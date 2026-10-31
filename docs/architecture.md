@@ -66,8 +66,7 @@ app (Tauri or Electron) wraps both, with the backend running as a bundled sideca
 |---|---|
 | **FastAPI** + **Pydantic** | API and typed request/response models |
 | **PyAV** | Decoding uploads and live chunks: audio resampled to 16 kHz mono, and video frames read faster than real time. Its wheels bundle FFmpeg, so there is no system install |
-| **OpenCV** + **numpy** | Frame diffs, "has the screen settled", finding changed regions, cropping |
-| **PySceneDetect** | Detecting slide and scene cuts |
+| **OpenCV** (headless) + **numpy** | Frame diffs, "has the screen settled", finding changed regions, cropping. Plain frame diffs cover cut detection, so PySceneDetect is not needed |
 | **RapidOCR** *(optional)* | Reading text on slides to match visuals to what was said |
 | **openai** | Transcription, visual selection, notes |
 | **faster-whisper** *(later)* | Local transcription, if cost or privacy calls for it |
