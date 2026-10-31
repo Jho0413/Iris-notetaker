@@ -6,6 +6,8 @@ sessions/<id>/
     audio.wav             16 kHz mono
     frames/<t_ms>.jpg     sampled frames
     frames.json           FrameIndex
+    transcript_chunks/<i>_<start_ms>_<end_ms>.json
+                          per-chunk transcription cache (so re-runs don't re-pay)
     transcript.json       Transcript
     moments.json          Moments
     alignment.json        Alignment
@@ -48,6 +50,10 @@ class SessionPaths:
     @property
     def frame_index(self) -> Path:
         return self.root / "frames.json"
+
+    @property
+    def transcript_chunks_dir(self) -> Path:
+        return self.root / "transcript_chunks"
 
     @property
     def transcript(self) -> Path:
