@@ -1,0 +1,18 @@
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+backend/.env
+
+# Session data (recordings, frames, notes)
+backend/data/
+data/
+
+# Frontend
+node_modules/
+frontend/dist/
+*.tsbuildinfo

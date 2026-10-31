@@ -1,0 +1,102 @@
+"""The on-disk layout of one session. Every stage reads and writes files named here.
+
+sessions/<id>/
+    source.<ext>          uploaded recording (upload source only)
+    live/audio/<n>.webm   live audio chunks (browser live source only)
+    audio.wav             16 kHz mono
+    frames/<t_ms>.jpg     sampled frames
+    frames.json           FrameIndex
+    transcript.json       Transcript
+    moments.json          Moments
+    alignment.json        Alignment
+    selection.json        Selection
+    visuals/<id>.jpg      kept frames / crops
+    notes_draft.json      NotesDraft
+    notes.json            Notes
+    notes.md              final markdown (for export)
+"""
+
+from dataclasses import dataclass
+from pathlib import Path
+
+from pydantic import BaseModel
+
+
+@dataclass(frozen=True)
+class SessionPaths:
+    root: Path
+
+    def source(self, ext: str) -> Path:
+        return self.root / f"source{ext}"
+
+    def find_source(self) -> Path | None:
+        matches = sorted(self.root.glob("source.*"))
+        return matches[0] if matches else None
+
+    @property
+    def live_audio_dir(self) -> Path:
+        return self.root / "live" / "audio"
+
+    @property
+    def audio(self) -> Path:
+        return self.root / "audio.wav"
+
+    @property
+    def frames_dir(self) -> Path:
+        return self.root / "frames"
+
+    @property
+    def frame_index(self) -> Path:
+        return self.root / "frames.json"
+
+    @property
+    def transcript(self) -> Path:
+        return self.root / "transcript.json"
+
+    @property
+    def moments(self) -> Path:
+        return self.root / "moments.json"
+
+    @property
+    def alignment(self) -> Path:
+        return self.root / "alignment.json"
+
+    @property
+    def selection(self) -> Path:
+        return self.root / "selection.json"
+
+    @property
+    def visuals_dir(self) -> Path:
+        return self.root / "visuals"
+
+    @property
+    def notes_draft(self) -> Path:
+        return self.root / "notes_draft.json"
+
+    @property
+    def notes(self) -> Path:
+        return self.root / "notes.json"
+
+    @property
+    def notes_md(self) -> Path:
+        return self.root / "notes.md"
+
+    def ensure(self) -> "SessionPaths":
+        for d in (self.root, self.frames_dir, self.visuals_dir):
+            d.mkdir(parents=True, exist_ok=True)
+        return self
+
+
+def session_paths(sessions_dir: Path, session_id: str) -> SessionPaths:
+    return SessionPaths(sessions_dir / session_id)
+
+
+def write_model(path: Path, model: BaseModel) -> None:
+    """Write atomically, so a crash never leaves a half-written stage output."""
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(model.model_dump_json(indent=2))
+    tmp.replace(path)
+
+
+def read_model[M: BaseModel](path: Path, model: type[M]) -> M:
+    return model.model_validate_json(path.read_text())

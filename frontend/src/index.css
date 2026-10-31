@@ -1,0 +1,46 @@
+/* Placeholder styling until docs/frontend.md defines the UI. */
+:root {
+  font-family: system-ui, -apple-system, sans-serif;
+  line-height: 1.5;
+  color: #1d1d1f;
+  background: #fafafa;
+  --muted: #6e6e73;
+  --border: #e5e5ea;
+  --accent: #5b4bdb;
+}
+* { box-sizing: border-box; }
+body { margin: 0; }
+a { color: var(--accent); }
+
+.nav { display: flex; gap: 1.25rem; align-items: center; padding: 0.75rem 1.5rem; border-bottom: 1px solid var(--border); background: #fff; }
+.nav a { text-decoration: none; color: var(--muted); }
+.nav a.active { color: #1d1d1f; font-weight: 600; }
+.nav .brand { font-weight: 700; color: var(--accent); margin-right: 1rem; }
+.main { max-width: 860px; margin: 2rem auto; padding: 0 1.5rem; }
+
+.card { display: flex; flex-direction: column; gap: 0.75rem; padding: 1.5rem; background: #fff; border: 1px solid var(--border); border-radius: 12px; }
+input, button, .button { font: inherit; padding: 0.5rem 0.75rem; border-radius: 8px; border: 1px solid var(--border); }
+button, .button { background: var(--accent); color: #fff; border: none; cursor: pointer; text-decoration: none; }
+button:disabled { opacity: 0.5; cursor: default; }
+
+.muted { color: var(--muted); }
+.error { color: #c0392b; }
+.badge { font-size: 0.8rem; padding: 0.1rem 0.5rem; border-radius: 999px; background: var(--border); }
+.badge-done { background: #d4f5dd; }
+.badge-failed { background: #fbd9d5; }
+.badge-processing, .badge-recording { background: #e3defc; }
+
+.library { list-style: none; padding: 0; }
+.library li { display: flex; gap: 1rem; align-items: center; padding: 0.75rem 0; border-bottom: 1px solid var(--border); }
+.library li a { flex: 1; }
+
+.session-header { display: flex; gap: 1rem; align-items: center; }
+.session-header h2 { flex: 1; margin: 0; }
+.stages { display: flex; gap: 0.5rem; list-style: none; padding: 0; flex-wrap: wrap; }
+.stage { font-size: 0.85rem; padding: 0.2rem 0.6rem; border-radius: 6px; background: var(--border); color: var(--muted); }
+.stage-running { background: #e3defc; color: #1d1d1f; }
+.stage-done { background: #d4f5dd; color: #1d1d1f; }
+.stage-failed { background: #fbd9d5; color: #1d1d1f; }
+
+.notes img { max-width: 100%; border: 1px solid var(--border); border-radius: 8px; }
+.preview { width: 100%; border-radius: 8px; background: #000; }
