@@ -25,11 +25,13 @@ def test_upload_creates_session_and_runs_pipeline(client: TestClient):
     sid = r.json()["id"]
     assert r.json()["title"] == "talk"
 
-    # Stages are still stubs, so the pipeline should fail cleanly at ingest.
+    # The upload is not a real video, so the pipeline should fail cleanly at ingest.
     session = wait_for_status(client, sid, {"done", "failed"})
     assert session["status"] == "failed"
     assert session["current_stage"] == "ingest"
-    assert session["error"] == "ingest failed: NotImplementedError: upload ingest"
+    assert session["error"] == (
+        "ingest failed: ValueError: source.mp4 is not a readable audio or video file"
+    )
 
     assert [s["id"] for s in client.get("/api/sessions").json()] == [sid]
     assert client.get(f"/api/sessions/{sid}/notes").status_code == 404

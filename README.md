@@ -45,7 +45,7 @@ discussed is placed in the notes next to what was said about it.
 - Processing cost: $0.50–2 per hour of session
 
 ### Stack
-- **Backend:** Python, FastAPI, PyAV (bundles FFmpeg), OpenCV, PySceneDetect, SQLite
+- **Backend:** Python, FastAPI, PyAV (bundles FFmpeg), OpenCV, SQLite
 - **Frontend:** TypeScript web UI
 - **Models:** OpenAI
 - **Later:** a desktop app (Tauri or Electron) wrapping the UI, with the backend as a sidecar
