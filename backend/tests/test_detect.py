@@ -257,3 +257,46 @@ async def test_run_with_no_frames_writes_empty_moments(ctx: StageContext, events
     await detect.run(ctx)
     assert read_model(ctx.paths.moments, Moments).moments == []
     assert events == []
+
+
+@pytest.mark.parametrize("seconds", [1, 2])
+def test_short_static_recording_keeps_a_candidate(seconds):
+    deck = Deck().hold(SLIDE_A, seconds)
+    moments = deck.detect()
+    assert len(moments) == 1
+    assert (moments[0].start, moments[0].end) == (0, seconds)
+    assert moments[0].frame in deck.refs()
+    assert moments[0].changed_region is None
+
+
+def test_unsettled_recording_uses_sharpest_real_frame_once():
+    det = MomentDetector()
+    sharp = FrameRef(t=5, path="frames/sharp.jpg")
+    blurred = FrameRef(t=6, path="frames/blurred.jpg")
+    assert det.feed(5, sharp, SLIDE_A) is None
+    assert det.feed(6, blurred, cv2.GaussianBlur(SLIDE_B, (31, 31), 0)) is None
+    moment = det.finish(7)
+    assert moment is not None
+    assert moment.frame == sharp
+    assert (moment.id, moment.start, moment.end) == ("m001", 5, 7)
+    assert det.finish(7) is None
+
+
+def test_unsettled_tail_keeps_established_representative():
+    deck = Deck().hold(SLIDE_A, 8).hold(SLIDE_B, 1)
+    moments = deck.detect()
+    assert len(moments) == 1
+    assert (moments[0].start, moments[0].end) == (0, 9)
+    assert moments[0].frame.t < 8
+
+
+async def test_single_frame_stage_writes_and_emits_fallback(ctx, events):
+    ref = FrameRef(t=0, path="frames/000000000.jpg")
+    cv2.imwrite(str(ctx.paths.root / ref.path), SLIDE_A)
+    write_model(ctx.paths.frame_index, FrameIndex(fps=1, width=W, height=H, frames=[ref]))
+    await detect.run(ctx)
+    moments = read_model(ctx.paths.moments, Moments).moments
+    assert len(moments) == 1
+    assert moments[0].frame == ref
+    assert (moments[0].start, moments[0].end) == (0, 1)
+    assert events == [(EventType.MOMENT_FOUND, detect._event(moments[0]))]

@@ -131,6 +131,7 @@ class MomentDetector:
         self._current: _State | None = None  # the open moment
         self._next: _State | None = None  # a new moment that has not lasted min_moment_s yet
         self._pending: _Pending | None = None
+        self._fallback: tuple[FrameRef, float] | None = None
         self._first_t: float | None = None
         self._work_size: tuple[int, int] | None = None  # (w, h) of work images
         self._frame_size: tuple[int, int] = (0, 0)  # (w, h) of the latest input frame
@@ -148,6 +149,13 @@ class MomentDetector:
         sharpness = _sharpness(image)
         if self._first_t is None:
             self._first_t = t
+
+        if (
+            self._current is None
+            and self._count == 0
+            and (self._fallback is None or sharpness > self._fallback[1])
+        ):
+            self._fallback = (frame_ref, sharpness)
 
         active = self._next or self._current
         if active is not None and self._same(small, active.small):
@@ -168,10 +176,26 @@ class MomentDetector:
         return self._promote()
 
     def finish(self, end_t: float) -> Moment | None:
-        """Close the last moment at ``end_t``. An unsettled tail belongs to the last moment."""
+        """Close the last moment; use a real frame if no state ever settled.
+
+        The fallback is a candidate for downstream selection, not evidence of a stable screen.
+        An unsettled tail after an established moment still belongs to that moment.
+        """
         current, self._current = self._current, None
+        fallback, self._fallback = self._fallback, None
+        pending = self._pending
         self._next = self._pending = None  # an unproven candidate is too short to stand alone
         if current is None:
+            if self._count == 0 and fallback is not None and pending is not None:
+                ref, _ = fallback
+                assert self._first_t is not None
+                self._count += 1
+                return Moment(
+                    id=f"m{self._count:03d}",
+                    start=round(self._first_t, 3),
+                    end=round(max(end_t, pending.frames[-1][0]), 3),
+                    frame=ref,
+                )
             return None
         return self._emit(current, max(end_t, current.last_t))
 
