@@ -16,3 +16,7 @@ data/
 node_modules/
 frontend/dist/
 *.tsbuildinfo
+
+# Claude Code: agent worktrees and personal settings (agent definitions are committed)
+.claude/worktrees/
+.claude/settings.local.json
