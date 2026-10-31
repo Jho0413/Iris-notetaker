@@ -80,8 +80,8 @@ def plan_chunks(
 
     Each cut lands near ``target_s`` after the previous one, at the quietest ``pause_s`` stretch
     (by RMS energy over ``window_s`` frames) within ``search_s`` either side. No chunk is longer
-    than ``max_s``, and the last chunk is at least the search distance long, so audio up to about
-    ``target_s + search_s`` is a single chunk. Among equally quiet candidates, the one closest to
+    than ``max_s``. Remaining audio that fits within that maximum is kept as the final chunk
+    without searching for another cut. Among equally quiet candidates, the one closest to
     the target wins (within ``QUIET_RATIO`` of the quietest). ``search_s`` is capped at
     ``target_s / 2``.
     """
@@ -97,6 +97,9 @@ def plan_chunks(
     frame = max(1, int(window_s * rate))
     k = max(1, round(pause_s / window_s))  # smoothing width, in frames
 
+    if n <= max_len:
+        return [(0, n)]
+
     power = _frame_power(samples, frame)
     if len(power) >= k:
         # quiet[j] = mean power over frames j..j+k-1, centred on sample (j + k/2) * frame
@@ -108,7 +111,7 @@ def plan_chunks(
 
     chunks: list[tuple[int, int]] = []
     start = 0
-    while n - start > target + search:
+    while n - start > max_len:
         lo = start + max(target - search, 1)
         hi = min(start + target + search, start + max_len, n - search)
         cut = min(start + target, hi)  # fallback when there is no energy data to search

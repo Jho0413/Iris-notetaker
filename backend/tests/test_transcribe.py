@@ -423,3 +423,19 @@ async def test_chunk_lengths_from_settings_if_present(ctx, monkeypatch):
     await transcribe.run(ctx)
     n = len(plan_chunks(samples, RATE, 3.0, 5.0))
     assert n > 1 and len(client.audio.transcriptions.calls) == n
+
+
+@pytest.mark.parametrize("seconds", [10, 12, 15])
+def test_remaining_audio_within_max_is_one_chunk(seconds):
+    samples = np.zeros(seconds * RATE, dtype=np.int16)
+    assert plan_chunks(samples, RATE, target_s=10, max_s=15, search_s=2) == [(0, len(samples))]
+
+
+@pytest.mark.parametrize("sample_count", [10 * RATE + 1, 12 * RATE, 22 * RATE])
+def test_final_chunk_never_exceeds_max(sample_count):
+    samples = np.zeros(sample_count, dtype=np.int16)
+    chunks = plan_chunks(samples, RATE, target_s=10, max_s=10, search_s=5)
+    assert chunks[0][0] == 0
+    assert chunks[-1][1] == sample_count
+    assert all(0 < end - start <= 10 * RATE for start, end in chunks)
+    assert all(left[1] == right[0] for left, right in zip(chunks, chunks[1:], strict=False))
