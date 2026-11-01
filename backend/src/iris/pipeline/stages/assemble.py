@@ -6,6 +6,7 @@ Writes: notes.json (Notes), notes.md
 
 import re
 
+from iris.markdown import escape_text
 from iris.models import EventType, Notes, NotesDraft, Selection, Visual
 from iris.pipeline.context import StageContext
 from iris.store.layout import read_model, write_model
@@ -21,7 +22,8 @@ def resolve_markers(markdown: str, visuals: list[Visual]) -> str:
         v = by_id.get(match.group(1))
         if v is None:
             return ""
-        return f"![{v.caption}]({v.path})\n*{v.caption}*"
+        caption = escape_text(" ".join(v.caption.splitlines()))
+        return f"![{caption}]({v.path})\n*{caption}*"
 
     return MARKER.sub(repl, markdown)
 
