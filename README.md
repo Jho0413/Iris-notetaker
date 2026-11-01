@@ -96,6 +96,9 @@ Visual selection sends batches of up to six representative frames with their ali
 `IRIS_VISION_MODEL`. Set `IRIS_SELECTION_BATCH_SIZE` (1–20) to adjust this. Kept visuals are full
 frames or validated crops of real frames. Completed decisions are cached in each session's
 `selection_batches/` directory; unchanged batches are reused after failures and on reruns.
+Transcript context is limited to 24,000 characters per batch, divided across its moments.
+Long context is explicitly marked as excerpts sampled from the start, middle, and end; the full
+transcript remains on disk for note writing. OCR context is limited to 1,000 characters per moment.
 Selection outputs and progress events are saved after each batch. The notes-writing stage is still
 unimplemented, so the full pipeline currently stops there.
 
