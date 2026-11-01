@@ -9,6 +9,7 @@ import base64
 import hashlib
 import json
 import shutil
+from dataclasses import dataclass
 from pathlib import Path
 
 import cv2
@@ -71,9 +72,23 @@ def valid_crop(crop: Box | None, width: int, height: int) -> Box | None:
     return crop
 
 
-def prepare_batch(ctx: StageContext, items: list[AlignedMoment]):
+@dataclass(frozen=True)
+class PreparedFrame:
+    path: Path
+    width: int
+    height: int
+
+
+@dataclass(frozen=True)
+class PreparedBatch:
+    content: list[ChatCompletionContentPartParam]
+    frames: list[PreparedFrame]
+    cache_key: str
+
+
+def prepare_batch(ctx: StageContext, items: list[AlignedMoment]) -> PreparedBatch:
     content: list[ChatCompletionContentPartParam] = []
-    frames: list[tuple[Path, int, int]] = []
+    frames: list[PreparedFrame] = []
     digest = hashlib.sha256(
         (PROMPT + ctx.settings.vision_model + json.dumps(Decisions.model_json_schema())).encode()
     )
@@ -109,8 +124,8 @@ def prepare_batch(ctx: StageContext, items: list[AlignedMoment]):
                 },
             }
         )
-        frames.append((path, width, height))
-    return content, frames, digest.hexdigest()
+        frames.append(PreparedFrame(path, width, height))
+    return PreparedBatch(content, frames, digest.hexdigest())
 
 
 async def choose(ctx: StageContext, content: list[ChatCompletionContentPartParam]) -> Decisions:
@@ -157,28 +172,28 @@ async def run(ctx: StageContext) -> None:
     size = ctx.settings.selection_batch_size
     for offset in range(0, len(items), size):
         batch = items[offset : offset + size]
-        content, frames, key = await asyncio.to_thread(prepare_batch, ctx, batch)
-        cache = cache_dir / f"{key}.json"
+        prepared = await asyncio.to_thread(prepare_batch, ctx, batch)
+        cache = cache_dir / f"{prepared.cache_key}.json"
         try:
             result = read_model(cache, Decisions)
             validate_decisions(result, batch)
         except (FileNotFoundError, ValueError):
             # Invalid JSON, schema, encoding or decisions are a cache miss. Replace the
             # entry only after a fresh response passes the same validation.
-            result = await choose(ctx, content)
+            result = await choose(ctx, prepared.content)
             validate_decisions(result, batch)
         write_model(cache, result)
         by_id = {d.moment_id: d for d in result.decisions}
-        for index, (item, (source, width, height)) in enumerate(zip(batch, frames, strict=True)):
+        for index, (item, frame) in enumerate(zip(batch, prepared.frames, strict=True)):
             decision = by_id[item.moment.id]
             if not decision.keep:
                 selection.rejected_moment_ids.append(item.moment.id)
                 continue
             # IDs come from pipeline order, never from model-controlled filenames.
             vid = f"v{offset + index + 1:06d}"
-            crop = valid_crop(decision.crop, width, height)
+            crop = valid_crop(decision.crop, frame.width, frame.height)
             path = f"visuals/{vid}.jpg"
-            await asyncio.to_thread(render, source, ctx.paths.root / path, crop)
+            await asyncio.to_thread(render, frame.path, ctx.paths.root / path, crop)
             visual = Visual(
                 id=vid,
                 moment_id=item.moment.id,

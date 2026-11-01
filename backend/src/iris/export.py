@@ -8,13 +8,13 @@ from urllib.parse import unquote, urlsplit
 from markdown_it import MarkdownIt
 from markdown_it.renderer import RendererHTML
 from markdown_it.token import Token
-from mdformat.renderer import MDRenderer
+from mdformat.renderer import MDRenderer, RenderContext, RenderTreeNode
 
 from iris.markdown import escape_text
 from iris.models import Notes
 
 
-def _image_markdown(node, context) -> str:
+def _image_markdown(node: RenderTreeNode, context: RenderContext) -> str:
     # Preserve literal alt text, including brackets, when serializing image tokens.
     alt = escape_text(node.meta["export_alt"])
     # Escape Markdown delimiters and entity-like text without URL-encoding the URL.
@@ -41,26 +41,34 @@ def export_markdown_embedded(notes: Notes, session_root: Path) -> str:
     title = escape_text(" ".join(notes.title.splitlines()))
     tokens = parser.parse(f"# {title}\n\n{notes.markdown}", env)
 
-    def visit(tokens: list[Token]) -> None:
-        for token in tokens:
-            if token.children:
-                visit(token.children)
-            # markdown-it-py 4 emits escaped punctuation as text_special; the
-            # plain-text image renderer only recognizes text tokens.
-            if token.type == "text_special":
-                token.type = "text"
-            if token.type == "image":
-                token.meta["export_alt"] = RendererHTML().renderInlineAsText(
-                    token.children or [], parser.options, env
-                )
-                ref = token.attrGet("src") or ""
-                url = urlsplit(ref)
-                if ref and not url.scheme and not url.netloc:
-                    path = (root / unquote(url.path)).resolve()
-                    if path.is_relative_to(root) and path.is_file():
-                        mime = mimetypes.guess_type(path.name)[0] or "image/jpeg"
-                        data = base64.b64encode(path.read_bytes()).decode()
-                        token.attrSet("src", f"data:{mime};base64,{data}")
-
-    visit(tokens)
+    _prepare_images(tokens, root, parser, env)
     return parser.renderer.render(tokens, parser.options, env)
+
+
+def _embedded_source(ref: str, root: Path) -> str:
+    """Resolve a local image within the session; preserve all other URLs."""
+    url = urlsplit(ref)
+    if not ref or url.scheme or url.netloc:
+        return ref
+    path = (root / unquote(url.path)).resolve()
+    if not path.is_relative_to(root) or not path.is_file():
+        return ref
+    mime = mimetypes.guess_type(path.name)[0] or "image/jpeg"
+    data = base64.b64encode(path.read_bytes()).decode()
+    return f"data:{mime};base64,{data}"
+
+
+def _prepare_images(tokens: list[Token], root: Path, parser: MarkdownIt, env: dict) -> None:
+    """Normalize literal tokens and replace image sources before serialization."""
+    for token in tokens:
+        if token.children:
+            _prepare_images(token.children, root, parser, env)
+        # markdown-it-py 4 emits escaped punctuation as text_special; the
+        # plain-text image renderer only recognizes text tokens.
+        if token.type == "text_special":
+            token.type = "text"
+        if token.type == "image":
+            token.meta["export_alt"] = RendererHTML().renderInlineAsText(
+                token.children or [], parser.options, env
+            )
+            token.attrSet("src", _embedded_source(token.attrGet("src") or "", root))
