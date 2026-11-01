@@ -107,3 +107,30 @@ def test_export_preserves_image_destinations(tmp_path, destination):
     original = f"![image](<{destination}>)"
     exported = export_markdown_embedded(notes(original), tmp_path)
     assert images(exported)[0].attrGet("src") == images(original)[0].attrGet("src")
+
+
+def test_export_api_embeds_captioned_image(client, settings):
+    from iris.store.layout import session_paths, write_model
+
+    sid = client.post("/api/live", json={"title": "Review"}).json()["id"]
+    paths = session_paths(settings.sessions_dir, sid)
+    (paths.visuals_dir / "v1.jpg").write_bytes(b"image bytes")
+    visual = Visual(
+        id="v1",
+        moment_id="m1",
+        frame=FrameRef(t=0, path="frames/1.jpg"),
+        caption=r"Revenue [USD] \ Q1",
+        path="visuals/v1.jpg",
+    )
+    document = notes(resolve_markers("[visual:v1]", [visual]))
+    document.session_id = sid
+    document.visuals = [visual]
+    write_model(paths.notes, document)
+
+    response = client.get(f"/api/sessions/{sid}/export")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/markdown")
+    assert response.headers["content-disposition"] == 'attachment; filename="Review.md"'
+    image = images(response.text)[0]
+    assert image.attrGet("src") == "data:image/jpeg;base64,aW1hZ2UgYnl0ZXM="
+    assert "".join(t.content for t in image.children) == visual.caption

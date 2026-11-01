@@ -260,3 +260,61 @@ def test_long_context_is_bounded_and_changes_invalidate_cache(setup):
     changed = select.prepare_batch(ctx, items)
     assert changed.content == prepared.content
     assert changed.cache_key != prepared.cache_key
+
+
+@pytest.mark.parametrize("valid", [True, False])
+async def test_selection_through_sdk_parser(setup, monkeypatch, valid):
+    import json
+
+    import httpx
+    from openai import AsyncOpenAI
+    from pydantic import ValidationError
+
+    ctx, items, _, _ = setup
+    write_model(ctx.paths.alignment, Alignment(items=items[:1]))
+    requests = []
+
+    def handle(request):
+        payload = json.loads(request.content)
+        requests.append(payload)
+        result = select.Decisions(decisions=[decision("m0")]).model_dump()
+        if not valid:
+            del result["decisions"][0]["keep"]
+        return httpx.Response(
+            200,
+            json={
+                "id": "test-completion",
+                "object": "chat.completion",
+                "created": 0,
+                "model": ctx.settings.vision_model,
+                "choices": [
+                    {
+                        "index": 0,
+                        "finish_reason": "stop",
+                        "message": {
+                            "role": "assistant",
+                            "content": json.dumps(result),
+                        },
+                    }
+                ],
+            },
+        )
+
+    async with AsyncOpenAI(
+        api_key="test-only",
+        max_retries=0,
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handle)),
+    ) as client:
+        monkeypatch.setattr(select, "get_openai", lambda _: client)
+        if valid:
+            await select.run(ctx)
+            assert read_model(ctx.paths.selection, Selection).visuals[0].caption == "Revenue chart"
+        else:
+            with pytest.raises(ValidationError):
+                await select.run(ctx)
+            assert not ctx.paths.selection.exists()
+            assert not list((ctx.paths.root / "selection_batches").glob("*.json"))
+
+    assert len(requests) == 1
+    assert requests[0]["response_format"]["json_schema"]["strict"] is True
+    assert requests[0]["messages"][1]["content"][1]["type"] == "image_url"
