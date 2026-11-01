@@ -92,6 +92,13 @@ frontend/src/
   pages/          library, upload, live, session (notes view)
 ```
 
+Visual selection sends batches of up to six representative frames with their aligned transcript to
+`IRIS_VISION_MODEL`. Set `IRIS_SELECTION_BATCH_SIZE` (1–20) to adjust this. Kept visuals are full
+frames or validated crops of real frames. Completed decisions are cached in each session's
+`selection_batches/` directory; unchanged batches are reused after failures and on reruns.
+Selection outputs and progress events are saved after each batch. The notes-writing stage is still
+unimplemented, so the full pipeline currently stops there.
+
 Session data lives in `backend/data/` (`iris.db` plus `sessions/<id>/`).
 
 ## Docs

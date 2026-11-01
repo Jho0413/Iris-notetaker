@@ -11,6 +11,8 @@ sessions/<id>/
     transcript.json       Transcript
     moments.json          Moments
     alignment.json        Alignment
+    selection_batches/<hash>.json
+                          cached vision decisions, keyed by model, prompt and inputs
     selection.json        Selection
     visuals/<id>.jpg      kept frames / crops
     notes_draft.json      NotesDraft

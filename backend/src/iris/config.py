@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     frame_max_width: int = 1280
     audio_sample_rate: int = 16_000
 
+    # Selection: bound images and transcript context per vision call.
+    selection_batch_size: int = Field(default=6, ge=1, le=20)
+
     # Server
     cors_origins: list[str] = ["http://localhost:5173"]
 
