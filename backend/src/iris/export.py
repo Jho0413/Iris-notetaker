@@ -17,7 +17,8 @@ from iris.models import Notes
 def _image_markdown(node, context) -> str:
     # Preserve literal alt text, including brackets, when serializing image tokens.
     alt = escape_text(node.meta["export_alt"])
-    src = node.attrs["src"]
+    # Escape Markdown delimiters and entity-like text without URL-encoding the URL.
+    src = escape_text(node.attrs["src"])
     title = node.attrs.get("title")
     suffix = f' "{escape_text(title)}"' if title is not None else ""
     return f"![{alt}](<{src}>{suffix})"

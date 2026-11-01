@@ -93,3 +93,17 @@ def test_code_and_nonlocal_images_remain_unembedded(tmp_path):
         "../outside.jpg",
         "data:image/png;base64,cG5n",
     ]
+
+
+@pytest.mark.parametrize(
+    "destination",
+    [
+        "https://example.com/?x=&amp;copy;",
+        "https://example.com/a(b)?q=&amp;quot;",
+        "missing&amp;copy;.jpg",
+    ],
+)
+def test_export_preserves_image_destinations(tmp_path, destination):
+    original = f"![image](<{destination}>)"
+    exported = export_markdown_embedded(notes(original), tmp_path)
+    assert images(exported)[0].attrGet("src") == images(original)[0].attrGet("src")
