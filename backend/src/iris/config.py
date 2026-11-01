@@ -28,6 +28,9 @@ class Settings(BaseSettings):
     # Selection: bound images and transcript context per vision call.
     selection_batch_size: int = Field(default=6, ge=1, le=20)
 
+    # Serialized evidence characters per notes call (plus prompt and small metadata).
+    notes_context_chars: int = Field(default=24_000, ge=2_000, le=60_000)
+
     # Server
     cors_origins: list[str] = ["http://localhost:5173"]
 

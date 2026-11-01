@@ -99,8 +99,17 @@ frames or validated crops of real frames. Completed decisions are cached in each
 Transcript context is limited to 24,000 characters per batch, divided across its moments.
 Long context is explicitly marked as excerpts sampled from the start, middle, and end; the full
 transcript remains on disk for note writing. OCR context is limited to 1,000 characters per moment.
-Selection outputs and progress events are saved after each batch. The notes-writing stage is still
-unimplemented, so the full pipeline currently stops there.
+Selection outputs and progress events are saved after each batch.
+
+Note writing uses `IRIS_NOTES_MODEL` to produce meeting, lecture or demo notes, placing selected
+visuals beside the relevant explanation. All transcript text is processed. Longer transcripts are
+split into chronological sections, with up to `IRIS_NOTES_CONTEXT_CHARS` serialized evidence
+characters per call (default 24,000; range 2,000–60,000, plus prompt and small metadata). Oversized
+speech segments are split without dropping text or inventing timestamps. Sections retain the first
+section's title and style and are joined in order, without an additional global synthesis pass.
+Validated sections are cached in `notes_sections/`; damaged entries are regenerated. The draft is
+saved and a progress event emitted after each section. Final notes become available after assembly;
+partial draft display in the UI and live processing remain future work.
 
 Session data lives in `backend/data/` (`iris.db` plus `sessions/<id>/`).
 

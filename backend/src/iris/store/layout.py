@@ -15,6 +15,8 @@ sessions/<id>/
                           cached vision decisions, keyed by model, prompt and inputs
     selection.json        Selection
     visuals/<id>.jpg      kept frames / crops
+    notes_sections/<hash>.json
+                          validated writing sections, keyed by model, prompt and inputs
     notes_draft.json      NotesDraft
     notes.json            Notes
     notes.md              final markdown (for export)
