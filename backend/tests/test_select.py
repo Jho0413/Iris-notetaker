@@ -1,3 +1,4 @@
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -10,6 +11,7 @@ from iris.models import (
     AlignedMoment,
     Alignment,
     Box,
+    Build,
     EventType,
     FrameRef,
     Moment,
@@ -66,10 +68,19 @@ def response(*decisions, refusal=None):
     )
 
 
-def decision(mid, keep=True, crop=None):
-    return select.Decision(
-        moment_id=mid, keep=keep, caption="Revenue chart" if keep else "", crop=crop
+def figure(crop=None, caption="Revenue chart", build=None):
+    return select.ElementDecision(
+        kind="figure",
+        content="Bar chart of revenue by quarter",
+        build=build,
+        region=crop,
+        caption=caption,
+        render_as="svg",
     )
+
+
+def decision(mid, keep=True, crop=None):
+    return select.Decision(moment_id=mid, keep=keep, elements=[figure(crop)] if keep else [])
 
 
 async def test_batches_render_real_pixels_and_emit(setup):
@@ -94,9 +105,13 @@ async def test_batches_render_real_pixels_and_emit(setup):
     assert request["model"] == ctx.settings.vision_model
     assert request["response_format"] is select.Decisions
     content = request["messages"][1]["content"]
-    assert len(content) == 4
-    assert "Revenue chart" in content[0]["text"]
-    assert content[1]["image_url"]["url"].startswith("data:image/jpeg;base64,")
+    assert len(content) == 5
+    assert json.loads(content[0]["text"]) == {"earlier_content": []}
+    assert "Revenue chart" in content[1]["text"]
+    assert content[2]["image_url"]["url"].startswith("data:image/jpeg;base64,")
+    # The next batch knows what the first one captured, so it does not list it again.
+    later = json.loads(parse.call_args_list[1].kwargs["messages"][1]["content"][0]["text"])
+    assert [m["moment_id"] for m in later["earlier_content"]] == ["m0"]
 
 
 @pytest.mark.parametrize(
@@ -191,15 +206,11 @@ async def test_frame_must_be_readable_and_inside_frames(setup):
         b"\xff",
         b'{"wrong_schema": []}',
         select.Decisions(decisions=[decision("invented")]).model_dump_json().encode(),
+        select.Decisions(decisions=[select.Decision(moment_id="m0", keep=True, elements=[])])
+        .model_dump_json()
+        .encode(),
         select.Decisions(
-            decisions=[
-                select.Decision(
-                    moment_id="m0",
-                    keep=True,
-                    caption="  ",
-                    crop=None,
-                )
-            ]
+            decisions=[select.Decision(moment_id="m0", keep=True, elements=[figure(caption=" ")])]
         )
         .model_dump_json()
         .encode(),
@@ -243,7 +254,7 @@ def test_long_context_is_bounded_and_changes_invalidate_cache(setup):
         item.transcript[0].text = "start " + "x" * 50000 + " end"
         item.ocr_text = "y" * 5000
     prepared = select.prepare_batch(ctx, items)
-    metadata = [json.loads(part["text"]) for part in prepared.content if part["type"] == "text"]
+    metadata = [json.loads(p["text"]) for p in prepared.content[1:] if p["type"] == "text"]
     assert sum(len(e) for m in metadata for e in m["transcript_excerpts"]) <= (
         select.TRANSCRIPT_CHARS_PER_BATCH
     )
@@ -317,4 +328,32 @@ async def test_selection_through_sdk_parser(setup, monkeypatch, valid):
 
     assert len(requests) == 1
     assert requests[0]["response_format"]["json_schema"]["strict"] is True
-    assert requests[0]["messages"][1]["content"][1]["type"] == "image_url"
+    assert requests[0]["messages"][1]["content"][2]["type"] == "image_url"
+
+
+async def test_screen_content_is_read_in_build_order(setup):
+    ctx, items, events, parse = setup
+    items[0].moment.builds = [
+        Build(t=0, frame=items[0].moment.frame),
+        Build(t=4.5, frame=items[0].moment.frame, region=Box(x=0, y=0, w=10, h=10)),
+    ]
+    write_model(ctx.paths.alignment, Alignment(items=items[:1]))
+    math = select.ElementDecision(
+        kind="math", content="3(x+3)^2 - 28", build=1, region=None, caption="", render_as=None
+    )
+    parse.return_value = response(
+        select.Decision(moment_id="m0", keep=True, elements=[math, figure(build=0)])
+    )
+    await select.run(ctx)
+    output = read_model(ctx.paths.selection, Selection)
+    [content] = output.contents
+    assert [(e.kind, e.t, e.visual_id) for e in content.elements] == [
+        ("math", 4.5, None),
+        ("figure", 0, "v000001"),
+    ]
+    [visual] = output.visuals
+    assert visual.render_as == "svg"
+    assert visual.description == "Bar chart of revenue by quarter"
+    assert visual.source_path == visual.path == "visuals/v000001.source.jpg"
+    builds = json.loads(parse.call_args.kwargs["messages"][1]["content"][1]["text"])["builds"]
+    assert [b["t"] for b in builds] == [0, 4.5]

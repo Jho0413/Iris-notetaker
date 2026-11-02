@@ -147,6 +147,57 @@ def test_slide_build_updates_moment_with_most_complete_state():
     assert_not_transition(moments, deck)
 
 
+def test_builds_record_each_addition_and_its_region():
+    built = slide("Agenda", bullets=3, shape="rect")
+    deck = Deck().hold(SLIDE_A, 10).fade(SLIDE_A, built).hold(built, 10)
+    deck.fade(built, SLIDE_B).hold(SLIDE_B, 10)
+    first, second = deck.detect()
+    assert [b.t for b in first.builds] == [0, 11]
+    assert first.builds[0].region is None
+    assert _covers(first.builds[1].region, bullet_box("Agenda"))
+    assert len(second.builds) == 1
+
+
+def test_small_handwritten_addition_is_a_build():
+    board = np.full((H, W, 3), 255, np.uint8)
+    cv2.putText(board, "3x^2 + 18x - 1", (40, 70), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 0), 2)
+    line = board.copy()
+    cv2.putText(line, "= 3(x+3)^2 - 28", (60, 160), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 0), 2)
+    deck = Deck().hold(board, 8).hold(line, 8)
+    [moment] = deck.detect()
+    assert [b.t for b in moment.builds] == [0, 8]
+    assert moment.builds[1].region is not None
+    assert moment.builds[1].region.y > 100
+
+
+def test_scrolling_a_canvas_continues_the_moment():
+    canvas = np.full((H + 200, W, 3), 255, np.uint8)
+    cv2.putText(canvas, "two black holes", (60, 120), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 0), 2)
+    cv2.circle(canvas, (300, 220), 50, (0, 0, 0), 2)
+    cv2.putText(canvas, "LIGO", (60, H + 30), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 0), 2)
+
+    def view(top: int) -> np.ndarray:
+        img = canvas[top : top + H].copy()
+        img[:30] = 40  # a toolbar that stays put
+        cv2.putText(img, "toolbar", (250, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
+        return img
+
+    deck = Deck().hold(view(0), 8).hold(view(70), 8)
+    [moment] = deck.detect()
+    assert [b.t for b in moment.builds] == [0, 8]
+    assert moment.builds[1].region is not None
+    assert moment.builds[1].region.y > H - 120  # "LIGO" scrolled into view at the bottom
+
+
+def test_scrolling_content_off_screen_is_a_new_moment():
+    canvas = np.full((H * 3, W, 3), 255, np.uint8)
+    for i, word in enumerate(["first", "second", "third", "fourth", "fifth"]):
+        y = 80 + i * 200
+        cv2.putText(canvas, word, (60, y), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 0, 0), 3)
+    deck = Deck().hold(canvas[:H], 8).hold(canvas[300 : 300 + H], 8)
+    assert len(deck.detect()) == 2
+
+
 def _covers(box, target, slack: int = 40) -> bool:
     x, y, w, h = target
     return (

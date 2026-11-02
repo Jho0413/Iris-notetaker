@@ -36,6 +36,14 @@ How it works (``MomentDetector``, incremental so live sessions can feed it frame
      So a moment is returned by ``feed`` when its successor has proven itself.
   6. The representative frame is the sharpest (Laplacian variance) real frame of the moment's
      latest settled state.
+  7. Each moment records its *builds*: the first settled state, then every additive update, with
+     the region that was added. A worked example written line by line becomes one moment whose
+     builds are the lines, so notes can follow it step by step.
+  8. Scrolling a canvas (a note app, a long document) moves content without changing it. If the
+     old state's content reappears shifted vertically, still on screen, it is the same moment: a
+     build whose region is whatever newly came into view, with earlier build regions shifted to
+     match. Static parts (toolbars) are ignored when matching. Content scrolled off screen counts
+     as lost, so a long scroll still starts a new moment.
 """
 
 import asyncio
@@ -46,7 +54,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from iris.models import Box, EventType, FrameIndex, FrameRef, Moment, Moments
+from iris.models import Box, Build, EventType, FrameIndex, FrameRef, Moment, Moments
 from iris.pipeline.context import StageContext
 from iris.store.layout import read_model, write_model
 
@@ -84,6 +92,10 @@ class DetectParams:
     region_max_frac: float = 0.6  # a region larger than this is reported as None (full screen)
     region_pad: int = 8  # padding added around the region, in frame pixels
 
+    # Scrolling
+    scroll_max_frac: float = 0.6  # largest vertical scroll considered, as a share of the height
+    scroll_min_edges: int = 40  # moved content needed (work-image edge pixels) to judge a scroll
+
 
 @dataclass
 class _State:
@@ -97,14 +109,17 @@ class _State:
     last_t: float
     mask_frac: float  # share of the frame masked when this state settled
     region: Box | None = None
+    builds: list[Build] = field(default_factory=list)
 
     def consider(self, t: float, ref: FrameRef, sharpness: float, can_represent: bool) -> None:
         self.last_t = t
         if can_represent and sharpness > self.sharpness:
             self.frame, self.sharpness = ref, sharpness
 
-    def replace_content(self, other: "_State") -> None:
+    def replace_content(self, other: "_State", build: Build | None = None) -> None:
         """Take the newer state's content and representative, keeping start and region."""
+        if build is not None:
+            self.builds.append(build)
         self.small, self.edges = other.small, other.edges
         self.frame, self.sharpness = other.frame, other.sharpness
         self.last_t, self.mask_frac = other.last_t, other.mask_frac
@@ -272,6 +287,7 @@ class MomentDetector:
         pending, self._pending = self._pending, None
         assert pending is not None
         _, ref, sharpness = max(pending.frames, key=lambda f: f[2])
+        settled_t = pending.frames[0][0]
         state = _State(
             start=pending.onset,
             small=pending.small,
@@ -283,27 +299,89 @@ class MomentDetector:
         )
         if self._current is None:
             state.start = self._first_t if self._first_t is not None else state.start
+            state.builds = [Build(t=round(settled_t, 3), frame=ref)]
             self._current = state
             return
-        if self._next is not None and self._absorbs(self._next, state):
-            self._next.replace_content(state)
-            return
-        if self._absorbs(self._current, state):
-            self._next = None
-            self._current.replace_content(state)
-            return
+        for old in (self._next, self._current):
+            if old is None:
+                continue
+            absorbed = self._absorbs(old, state, settled_t)
+            if absorbed is not False:
+                if old is self._current:
+                    self._next = None
+                old.replace_content(state, absorbed)
+                return
         if self._next is not None:
             # The candidate never lasted min_moment_s; the new one takes over its time.
             state.start = self._next.start
         state.region = self._region(self._changed(self._current.small, state.small))
+        state.builds = [Build(t=round(settled_t, 3), frame=ref, region=state.region)]
         self._next = state
 
-    def _absorbs(self, old: _State, new: _State) -> bool:
-        """Whether a newly settled state is the same moment as ``old`` (duplicate or build)."""
+    def _absorbs(self, old: _State, new: _State, settled_t: float) -> Build | None | bool:
+        """Whether a newly settled state is the same moment as ``old``.
+
+        Returns False for a different moment, None for a near-duplicate, and the ``Build`` for an
+        additive change.
+        """
         changed = self._changed(old.small, new.small)
-        if cv2.countNonZero(changed) / changed.size < self.p.dup_frac:
-            return True
-        return self.p.merge_builds and self._is_additive(old, new, changed)
+        small_change = cv2.countNonZero(changed) / changed.size < self.p.dup_frac
+        if (self.p.merge_builds or small_change) and self._is_additive(old, new, changed):
+            # Handwriting adds little ink per line, so even small additions are builds.
+            return Build(t=round(settled_t, 3), frame=new.frame, region=self._region(changed))
+        if small_change:
+            return None
+        if self.p.merge_builds and (dy := self._scroll(old, new)) is not None:
+            return self._scroll_build(old, new, dy, settled_t)
+        return False
+
+    def _scroll(self, old: _State, new: _State) -> int | None:
+        """Vertical shift (work pixels) that carries all of ``old``'s content onto ``new``."""
+        h = old.small.shape[0]
+        static = cv2.absdiff(old.small, new.small) <= self.p.pixel_threshold
+        moving = old.edges & ~static
+        if self._mask is not None:
+            moving &= ~self._mask
+        ys, xs = np.nonzero(moving)
+        if len(ys) < self.p.scroll_min_edges:
+            return None
+        target = cv2.dilate(new.edges.astype(np.uint8), np.ones((3, 3), np.uint8)).astype(bool)
+        best_score, best_dy = 0.0, 0
+        limit = int(h * self.p.scroll_max_frac)
+        for dy in range(-limit, limit + 1):
+            if abs(dy) < 2:
+                continue
+            y2 = ys + dy
+            inside = (y2 >= 0) & (y2 < h)
+            # Content pushed off screen counts against the match: it is no longer visible.
+            score = float(target[y2[inside], xs[inside]].sum()) / len(ys)
+            if score > best_score:
+                best_score, best_dy = score, dy
+        return best_dy if best_score >= self.p.additive_keep else None
+
+    def _scroll_build(self, old: _State, new: _State, dy: int, settled_t: float) -> Build:
+        h = old.small.shape[0]
+        shifted = np.zeros_like(old.edges)
+        if dy > 0:
+            shifted[dy:] = old.edges[: h - dy]
+        else:
+            shifted[: h + dy] = old.edges[-dy:]
+        explained = cv2.dilate(shifted.astype(np.uint8), _MASK_KERNEL).astype(bool)
+        static = cv2.absdiff(old.small, new.small) <= self.p.pixel_threshold
+        fresh = (new.edges & ~explained & ~static).astype(np.uint8)
+        # Earlier builds' regions refer to positions before the scroll; move them with it.
+        fh = self._frame_size[1]
+        shift = round(dy * fh / h)
+        for build in old.builds:
+            if build.region is None:
+                continue
+            y0 = max(0, build.region.y + shift)
+            y1 = min(fh, build.region.y + build.region.h + shift)
+            build.region = (
+                Box(x=build.region.x, y=y0, w=build.region.w, h=y1 - y0) if y1 > y0 else None
+            )
+        region = self._region(cv2.dilate(fresh, _OPEN_KERNEL)) if fresh.any() else None
+        return Build(t=round(settled_t, 3), frame=new.frame, region=region)
 
     def _is_additive(self, old: _State, new: _State, changed: np.ndarray) -> bool:
         """True when the change only adds content: old edges in the changed area survive."""
@@ -336,6 +414,7 @@ class MomentDetector:
             end=round(end, 3),
             frame=state.frame,
             changed_region=state.region,
+            builds=state.builds,
         )
 
     def _region(self, changed: np.ndarray) -> Box | None:

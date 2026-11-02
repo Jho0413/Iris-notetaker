@@ -9,7 +9,7 @@ from collections.abc import Awaitable, Callable
 
 from iris.models import Stage
 from iris.pipeline.context import StageContext
-from iris.pipeline.stages import align, assemble, detect, select, transcribe, write
+from iris.pipeline.stages import align, assemble, detect, render, select, transcribe, write
 
 StageFn = Callable[[StageContext], Awaitable[None]]
 
@@ -28,6 +28,7 @@ STAGES: dict[Stage, StageFn] = {
     Stage.ALIGN: align.run,
     Stage.SELECT: select.run,
     Stage.WRITE: write.run,
+    Stage.RENDER: render.run,
     Stage.ASSEMBLE: assemble.run,
 }
 
@@ -36,7 +37,7 @@ PLAN: list[list[Stage]] = [
     [Stage.TRANSCRIBE, Stage.DETECT],
     [Stage.ALIGN],
     [Stage.SELECT],
-    [Stage.WRITE],
+    [Stage.WRITE, Stage.RENDER],  # notes only need figure descriptions, not the images
     [Stage.ASSEMBLE],
 ]
 

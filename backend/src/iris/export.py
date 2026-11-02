@@ -10,8 +10,9 @@ from markdown_it.renderer import RendererHTML
 from markdown_it.token import Token
 from mdformat.renderer import MDRenderer, RenderContext, RenderTreeNode
 
-from iris.markdown import escape_text
+from iris.markdown import escape_text, protect_math, restore_math
 from iris.models import Notes
+from iris.svg import rasterize_svg
 
 
 def _image_markdown(node: RenderTreeNode, context: RenderContext) -> str:
@@ -39,10 +40,12 @@ def export_markdown_embedded(notes: Notes, session_root: Path) -> str:
     parser.options["parser_extension"] = [_ImageRenderer]
     env: dict = {}
     title = escape_text(" ".join(notes.title.splitlines()))
-    tokens = parser.parse(f"# {title}\n\n{notes.markdown}", env)
+    # Serialization would escape LaTeX (x_1 -> x\_1), so math is swapped out and restored.
+    markdown, math = protect_math(notes.markdown)
+    tokens = parser.parse(f"# {title}\n\n{markdown}", env)
 
     _prepare_images(tokens, root, parser, env)
-    return parser.renderer.render(tokens, parser.options, env)
+    return restore_math(parser.renderer.render(tokens, parser.options, env), math)
 
 
 def _embedded_source(ref: str, root: Path) -> str:
@@ -53,8 +56,12 @@ def _embedded_source(ref: str, root: Path) -> str:
     path = (root / unquote(url.path)).resolve()
     if not path.is_relative_to(root) or not path.is_file():
         return ref
-    mime = mimetypes.guess_type(path.name)[0] or "image/jpeg"
-    data = base64.b64encode(path.read_bytes()).decode()
+    if path.suffix == ".svg":
+        # Markdown viewers reject SVG data URIs (SVG can carry script), so embed a PNG.
+        mime, raw = "image/png", rasterize_svg(path.read_text(), width=1600)
+    else:
+        mime, raw = mimetypes.guess_type(path.name)[0] or "image/jpeg", path.read_bytes()
+    data = base64.b64encode(raw).decode()
     return f"data:{mime};base64,{data}"
 
 

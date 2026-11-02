@@ -87,3 +87,11 @@ async def test_assemble_resolves_markers_and_drops_unknown(ctx: StageContext):
     assert "![Q3 revenue chart](visuals/v1.jpg)" in notes.markdown
     assert "nope" not in notes.markdown
     assert ctx.paths.notes_md.read_text() == notes.markdown
+
+
+def test_leading_heading_repeating_the_title_is_dropped():
+    md = "## Completing the Square\n\n**Problem:** x\n\n## Completing the Square\n"
+    assert assemble.drop_title_heading(md, "Completing the square") == (
+        "**Problem:** x\n\n## Completing the Square\n"
+    )
+    assert assemble.drop_title_heading("## Other\n\nText", "Title") == "## Other\n\nText"

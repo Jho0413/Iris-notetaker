@@ -1,4 +1,5 @@
 import base64
+from pathlib import Path
 
 import pytest
 from markdown_it import MarkdownIt
@@ -147,3 +148,10 @@ def test_repeated_marker_places_visual_once():
     markdown = resolve_markers("Intro\n\n[visual:v1]\n\nMore\n\n[visual:v1]", [visual])
     assert len(images(markdown)) == 1
     assert markdown.index("![") < markdown.index("More")
+
+
+def test_export_keeps_latex_intact():
+    markdown = "Step 1: $x_1 * y_2$ and\n\n$$\n3\\left[(x+3)^2 - 9\\right] - 1\n$$\n\nCosts $5."
+    exported = export_markdown_embedded(notes(markdown), Path("/nonexistent"))
+    assert "$x_1 * y_2$" in exported
+    assert "$$\n3\\left[(x+3)^2 - 9\\right] - 1\n$$" in exported

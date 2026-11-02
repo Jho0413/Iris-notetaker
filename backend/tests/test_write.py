@@ -230,7 +230,7 @@ async def test_real_sdk_response_parsing(tmp_path, monkeypatch, mode):
 def test_upload_pipeline_reaches_export(client, tmp_path, monkeypatch):
     from types import SimpleNamespace
 
-    from iris.pipeline.stages import select, transcribe
+    from iris.pipeline.stages import render, select, transcribe
     from tests.test_api import wait_for_status
     from tests.test_ingest import make_media
 
@@ -241,13 +241,27 @@ def test_upload_pipeline_reaches_export(client, tmp_path, monkeypatch):
         calls.append(schema)
         if schema is select.Decisions:
             content = kwargs["messages"][1]["content"]
-            ids = [json.loads(p["text"])["moment_id"] for p in content if p["type"] == "text"]
+            ids = [json.loads(p["text"])["moment_id"] for p in content[1:] if p["type"] == "text"]
+            figure = select.ElementDecision(
+                kind="figure",
+                content="A coloured slide",
+                build=0,
+                region=None,
+                caption="Colored slide",
+                render_as="svg",
+            )
             result = select.Decisions(
                 decisions=[
-                    select.Decision(moment_id=mid, keep=True, caption="Colored slide", crop=None)
-                    for mid in ids
+                    select.Decision(moment_id=mid, keep=True, elements=[figure]) for mid in ids
                 ]
             )
+        elif schema is render.SvgDrawing:
+            svg = (
+                '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 9 9"><rect width="9"/></svg>'
+            )
+            result = render.SvgDrawing(svg=svg)
+        elif schema is render.Check:
+            result = render.Check(matches=True, problems=[])
         else:
             payload = json.loads(kwargs["messages"][1]["content"])
             ids = [r["id"] for r in payload["records"] if r["kind"] == "visual"]
@@ -266,7 +280,7 @@ def test_upload_pipeline_reaches_export(client, tmp_path, monkeypatch):
         chat=SimpleNamespace(completions=SimpleNamespace(parse=parse)),
         audio=SimpleNamespace(transcriptions=SimpleNamespace(create=transcribe_audio)),
     )
-    for module in (write, select, transcribe):
+    for module in (write, select, transcribe, render):
         monkeypatch.setattr(module, "get_openai", lambda _: fake)
     recording = make_media(tmp_path / "talk.mp4", seconds=2)
     result = client.post("/api/sessions", files={"file": ("talk.mp4", recording.read_bytes())})
@@ -288,6 +302,45 @@ def test_upload_pipeline_reaches_export(client, tmp_path, monkeypatch):
         for child in (token.children or [])
         if child.type == "image"
     ]
-    assert image_tokens
-    assert all(t.attrGet("src").startswith("data:image/jpeg;base64,") for t in image_tokens)
-    assert calls == [select.Decisions, write.WrittenSection]
+    assert image_tokens, exported.text[:600]
+    assert all(t.attrGet("src").startswith("data:image/png;base64,") for t in image_tokens)
+    assert calls[0] is select.Decisions
+    assert sorted(c.__name__ for c in calls[1:]) == ["Check", "SvgDrawing", "WrittenSection"]
+
+
+async def test_screen_content_is_evidence_and_visuals_are_placed_once(setup):
+    from iris.models import BoardElement, MomentContent
+
+    ctx, _, visual, generate, _ = setup
+    visual.description = "Mockup of the prototype screen"
+    contents = [
+        MomentContent(
+            moment_id="m1",
+            start=0,
+            end=10,
+            elements=[
+                BoardElement(kind="math", content="3(x+3)^2 - 28", t=4),
+                BoardElement(kind="figure", content="Mockup", visual_id="v1"),
+            ],
+        )
+    ]
+    write_model(ctx.paths.selection, Selection(visuals=[visual], contents=contents))
+    await write.run(ctx)
+    records = json.loads(generate.call_args.args[1])["records"]
+    assert [r["kind"] for r in records] == ["speech", "visual", "screen"]
+    assert records[1]["description"] == "Mockup of the prototype screen"
+    assert records[2] == {"kind": "screen", "start": 4, "type": "math", "content": "3(x+3)^2 - 28"}
+    twice = write.WrittenSection(
+        session_type=SessionType.MEETING,
+        title="Prototype review",
+        blocks=[
+            write.NoteBlock(markdown="Intro $x_1 < y$.", visual_ids=["v1"]),
+            write.NoteBlock(markdown="More.", visual_ids=["v1"]),
+        ],
+    )
+    with pytest.raises(ValueError, match="exactly once"):
+        write.validate_section(twice, write.plan_parts(*_inputs(ctx), 24_000)[0], None)
+
+
+def _inputs(ctx):
+    return read_model(ctx.paths.transcript, Transcript), read_model(ctx.paths.selection, Selection)
