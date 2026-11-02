@@ -19,6 +19,7 @@ export const STAGES: Stage[] = [
   'align',
   'select',
   'write',
+  'render',
   'assemble',
 ]
 
