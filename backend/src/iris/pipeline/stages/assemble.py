@@ -15,13 +15,19 @@ MARKER = re.compile(r"\[visual:([A-Za-z0-9_\-]+)\]")
 
 
 def resolve_markers(markdown: str, visuals: list[Visual]) -> str:
-    """Replace each marker with a markdown image. Unknown ids are dropped, never invented."""
+    """Replace each marker with a markdown image.
+
+    Unknown ids are dropped, never invented. Each visual appears once: repeated markers for an
+    already placed visual are dropped.
+    """
     by_id = {v.id: v for v in visuals}
+    placed: set[str] = set()
 
     def repl(match: re.Match[str]) -> str:
         v = by_id.get(match.group(1))
-        if v is None:
+        if v is None or v.id in placed:
             return ""
+        placed.add(v.id)
         caption = escape_text(" ".join(v.caption.splitlines()))
         return f"![{caption}]({v.path})\n*{caption}*"
 

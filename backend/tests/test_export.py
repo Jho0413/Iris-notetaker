@@ -134,3 +134,16 @@ def test_export_api_embeds_captioned_image(client, settings):
     image = images(response.text)[0]
     assert image.attrGet("src") == "data:image/jpeg;base64,aW1hZ2UgYnl0ZXM="
     assert "".join(t.content for t in image.children) == visual.caption
+
+
+def test_repeated_marker_places_visual_once():
+    visual = Visual(
+        id="v1",
+        moment_id="m1",
+        frame=FrameRef(t=0, path="frames/1.jpg"),
+        caption="Worked example",
+        path="visuals/v1.jpg",
+    )
+    markdown = resolve_markers("Intro\n\n[visual:v1]\n\nMore\n\n[visual:v1]", [visual])
+    assert len(images(markdown)) == 1
+    assert markdown.index("![") < markdown.index("More")
