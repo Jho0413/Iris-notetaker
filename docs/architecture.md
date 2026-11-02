@@ -22,8 +22,10 @@ it.
 
 ### Principles
 
-1. **Faithful visuals.** Every image in the notes is a real frame from the session, or a crop of one.
-   Nothing is redrawn or generated. A model may choose and caption a visual, but never draws one.
+1. **Professional visuals, accurate to the session.** What was shown on screen is rebuilt as a clean
+   visual (typeset maths, plotted graphs, rendered diagrams, illustrations, cleaned screenshots), with
+   no restriction on visual type. Redraws must match what was shown and said: each is verified against
+   the source frames and transcript, and source frames stay on disk so any visual can be regenerated.
 2. **One pipeline, many sources.** An uploaded file, live browser capture, and later a desktop app or
    a meeting bot all produce the same thing: timestamped audio and frames. Everything downstream is
    unaware of where they came from.
@@ -126,7 +128,6 @@ is in the session, so adding a source never touches the pipeline.
 
 ### Not in v1
 
-- Redrawn, annotated or generated visuals (principle 1)
 - Accounts, hosting, sharing links
 - Desktop app and meeting bot (designed for, not built)
 - Editing notes inside Iris

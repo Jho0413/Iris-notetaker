@@ -12,7 +12,8 @@ discussed is placed in the notes next to what was said about it.
 2. **Transcribe** the audio with timestamps.
 3. **Detect moments** where the screen changed and then settled, each with a representative frame.
 4. **Align** each moment with what was said while it was on screen.
-5. **Select** the moments worth keeping, with the best frame or crop and a short caption.
+5. **Select** the moments worth keeping and rebuild each as a professional visual, checked against
+   what was shown and said.
 6. **Write** notes in a style suited to the session (meeting, lecture or demo), with each visual placed
    where it belongs.
 7. **Show and export** the finished notes, with visuals embedded.
@@ -30,10 +31,15 @@ discussed is placed in the notes next to what was said about it.
   on where they came from
 
 ### Visuals
-- Faithful only: every image in the notes is a real frame from the session, or a crop of one
-- No redrawn, annotated or generated images in v1
+- Professional, not raw: anything shown on screen (handwriting, sketches, diagrams, slides) is rebuilt
+  as a clean visual in the notes: typeset maths, plotted graphs, rendered diagrams, tables,
+  illustrations, or a cleaned-up screenshot where the screen is already clean
+- No restriction on visual type; each visual uses whichever renderer fits it best
+- Accurate to the session: every redraw is checked against the source frames and transcript before it
+  is used. Source frames stay on disk for verification and regeneration, not in the notes
 
 ### Notes
+- Worked examples are written step by step: what was written, why, with the visual for that step
 - Style adapts to the content: meeting, lecture or demo
 - Shown in the app, and downloadable with visuals embedded
 

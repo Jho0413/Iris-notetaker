@@ -3,7 +3,7 @@
 Updated: 1 November 2026.
 
 The first milestone is a complete live MVP: someone can record a session, watch useful notes with
-faithful visuals appear, and leave with a finished, downloadable document in a well-designed UI.
+professional visuals appear, and leave with a finished, downloadable document in a well-designed UI.
 Later milestones build on feedback from using that product. They describe direction rather than
 fixed release dates; revisit their scope after the MVP is in use.
 
@@ -35,6 +35,18 @@ capture. Live functionality and a well-designed UI are part of this milestone.
 - [ ] Measure stage latency and model cost; address issues against the README's performance and
       cost goals. Record measurements rather than treating those goals as already achieved.
 - [ ] Open exported notes in the intended Markdown viewer and verify the embedded visuals.
+
+### Step-by-step notes and professional visuals
+
+- [ ] Detect incremental changes (newly written content and its region) within a moment, not only
+      whole-screen changes.
+- [ ] Group changes with the transcript into steps: what was written plus the spoken reasoning.
+- [ ] Write structured notes (problem, steps, figures, answer, pitfalls) for worked examples, keeping
+      the current format for slides and meetings.
+- [ ] Rebuild every visual professionally, choosing a renderer per visual: LaTeX, plots, diagrams
+      (Mermaid/SVG), tables, image generation or a cleaned screenshot.
+- [ ] Verify each redraw against the source frames and transcript; regenerate on disagreement.
+- [ ] Render the structured notes in the UI (KaTeX, step cards, figures) and export them.
 
 ### Complete live capture and ingestion
 
@@ -86,8 +98,7 @@ representative real sessions have been reviewed, known limitations are documente
 failures have a usable retry path. A passing mocked pipeline test alone does not complete the MVP.
 
 **Scope boundary:** local, single-user browser app. Desktop packaging, meeting bots, accounts,
-collaboration and in-app note editing belong to later milestones. Visuals remain real frames or
-crops, never generated or redrawn.
+collaboration and in-app note editing belong to later milestones.
 
 ## Milestone 2 — Reliable daily use
 
@@ -145,7 +156,8 @@ hosting, access-control and data-handling requirements.
 ## Immediate sequence within milestone 1
 
 1. Validate a real upload and establish the initial quality, latency and cost baseline.
-2. Define the UI flows and visual design alongside the remaining live workflow.
-3. Complete live ingestion and incremental processing.
-4. Add final synthesis and connect the live transcript/draft to the designed UI.
-5. Run end-to-end real-session checks, fix the gaps and document the MVP's supported behavior.
+2. Build step-by-step notes and professional visuals; this sets the notes format the UI depends on.
+3. Define the UI flows and visual design alongside the remaining live workflow.
+4. Complete live ingestion and incremental processing.
+5. Add final synthesis and connect the live transcript/draft to the designed UI.
+6. Run end-to-end real-session checks, fix the gaps and document the MVP's supported behavior.
