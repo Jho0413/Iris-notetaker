@@ -79,7 +79,12 @@ cd backend
 uv run iris process path/to/recording.mp4   # new session, full pipeline
 uv run iris run <session_id> --from select  # re-run from a stage
 uv run iris stage <session_id> detect       # run one stage on its own
+uv run iris cost <session_id>               # model calls and cost per stage, model and purpose
 ```
+
+Every model call is recorded in the session's `usage.json` (also `GET /api/sessions/{id}/usage`):
+tokens, images, audio seconds, latency and cost from the price table in `config.py`. Calls to
+models missing from the table are reported as unpriced, not guessed. Cached work costs nothing.
 
 ### Live capture
 
@@ -129,7 +134,7 @@ backend/src/iris/
     live.py       incremental processing while a live session runs (not implemented yet)
   jobs/runner.py  runs a session's PLAN as an asyncio task, publishes progress
   store/          SQLite session index + on-disk session folder layout (layout.py lists every file)
-  llm/            OpenAI client
+  llm/            OpenAI client; usage.py records every model call and its cost (usage.json)
   config.py       Settings (IRIS_* environment variables, see backend/.env.example)
   cli.py          the `iris` command
   events.py       progress event bus
@@ -154,4 +159,4 @@ Session data lives in `backend/data/` (`iris.db` plus `sessions/<id>/`).
 
 - [`docs/roadmap.md`](docs/roadmap.md): milestones, remaining work and completion criteria
 - [`docs/architecture.md`](docs/architecture.md): architecture and pipeline design
-- `docs/frontend.md`: screens and UI design (to come)
+- [`docs/frontend.md`](docs/frontend.md): screens, states, progress events and visual design of the UI

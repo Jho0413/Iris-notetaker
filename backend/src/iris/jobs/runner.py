@@ -5,6 +5,7 @@ import logging
 
 from iris.config import Settings
 from iris.events import EventBus
+from iris.llm import usage
 from iris.models import EventType, SessionStatus, Stage
 from iris.pipeline import STAGES, plan_from
 from iris.pipeline.context import StageContext
@@ -63,7 +64,8 @@ class JobRunner:
         self.store.update(ctx.session_id, current_stage=stage)
         self.bus.publish(ctx.session_id, EventType.STAGE_STARTED, {"stage": stage})
         try:
-            await STAGES[stage](ctx)
+            with usage.recording(ctx, stage):  # model calls in the stage go to usage.json
+                await STAGES[stage](ctx)
         except Exception as exc:
             raise StageError(stage, exc) from exc
         self.bus.publish(ctx.session_id, EventType.STAGE_FINISHED, {"stage": stage})
