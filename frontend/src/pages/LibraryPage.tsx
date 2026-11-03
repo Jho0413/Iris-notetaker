@@ -6,6 +6,7 @@ import { HealthBanner } from '../components/HealthBanner'
 import { Icon } from '../components/Icon'
 import { StatusChip } from '../components/StatusChip'
 import { formatWhen, SOURCE_LABEL } from '../session/format'
+import { act } from '../session/request'
 import { libraryState } from '../session/state'
 import { useTitle } from '../session/useTitle'
 
@@ -51,21 +52,27 @@ export function LibraryPage() {
   async function retry(s: Session) {
     setActionError(null)
     const from = libraryState(s).fromStage
-    const { error } = await api.POST('/api/sessions/{session_id}/run', {
-      params: { path: { session_id: s.id }, query: from ? { from_stage: from } : {} },
-    })
-    if (error) setActionError(`Couldn't restart "${s.title}". It may already be processing.`)
+    const result = await act(
+      api.POST('/api/sessions/{session_id}/run', {
+        params: { path: { session_id: s.id }, query: from ? { from_stage: from } : {} },
+      }),
+    )
+    if (!result.ok) {
+      setActionError(result.status === 0 ? "Couldn't reach the backend. Is it running?" : `Couldn't restart "${s.title}". It may already be processing.`)
+    }
     refresh()
   }
 
   async function confirmDelete() {
     if (!pendingDelete) return
     setBusy(true)
-    const { error } = await api.DELETE('/api/sessions/{session_id}', {
-      params: { path: { session_id: pendingDelete.id } },
-    })
+    const result = await act(
+      api.DELETE('/api/sessions/{session_id}', { params: { path: { session_id: pendingDelete.id } } }),
+    )
     setBusy(false)
-    if (error) setActionError(`Couldn't delete "${pendingDelete.title}". It may be processing.`)
+    if (!result.ok) {
+      setActionError(result.status === 0 ? "Couldn't reach the backend. Is it running?" : `Couldn't delete "${pendingDelete.title}". It may be processing.`)
+    }
     setPendingDelete(null)
     refresh()
   }

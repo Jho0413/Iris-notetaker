@@ -7,6 +7,7 @@ import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import { sessionFileUrl } from '../api/client'
 import { rehypeNotes } from '../notes/rehypeNotes'
+import { formatClock } from '../session/state'
 
 export interface OutlineItem {
   id: string
@@ -24,12 +25,14 @@ export function NotesView(props: {
   sessionId: string
   title: string
   markdown: string
-  /** Image paths (relative to the session) of figures shown as unverified original crops. */
-  unverified?: ReadonlySet<string>
+  /** Per image path (relative to the session): where it was shown and whether it is unverified. */
+  figures?: ReadonlyMap<string, { t?: number; unverified: boolean }>
+  /** Hide the notes' own title when the page heading already says the same. */
+  hideTitle?: boolean
   onOutline?: (items: OutlineItem[]) => void
 }) {
   const ref = useRef<HTMLElement>(null)
-  const { onOutline, unverified, sessionId } = props
+  const { onOutline, figures, sessionId } = props
 
   useEffect(() => {
     const root = ref.current
@@ -46,28 +49,36 @@ export function NotesView(props: {
     onOutline?.(items)
   }, [props.markdown, onOutline])
 
-  // Unverified fallbacks are tagged under their caption (figures come from rehypeNotes).
+  // Under each caption: when the figure was shown, and a tag if it is an unverified fallback.
+  // Figures come from rehypeNotes; their src may be relative or already resolved.
   const components = useMemo<Components>(() => {
-    const flagged = new Set([...(unverified ?? [])].flatMap((p) => [p, sessionFileUrl(sessionId, p)]))
+    const bySrc = new Map<string, { t?: number; unverified: boolean }>()
+    for (const [path, meta] of figures ?? []) {
+      bySrc.set(path, meta)
+      bySrc.set(sessionFileUrl(sessionId, path), meta)
+    }
     return {
       figure({ node, children, className }) {
         const img = node?.children.find((c): c is Element => c.type === 'element' && c.tagName === 'img')
-        const src = String(img?.properties.src ?? '')
+        const meta = bySrc.get(String(img?.properties.src ?? ''))
         return (
           <figure className={className}>
             {children}
-            {flagged.has(src) && (
-              <span className="badge badge-unverified figure-tag">Original crop · not verified</span>
+            {meta && (meta.t !== undefined || meta.unverified) && (
+              <span className="figure-meta">
+                {meta.t !== undefined && <span className="num">Shown at {formatClock(meta.t)}</span>}
+                {meta.unverified && <span className="badge badge-unverified">Original crop · not verified</span>}
+              </span>
             )}
           </figure>
         )
       },
     }
-  }, [unverified, sessionId])
+  }, [figures, sessionId])
 
   return (
     <article className="notes" ref={ref}>
-      <h1>{props.title}</h1>
+      {!props.hideTitle && <h1>{props.title}</h1>}
       <Markdown
         remarkPlugins={REMARK}
         rehypePlugins={REHYPE}

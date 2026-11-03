@@ -17,12 +17,13 @@ export function uploadWithProgress(
   title: string | undefined,
   onProgress: (fraction: number) => void,
   signal?: AbortSignal,
+  createXhr: () => XMLHttpRequest = () => new XMLHttpRequest(),
 ): Promise<Session> {
   return new Promise((resolve, reject) => {
     const form = new FormData()
     form.append('file', file)
     if (title) form.append('title', title)
-    const xhr = new XMLHttpRequest()
+    const xhr = createXhr()
     xhr.open('POST', '/api/sessions')
     xhr.responseType = 'json'
     xhr.upload.onprogress = (e) => {

@@ -6,11 +6,16 @@ import { ConfirmDialog } from '../components/ConfirmDialog'
 import { HealthBanner } from '../components/HealthBanner'
 import { Icon } from '../components/Icon'
 import { TranscriptList } from '../components/TranscriptList'
-import { formatClock, reduceEvents, transcriptSegments } from '../session/state'
+import { act } from '../session/request'
+import { formatClock, transcriptSegments } from '../session/state'
 import { useSessionStream } from '../session/useSessionStream'
 import { useTitle } from '../session/useTitle'
 
-type Phase = 'idle' | 'requesting' | 'recording' | 'stopping'
+/**
+ * `unfinished`: capture has stopped, but telling the backend to make notes failed;
+ * `finishing`: retrying that request.
+ */
+type Phase = 'idle' | 'requesting' | 'recording' | 'stopping' | 'unfinished' | 'finishing'
 
 /** Plain words for a capture failure. Messages from the capture module are shown as they are. */
 function captureError(err: unknown): string {
@@ -43,7 +48,7 @@ export function LivePage() {
   useTitle(recording ? `● Recording ${formatClock(elapsed)}` : 'Record live')
 
   const stream = useSessionStream(recording ? sessionId ?? undefined : undefined)
-  const segments = useMemo(() => transcriptSegments(reduceEvents(stream.events), null), [stream.events])
+  const segments = useMemo(() => transcriptSegments(stream.run, null), [stream.run])
 
   // Leaving ends the recording: the browser asks before closing the tab, the app before navigating.
   const blocker = useBlocker(recording)
@@ -92,7 +97,11 @@ export function LivePage() {
     }
   }
 
-  /** Stop and hand over to processing. On failure, stay recording so stopping again retries. */
+  /**
+   * Stop capture and hand over to processing. Stopping tears capture down before it tells the
+   * backend to finish, so a failure leaves the recording stopped but unfinished: the page then
+   * offers to retry only the finish request (`finish`). What was captured is already saved.
+   */
   async function stop(): Promise<boolean> {
     const live = capture.current
     if (!live || stopping.current) return false
@@ -101,18 +110,26 @@ export function LivePage() {
     setPhase('stopping')
     try {
       await live.stop()
+      return true
     } catch (err) {
-      stopping.current = false
-      setPhase('recording')
-      setError(
-        err instanceof Error && err.message
-          ? err.message
-          : "Couldn't finish the session. Nothing captured is lost; stop again to retry.",
-      )
+      setPhase('unfinished')
+      setError(err instanceof Error && err.message ? err.message : String(err))
       return false
+    } finally {
+      capture.current = null
+      stopping.current = false
     }
-    capture.current = null
-    return true
+  }
+
+  async function finish() {
+    if (!sessionId) return
+    setPhase('finishing')
+    setError(null)
+    const result = await act(api.POST('/api/live/{session_id}/end', { params: { path: { session_id: sessionId } } }))
+    // 409: the session is no longer recording, so an earlier finish request did arrive.
+    if (result.ok || result.status === 409) return navigate(`/sessions/${sessionId}`)
+    setPhase('unfinished')
+    setError(result.status === 0 ? "Couldn't reach the backend. Is it running?" : `The backend refused (HTTP ${result.status}).`)
   }
 
   async function stopAndOpen() {
@@ -122,6 +139,37 @@ export function LivePage() {
   useEffect(() => {
     stopRef.current = stopAndOpen
   })
+
+  if (phase === 'unfinished' || phase === 'finishing') {
+    return (
+      <div className="page-narrow">
+        <div className="page-head">
+          <div>
+            <h1>Recording stopped</h1>
+            <p className="lede">What was captured is saved on this computer.</p>
+          </div>
+        </div>
+        <div className="banner banner-error" role="alert">
+          <Icon name="alert" />
+          <div className="banner-body">
+            <p>
+              <strong>Iris couldn't start making the notes.</strong> {error}
+            </p>
+            <div className="banner-actions">
+              <button type="button" className="btn btn-primary" onClick={() => void finish()} disabled={phase === 'finishing'}>
+                <Icon name="retry" /> {phase === 'finishing' ? 'Trying…' : 'Try again'}
+              </button>
+              {sessionId && (
+                <button type="button" className="btn" onClick={() => navigate(`/sessions/${sessionId}`)}>
+                  Open the session
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   if (phase === 'idle' || phase === 'requesting') {
     return (

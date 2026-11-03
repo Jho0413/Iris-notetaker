@@ -11,9 +11,10 @@ import { StatusChip } from '../components/StatusChip'
 import { TabPanel, Tabs } from '../components/Tabs'
 import { TranscriptList } from '../components/TranscriptList'
 import { fetchDraft, type NotesDraft } from '../session/draft'
+import { act } from '../session/request'
 import { formatWhen, SOURCE_LABEL } from '../session/format'
 import {
-  failureHeadline, figureList, formatClock, reduceEvents, sessionLength, STAGE_LABELS,
+  failureHeadline, figureList, formatClock, sessionLength, STAGE_LABELS,
   transcriptSegments, uiState, type FigureState,
 } from '../session/state'
 import { useSessionStream } from '../session/useSessionStream'
@@ -58,7 +59,7 @@ export function SessionPage() {
 function SessionView({ id }: { id: string }) {
   const navigate = useNavigate()
   const stream = useSessionStream(id)
-  const run = useMemo(() => reduceEvents(stream.events), [stream.events])
+  const run = stream.run
 
   const [session, setSession] = useState<Session | null>(null)
   const [loadError, setLoadError] = useState<LoadError>(null)
@@ -105,14 +106,15 @@ function SessionView({ id }: { id: string }) {
     }
   }, [id, run.stages.transcribe.status, reload])
 
+  const draftSections = run.notes && !run.notes.final ? run.notes.completed : 0
   useEffect(() => {
-    if (!run.notes || run.notes.final) return
+    if (!draftSections) return
     let live = true
     void fetchDraft(id).then((d) => live && setDraft(d))
     return () => {
       live = false
     }
-  }, [id, run.notes])
+  }, [id, draftSections])
 
   const ui = session
     ? uiState(session, run, { stalled: stream.quiet && (run.status ?? session.status) === 'processing' })
@@ -121,8 +123,8 @@ function SessionView({ id }: { id: string }) {
 
   const segments = useMemo(() => transcriptSegments(run, transcript), [run, transcript])
   const figures = useMemo(() => figureList(run, notes), [run, notes])
-  const unverified = useMemo(
-    () => new Set(figures.filter((f) => f.verified === false && f.path).map((f) => f.path!)),
+  const figureMeta = useMemo(
+    () => new Map(figures.filter((f) => f.path).map((f) => [f.path!, { t: f.t, unverified: f.verified === false }])),
     [figures],
   )
   const transcriptKnown = transcript !== null || run.stages.transcribe.status === 'done'
@@ -132,12 +134,14 @@ function SessionView({ id }: { id: string }) {
     if (!ui) return
     setBusy(true)
     setActionError(null)
-    const { error, response } = await api.POST('/api/sessions/{session_id}/run', {
-      params: { path: { session_id: id }, query: ui.fromStage ? { from_stage: ui.fromStage } : {} },
-    })
+    const result = await act(
+      api.POST('/api/sessions/{session_id}/run', {
+        params: { path: { session_id: id }, query: ui.fromStage ? { from_stage: ui.fromStage } : {} },
+      }),
+    )
     setBusy(false)
-    if (error) {
-      setActionError(response.status === 409 ? 'This session is already processing.' : "Couldn't restart processing. Is the backend running?")
+    if (!result.ok) {
+      setActionError(result.status === 409 ? 'This session is already processing.' : "Couldn't restart processing. Is the backend running?")
     }
     setReload((n) => n + 1)
   }
@@ -145,19 +149,21 @@ function SessionView({ id }: { id: string }) {
   async function finishLive() {
     setBusy(true)
     setActionError(null)
-    const { error } = await api.POST('/api/live/{session_id}/end', { params: { path: { session_id: id } } })
+    const result = await act(api.POST('/api/live/{session_id}/end', { params: { path: { session_id: id } } }))
     setBusy(false)
-    if (error) setActionError("Couldn't finish the recording. It may already be processing.")
+    if (!result.ok) {
+      setActionError(result.status === 0 ? "Couldn't reach the backend. Is it running?" : "Couldn't finish the recording. It may already be processing.")
+    }
     setReload((n) => n + 1)
   }
 
   async function deleteSession() {
     setBusy(true)
-    const { error } = await api.DELETE('/api/sessions/{session_id}', { params: { path: { session_id: id } } })
+    const result = await act(api.DELETE('/api/sessions/{session_id}', { params: { path: { session_id: id } } }))
     setBusy(false)
     setConfirmDelete(false)
-    if (error) setActionError("Couldn't delete this session. It may be processing.")
-    else navigate('/')
+    if (result.ok) navigate('/')
+    else setActionError(result.status === 0 ? "Couldn't reach the backend. Is it running?" : "Couldn't delete this session. It may be processing.")
   }
 
   function showFigure(f: FigureState) {
@@ -358,7 +364,8 @@ function SessionView({ id }: { id: string }) {
                   sessionId={session.id}
                   title={notes.title}
                   markdown={notes.markdown}
-                  unverified={unverified}
+                  figures={figureMeta}
+                  hideTitle={notes.title.trim() === session.title.trim()}
                   onOutline={setOutline}
                 />
               </>
@@ -410,12 +417,12 @@ function SessionView({ id }: { id: string }) {
         <ProgressRail
           run={run}
           finished={finished}
-          hasEvents={stream.events.length > 0}
+          hasEvents={stream.eventCount > 0}
           currentStage={session.current_stage}
           outline={notes || draft ? outline : []}
           stream={stream.status}
           error={session.error ?? run.error}
-          showProgress={!finished || stream.events.length > 0}
+          showProgress={!finished || stream.eventCount > 0}
         />
       </div>
 

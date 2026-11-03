@@ -325,14 +325,15 @@ h1, h2, h3 { line-height: 1.2; letter-spacing: -0.01em; text-wrap: balance; }
 
 .ribbon { margin: 20px 0 0; }
 .ribbon-track { position: relative; height: 22px; }
-.ribbon-track::before { content: ''; position: absolute; left: 0; right: 0; top: 10px; height: 2px;
-  border-radius: 1px; background: var(--border-strong); }
-.ribbon-mark { position: absolute; top: 4px; width: 14px; height: 14px; margin-left: -7px; padding: 0;
-  border-radius: 3px; border: 2px solid var(--accent); background: var(--surface); cursor: pointer;
+.ribbon-track::before { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 6px;
+  background: repeating-linear-gradient(90deg, var(--border-strong) 0 1px, transparent 1px 10%);
+  border-bottom: 1px solid var(--border-strong); }
+.ribbon-mark { position: absolute; top: 0; width: 10px; height: 18px; margin-left: -5px; padding: 0;
+  border-radius: 3px 3px 1px 1px; border: 2px solid var(--accent); background: var(--surface); cursor: pointer;
   transition: transform var(--fast) var(--ease), background var(--fast) var(--ease); }
 .ribbon-mark.done { background: var(--accent); }
 .ribbon-mark.unverified { border-color: var(--warning); background: var(--warning); }
-.ribbon-mark:hover { transform: scale(1.2); }
+.ribbon-mark:hover { transform: translateY(-2px); }
 .ribbon-scale { display: flex; justify-content: space-between; color: var(--text-2);
   font-size: 0.75rem; margin-top: 2px; }
 .ribbon-tip { position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%);
@@ -364,7 +365,13 @@ h1, h2, h3 { line-height: 1.2; letter-spacing: -0.01em; text-wrap: balance; }
 .cost-slot { color: var(--text-2); font-size: 0.8125rem; }
 .details { font-size: 0.8125rem; color: var(--text-2); margin-top: 8px; border-top: 1px solid var(--border);
   padding-top: 8px; }
-.details summary { cursor: pointer; color: var(--text); font-weight: 500; padding: 4px 0; }
+.details summary { cursor: pointer; color: var(--text); font-weight: 500; padding: 4px 0;
+  list-style: none; display: flex; align-items: center; gap: 6px; }
+.details summary::-webkit-details-marker { display: none; }
+.details summary::before { content: ''; width: 6px; height: 6px; margin: 0 2px;
+  border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg); transition: transform var(--fast) var(--ease); }
+.details[open] summary::before { transform: rotate(45deg); }
 .details table { width: 100%; border-collapse: collapse; margin-top: 6px; }
 .details td { padding: 3px 0; }
 .details td:last-child { text-align: right; }
@@ -424,7 +431,7 @@ dialog.confirm .dialog-actions { display: flex; justify-content: flex-end; gap: 
 /* ---- Notes (Read surface). Cards come from rehypeNotes: problem, step, answer. ----------------- */
 
 .notes { font-size: 1.0625rem; line-height: 1.7; max-width: 68ch; overflow-wrap: break-word; }
-.notes h1 { font-size: 1.875rem; font-weight: 650; margin: 0 0 24px; }
+.notes h1 { font-size: 1.5rem; font-weight: 600; margin: 0 0 24px; }
 .notes h2 { font-size: 1.375rem; font-weight: 600; margin: 48px 0 12px; scroll-margin-top: 80px; }
 .notes h3 { font-size: 1.125rem; font-weight: 600; margin: 32px 0 8px; }
 .notes p, .notes ul, .notes ol { margin: 12px 0; }
@@ -480,7 +487,8 @@ dialog.confirm .dialog-actions { display: flex; justify-content: flex-end; gap: 
 .notes figcaption { font-size: 0.875rem; line-height: 1.5; color: var(--text-2); text-align: center;
   max-width: 56ch; }
 .notes .figure.flash img { outline: 2px solid var(--accent); outline-offset: 4px; }
-.notes .figure-tag { font-size: 0.75rem; }
+.notes .figure-meta { display: flex; gap: 8px; align-items: center; font-size: 0.8125rem;
+  color: var(--text-2); }
 
 /* ---- Laptop widths ----------------------------------------------------------------------------- */
 

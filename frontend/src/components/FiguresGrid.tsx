@@ -6,9 +6,9 @@ import { Icon } from './Icon'
 function Badge({ figure }: { figure: FigureState }) {
   if (!figure.rendered) return null
   if (figure.verified === false) return <span className="badge badge-unverified">Original crop · not verified</span>
-  if (figure.verified === undefined) return null // unknown without this run's events
   if (figure.renderAs === 'screenshot') return <span className="badge badge-shot">Screenshot</span>
-  return <span className="badge badge-verified">Verified redraw</span>
+  if (figure.verified) return <span className="badge badge-verified">Verified redraw</span>
+  return null
 }
 
 /** Every figure selected, each in a fixed 4:3 box so nothing moves when images arrive. */

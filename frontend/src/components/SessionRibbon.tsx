@@ -41,9 +41,12 @@ export function SessionRibbon(props: {
           )
         })}
       </div>
-      <div className="ribbon-scale num" aria-hidden="true">
-        <span>0:00</span>
-        <span>{formatClock(props.length)}</span>
+      <div className="ribbon-scale" aria-hidden="true">
+        <span className="num">0:00</span>
+        <span>
+          {placed.length === 1 ? '1 figure, placed where it was shown' : `${placed.length} figures, placed where they were shown`}
+        </span>
+        <span className="num">{formatClock(props.length)}</span>
       </div>
     </div>
   )

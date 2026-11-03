@@ -150,9 +150,13 @@ export function UploadPage() {
               <span style={{ width: `${progress * 100}%` }} />
             </div>
             <span className="num">{progress >= 1 ? 'Starting…' : `${Math.round(progress * 100)}%`}</span>
-            <button type="button" className="btn" onClick={() => abort.current?.abort()}>
-              Cancel
-            </button>
+            {/* Once every byte is sent the backend creates the session regardless, so cancelling
+                would only hide a session that is already processing. */}
+            {progress < 1 && (
+              <button type="button" className="btn" onClick={() => abort.current?.abort()}>
+                Cancel
+              </button>
+            )}
           </div>
         ) : (
           <div className="form-actions">

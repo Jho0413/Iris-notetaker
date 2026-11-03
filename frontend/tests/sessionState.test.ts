@@ -19,9 +19,10 @@ const session: Session = {
 }
 
 test('stages move through running and done, with durations from event times', () => {
+  const start = ev('status', { status: 'processing' })
   const started = ev('stage_started', { stage: 'ingest' })
   const finished = ev('stage_finished', { stage: 'ingest' })
-  const run = reduceEvents([ev('status', { status: 'processing' }), started, finished,
+  const run = reduceEvents([start, started, finished,
     ev('stage_started', { stage: 'transcribe' })])
   assert.equal(run.stages.ingest.status, 'done')
   assert.equal(stageSeconds(run.stages.ingest), 1)
@@ -82,6 +83,9 @@ test('finished notes and run events merge into one figure list', () => {
   assert.equal(fig.verified, false)
   assert.equal(fig.t, 12)
   assert.equal(figureList(emptyRun(), notes)[0].verified, undefined) // unknown without events
+  // A redraw in the finished notes passed its check, events or not.
+  const redrawn = { ...notes, visuals: [{ ...notes.visuals[0], render_as: 'svg' as const }] }
+  assert.equal(figureList(emptyRun(), redrawn)[0].verified, true)
 })
 
 test('a new run clears the previous run, and replays of its start do not', () => {
@@ -96,6 +100,19 @@ test('a new run clears the previous run, and replays of its start do not', () =>
   assert.equal(run2.status, 'processing')
   assert.equal(run2.error, undefined)
   assert.equal(run2.stages.write.status, 'running')
+})
+
+test('resuming after a backend restart starts clean, even without a failed status between', () => {
+  const old = [ev('status', { status: 'processing' }), ev('stage_started', { stage: 'write' }),
+    ev('stage_finished', { stage: 'write' }), ev('stage_started', { stage: 'render' }),
+    ev('notes_updated', { final: false, completed_parts: 3, total_parts: 4 }),
+    ev('visual_selected', { id: 'v1', caption: 'a' })]
+  const fresh = [ev('status', { status: 'processing' }), ev('stage_started', { stage: 'write' })]
+  const resumed = reduceEvents([...old, ...fresh])
+  assert.deepEqual(resumed, reduceEvents(fresh))
+  assert.equal(resumed.stages.write.status, 'running')
+  // Replaying everything, both runs included, still lands on the latest run.
+  assert.deepEqual(reduceEvents([...old, ...fresh, ...old, ...fresh]), resumed)
 })
 
 test('a failure in a parallel group marks only the named stage failed', () => {

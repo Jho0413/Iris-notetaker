@@ -2,7 +2,7 @@
 export function formatWhen(iso: string, now = new Date()): string {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return ''
-  const time = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+  const time = d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
   const day = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime()
   const days = Math.round((day(now) - day(d)) / 86_400_000)
   if (days === 0) return `Today ${time}`

@@ -6,6 +6,8 @@
 // The event stream replays a session's history on every (re)connect, so applying an event twice
 // must change nothing: everything is keyed (stage name, transcript chunk index, figure id).
 // A `status: processing` event marks the start of a run and clears the previous run's progress.
+// Events older than the current run's start belong to an earlier run and are ignored, so replaying
+// history (all runs, in order) always lands on the latest run.
 import type { IrisEvent, Notes, Session, SessionStatus, Stage, Transcript } from '../api/client'
 
 export type Segment = Transcript['segments'][number]
@@ -55,6 +57,8 @@ export interface RunState {
   figureOrder: string[]
   notes: { final: boolean; completed: number; total: number } | null
   error?: string
+  /** When the current run started (its `status: processing` event), in ms since the epoch. */
+  runStart?: number
 }
 
 export function emptyRun(): RunState {
@@ -113,13 +117,17 @@ function upsertFigure(state: RunState, id: string, patch: Partial<FigureState>):
 
 export function applyEvent(state: RunState, event: IrisEvent): RunState {
   const data = (event.data ?? {}) as Record<string, unknown>
+  // Parsed, not compared as strings: the backend omits zero microseconds from timestamps.
+  const at = Date.parse(event.at)
+  if (state.runStart !== undefined && at < state.runStart) return state
   switch (event.type) {
     case 'status': {
       const status = str(data.status)
       if (!status || !STATUSES.includes(status)) return state
-      // A new run starts with `processing`; replays of the same event are no-ops.
-      if (status === 'processing' && state.status !== 'processing') {
-        return { ...emptyRun(), status: 'processing' }
+      // A new run starts with `processing`. It can follow a run that never finished (the backend
+      // restarted mid-run), so compare timestamps rather than the previous status.
+      if (status === 'processing' && (state.runStart === undefined || at > state.runStart)) {
+        return { ...emptyRun(), status: 'processing', runStart: at }
       }
       return { ...state, status: status as SessionStatus }
     }
@@ -227,13 +235,18 @@ export function figureList(run: RunState, notes: Notes | null): FigureState[] {
       t: v.frame.t,
       path: v.path,
       renderAs: v.render_as,
+      // A redraw only reaches the notes after passing its check. A screenshot may be requested
+      // or a fallback; only this run's events can tell which.
+      verified: v.render_as === 'screenshot' ? undefined : true,
       rendered: true,
     })
   }
   for (const id of run.figureOrder) {
     const live = run.figures[id]
     const known = out.get(id)
-    out.set(id, known ? { ...live, ...known, verified: live.verified, t: known.t ?? live.t } : live)
+    out.set(id, known
+      ? { ...live, ...known, verified: live.verified ?? known.verified, t: known.t ?? live.t }
+      : live)
   }
   return [...out.values()]
 }

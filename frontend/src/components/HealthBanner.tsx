@@ -8,7 +8,10 @@ export function HealthBanner() {
 
   useEffect(() => {
     let live = true
-    api.GET('/api/health').then(({ data }) => live && setMissingKey(data?.openai_key === false))
+    api
+      .GET('/api/health')
+      .then(({ data }) => live && setMissingKey(data?.openai_key === false))
+      .catch(() => {}) // unreachable backend: the page shows its own error
     return () => {
       live = false
     }
