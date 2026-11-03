@@ -27,8 +27,7 @@ fixed release dates; revisit their scope after the MVP is in use.
   checks, screen reading, notes and SVG calls on `gpt-5.5` are suspected to be the main driver,
   alongside image generation. This needs measuring.
 - Long transcripts are processed in sections and joined; there is no final synthesis pass yet.
-- Live capture and ingestion work: ending a live session finalizes the browser's chunks and runs
-  the normal pipeline. Incremental processing while recording is not implemented yet.
+- Live ingestion and incremental processing are not implemented; ending a live session fails.
 - Library, upload, live and session screens are basic; the intended UI design is not done.
 
 ## Milestone 1 — Complete live MVP
@@ -100,14 +99,12 @@ capture. Live functionality and a well-designed UI are part of this milestone.
 
 ### Complete live capture and ingestion
 
-- [x] Finalize browser audio chunks into the standard audio format and build the frame index.
-- [x] Preserve timestamps and audio/screen alignment through recording and finalization.
-- [x] Handle microphone/screen permissions, capture cancellation and screen sharing ending.
-- [x] Handle failed uploads and out-of-order or repeated chunks without silently losing content.
-- [x] Flush pending audio and frames before ending a session, and retain captured data for retries.
+- [ ] Finalize browser audio chunks into the standard audio format and build the frame index.
+- [ ] Preserve timestamps and audio/screen alignment through recording and finalization.
+- [ ] Handle microphone/screen permissions, capture cancellation and screen sharing ending.
+- [ ] Handle failed uploads and out-of-order or repeated chunks without silently losing content.
+- [ ] Flush pending audio and frames before ending a session, and retain captured data for retries.
 - [ ] State which browsers and shared-audio modes are supported and validate them manually.
-      Stated in the README; checked in headless Chrome with fake devices. Firefox, Edge and real
-      tab/system audio still need a manual check.
 
 ### Process sessions while they happen
 

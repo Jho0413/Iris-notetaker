@@ -4,15 +4,16 @@
 // (architecture section 1, live). Uploads are retried until they land (uploadQueue.ts), and
 // ending the session waits for all of them, so a dropped request doesn't lose content.
 
-import { CaptureError, describeCaptureError, pickAudioMimeType } from './captureErrors'
-import { EndSessionError, endLiveSession } from './endSession'
-import { UploadQueue } from './uploadQueue'
+import { CaptureError, describeCaptureError, pickAudioMimeType } from './captureErrors.ts'
+import { EndSessionError, MissingAudioError, endLiveSession } from './endSession.ts'
+import { UploadQueue, type UploadQueueOptions } from './uploadQueue.ts'
 
 const AUDIO_CHUNK_MS = 5000
 const FRAME_INTERVAL_MS = 1000
 const FRAME_MAX_WIDTH = 1920 // the backend scales further (IRIS_FRAME_MAX_WIDTH)
 const JPEG_QUALITY = 0.8
 const DRAIN_TIMEOUT_MS = 30_000
+const UPLOAD_TIMEOUT_MS = 30_000 // a hung request becomes a retry instead of blocking the queue
 
 export type EndReason = 'screen-share-ended' | 'microphone-ended' | 'recorder-error'
 
@@ -22,35 +23,71 @@ export interface LiveCaptureOptions {
    * failed. Call `stop()` to finish the session. Without a handler, capture stops itself.
    */
   onEnded?: (reason: EndReason, message: string) => void
+  /** How long `stop()` waits for pending uploads before giving up (it can be called again). */
+  drainTimeoutMs?: number
+  uploads?: UploadQueueOptions
 }
 
-interface FrameGrabber {
-  grab(canvas: HTMLCanvasElement): Promise<Blob | null>
-  close(): void
+type Fetch = (input: string, init?: RequestInit) => Promise<Response>
+
+/** The browser APIs capture uses. Injectable, so the lifecycle can be tested without a browser. */
+export interface CaptureEnv {
+  mediaDevices?: Pick<MediaDevices, 'getDisplayMedia' | 'getUserMedia'>
+  MediaRecorder?: {
+    new (stream: MediaStream, options: MediaRecorderOptions): MediaRecorder
+    isTypeSupported(type: string): boolean
+  }
+  fetch: Fetch
+  sendBeacon: (url: string, body: Blob) => boolean
+  /** Where page lifecycle events (`beforeunload`, `pagehide`) arrive: `window`. */
+  page: Pick<EventTarget, 'addEventListener' | 'removeEventListener'>
+  /** Mix several audio streams into one. */
+  mixAudio: (streams: MediaStream[]) => { stream: MediaStream; close(): void }
+  /** Grab frames from `track` about once a second; returns a function that stops. */
+  captureFrames: (track: MediaStreamTrack, onFrame: (jpeg: Blob, at: number) => void) => () => void
+}
+
+export function browserEnv(): CaptureEnv {
+  return {
+    mediaDevices: navigator.mediaDevices,
+    MediaRecorder: typeof MediaRecorder === 'undefined' ? undefined : MediaRecorder,
+    fetch: (input, init) => fetch(input, init),
+    sendBeacon: (url, body) => navigator.sendBeacon(url, body),
+    page: window,
+    mixAudio,
+    captureFrames,
+  }
 }
 
 export class LiveCapture {
   readonly sessionId: string
   private readonly options: LiveCaptureOptions
+  private readonly env: CaptureEnv
   private readonly queue: UploadQueue
   private recorder?: MediaRecorder
   private streams: MediaStream[] = []
-  private audioCtx?: AudioContext
-  private grabber?: FrameGrabber
-  private stopTicker?: () => void
+  private mixer?: { close(): void }
+  private stopFrames?: () => void
   private startedAt = 0
   private seq = 0
   private recording = false
   private finished = false
+  private opening?: Promise<MediaStream>
+  private cancelled = false
   private stopping?: Promise<void>
 
-  constructor(sessionId: string, options: LiveCaptureOptions = {}) {
+  constructor(sessionId: string, options: LiveCaptureOptions = {}, env: CaptureEnv = browserEnv()) {
     this.sessionId = sessionId
     this.options = options
+    this.env = env
     this.queue = new UploadQueue(async (path, body) => {
-      const res = await fetch(`/api/live/${sessionId}/${path}`, { method: 'POST', body })
+      const res = await env.fetch(`/api/live/${sessionId}/${path}`, {
+        method: 'POST',
+        body,
+        signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
+      })
       return res.status
-    })
+    }, options.uploads)
   }
 
   /** Uploads not yet acknowledged by the backend. */
@@ -60,24 +97,29 @@ export class LiveCapture {
 
   /**
    * Ask for the screen and the mic, then start recording. On failure (permission denied, the
-   * picker cancelled, an unsupported browser) everything acquired is released, the empty
-   * session is deleted, and a `CaptureError` with a user-facing message is thrown.
+   * picker cancelled, an unsupported browser, or `stop()` called meanwhile) everything acquired
+   * is released, the empty session is deleted, and a `CaptureError` with a user-facing message
+   * is thrown.
    */
   async start(): Promise<MediaStream> {
+    this.opening = this.open()
     try {
-      return await this.open()
+      return await this.opening
     } catch (err) {
       this.release()
-      void fetch(`/api/sessions/${this.sessionId}`, { method: 'DELETE' }).catch(() => {})
+      void this.env.fetch(`/api/sessions/${this.sessionId}`, { method: 'DELETE' }).catch(() => {})
       if (err instanceof CaptureError) throw err
       throw new CaptureError(`Could not start recording: ${err}`, { cause: err })
+    } finally {
+      this.opening = undefined
     }
   }
 
   /**
    * Stop capture, upload everything still pending, then tell the backend to process the
    * session. Throws if uploads or the end request fail; nothing captured is discarded, so
-   * calling `stop()` again retries.
+   * calling `stop()` again retries. Called while `start()` is still asking for permissions, it
+   * cancels the start instead (nothing was recorded, so the session is discarded).
    */
   stop(): Promise<void> {
     this.stopping ??= this.finish().catch((err: unknown) => {
@@ -88,13 +130,13 @@ export class LiveCapture {
   }
 
   private async open(): Promise<MediaStream> {
-    const devices = navigator.mediaDevices
-    if (!devices?.getDisplayMedia || typeof MediaRecorder === 'undefined') {
+    const { mediaDevices: devices, MediaRecorder: Recorder } = this.env
+    if (!devices?.getDisplayMedia || !Recorder) {
       throw new CaptureError(
         "This browser can't record the screen. Use a recent desktop Chrome, Edge or Firefox.",
       )
     }
-    const mimeType = pickAudioMimeType((type) => MediaRecorder.isTypeSupported(type))
+    const mimeType = pickAudioMimeType((type) => Recorder.isTypeSupported(type))
     if (!mimeType) {
       throw new CaptureError(
         "This browser can't record WebM audio. Use a recent desktop Chrome, Edge or Firefox.",
@@ -103,6 +145,7 @@ export class LiveCapture {
 
     const display = await getDisplay(devices)
     this.streams.push(display)
+    this.throwIfCancelled()
     let mic: MediaStream
     try {
       mic = await devices.getUserMedia({ audio: true })
@@ -110,8 +153,9 @@ export class LiveCapture {
       throw new CaptureError(describeCaptureError(err, 'microphone'), { cause: err })
     }
     this.streams.push(mic)
+    this.throwIfCancelled()
 
-    const recorder = new MediaRecorder(this.audioToRecord(display, mic), { mimeType })
+    const recorder = new Recorder(this.audioToRecord(display, mic), { mimeType })
     recorder.ondataavailable = (e) => {
       if (e.data.size) this.queue.add('audio', `audio?seq=${this.seq++}`, e.data)
     }
@@ -120,6 +164,7 @@ export class LiveCapture {
     recorder.start(AUDIO_CHUNK_MS)
     this.recorder = recorder
     await started
+    this.throwIfCancelled()
     // The audio's time 0: WebM timestamps start at the first recorded sample.
     this.startedAt = performance.now()
     this.recording = true
@@ -130,42 +175,28 @@ export class LiveCapture {
     mic.getAudioTracks()[0]?.addEventListener('ended', () =>
       this.ended('microphone-ended', 'The microphone was disconnected, so the recording was finished.'),
     )
-    window.addEventListener('beforeunload', this.onBeforeUnload)
-    window.addEventListener('pagehide', this.onPageHide)
-    this.startFrames(display)
+    this.env.page.addEventListener('beforeunload', this.onBeforeUnload)
+    this.env.page.addEventListener('pagehide', this.onPageHide)
+    const track = display.getVideoTracks()[0]
+    if (track) {
+      this.stopFrames = this.env.captureFrames(track, (jpeg, at) => {
+        if (!this.recording) return
+        this.queue.add('frame', `frame?t=${((at - this.startedAt) / 1000).toFixed(3)}`, jpeg)
+      })
+    }
     return display
+  }
+
+  private throwIfCancelled() {
+    if (this.cancelled) throw new CaptureError('Recording was cancelled before it started.')
   }
 
   /** The mic alone, or the mic mixed with the shared tab/system audio into one track. */
   private audioToRecord(display: MediaStream, mic: MediaStream): MediaStream {
     if (!display.getAudioTracks().length) return mic
-    this.audioCtx = new AudioContext()
-    void this.audioCtx.resume()
-    const dest = this.audioCtx.createMediaStreamDestination()
-    for (const s of [display, mic]) this.audioCtx.createMediaStreamSource(s).connect(dest)
-    return dest.stream
-  }
-
-  private startFrames(display: MediaStream) {
-    const track = display.getVideoTracks()[0]
-    if (!track) return
-    const grabber = frameGrabber(track)
-    this.grabber = grabber
-    const canvas = document.createElement('canvas')
-    let busy = false
-    this.stopTicker = startTicker(FRAME_INTERVAL_MS, async () => {
-      if (busy || !this.recording) return
-      busy = true
-      try {
-        const t = (performance.now() - this.startedAt) / 1000
-        const blob = await grabber.grab(canvas)
-        if (blob && this.recording) this.queue.add('frame', `frame?t=${t.toFixed(3)}`, blob)
-      } catch {
-        // No frame this tick (e.g. the shared window is minimised); try again next tick.
-      } finally {
-        busy = false
-      }
-    })
+    const mixed = this.env.mixAudio([display, mic])
+    this.mixer = mixed
+    return mixed.stream
   }
 
   private ended(reason: EndReason, message: string) {
@@ -175,9 +206,15 @@ export class LiveCapture {
   }
 
   private async finish(): Promise<void> {
+    if (this.opening) {
+      // start() sees the flag after its current await, then releases and discards the session.
+      this.cancelled = true
+      await this.opening.catch(() => {})
+      return
+    }
     if (this.recording) {
       this.recording = false
-      this.stopTicker?.()
+      this.stopFrames?.()
       const recorder = this.recorder
       if (recorder && recorder.state !== 'inactive') {
         const stopped = new Promise((resolve) => recorder.addEventListener('stop', resolve, { once: true }))
@@ -186,7 +223,7 @@ export class LiveCapture {
       }
       this.release()
     }
-    const pending = await this.queue.drain(DRAIN_TIMEOUT_MS)
+    const pending = await this.queue.drain(this.options.drainTimeoutMs ?? DRAIN_TIMEOUT_MS)
     if (pending) {
       throw new EndSessionError(
         `${pending} uploads haven't reached Iris yet. Check the backend is running, then try again.`,
@@ -194,42 +231,51 @@ export class LiveCapture {
     }
     const rejectedAudio = this.queue.rejected.filter((r) => r.kind === 'audio')
     if (rejectedAudio.length) console.warn('Iris rejected audio chunks; they become silence', rejectedAudio)
-    await endLiveSession(this.sessionId, {
-      audioChunks: this.seq,
-      allowGaps: rejectedAudio.length > 0,
-    })
+    const request = { audioChunks: this.seq, allowGaps: rejectedAudio.length > 0 }
+    try {
+      await endLiveSession(this.sessionId, request, this.env.fetch)
+    } catch (err) {
+      if (!(err instanceof MissingAudioError)) throw err
+      // Every upload was acknowledged, so there is nothing left to resend: finish with silence
+      // where the backend is missing audio rather than leave the session stuck recording.
+      console.warn('Iris is missing audio chunks; they become silence', err.missing)
+      await endLiveSession(this.sessionId, { ...request, allowGaps: true }, this.env.fetch)
+    }
     this.finished = true
-    window.removeEventListener('beforeunload', this.onBeforeUnload)
-    window.removeEventListener('pagehide', this.onPageHide)
+    this.env.page.removeEventListener('beforeunload', this.onBeforeUnload)
+    this.env.page.removeEventListener('pagehide', this.onPageHide)
   }
 
-  /** Stop devices and timers. Uploads already queued carry on. */
+  /** Stop devices, timers and the recorder. Uploads already queued carry on. */
   private release() {
-    this.stopTicker?.()
-    this.stopTicker = undefined
-    this.grabber?.close()
-    this.grabber = undefined
+    this.stopFrames?.()
+    this.stopFrames = undefined
+    if (this.recorder && this.recorder.state !== 'inactive') {
+      this.recorder.ondataavailable = null // a start that was cancelled: nothing to upload
+      this.recorder.stop()
+    }
     this.streams.forEach((s) => s.getTracks().forEach((t) => t.stop()))
     this.streams = []
-    void this.audioCtx?.close().catch(() => {})
-    this.audioCtx = undefined
+    this.mixer?.close()
+    this.mixer = undefined
   }
 
-  private onBeforeUnload = (e: BeforeUnloadEvent) => {
+  private onBeforeUnload = (e: Event) => {
     if (this.finished) return
     e.preventDefault()
-    e.returnValue = '' // older browsers need this to show the "leave site?" prompt
+    // Older browsers need returnValue set to show the "leave site?" prompt.
+    ;(e as BeforeUnloadEvent).returnValue = ''
   }
 
   /** The page is going away anyway: end with what has arrived, rather than leave it recording. */
   private onPageHide = () => {
     if (this.finished) return
     const body = new Blob([JSON.stringify({ allow_gaps: true })], { type: 'application/json' })
-    navigator.sendBeacon(`/api/live/${this.sessionId}/end`, body)
+    this.env.sendBeacon(`/api/live/${this.sessionId}/end`, body)
   }
 }
 
-async function getDisplay(devices: MediaDevices): Promise<MediaStream> {
+async function getDisplay(devices: Pick<MediaDevices, 'getDisplayMedia'>): Promise<MediaStream> {
   try {
     return await devices.getDisplayMedia({ video: true, audio: true })
   } catch (err) {
@@ -244,6 +290,44 @@ async function getDisplay(devices: MediaDevices): Promise<MediaStream> {
   } catch (err) {
     throw new CaptureError(describeCaptureError(err, 'screen'), { cause: err })
   }
+}
+
+// --- Browser implementations of CaptureEnv ---------------------------------------------------
+
+function mixAudio(streams: MediaStream[]): { stream: MediaStream; close(): void } {
+  const ctx = new AudioContext()
+  void ctx.resume()
+  const dest = ctx.createMediaStreamDestination()
+  for (const s of streams) ctx.createMediaStreamSource(s).connect(dest)
+  return { stream: dest.stream, close: () => void ctx.close().catch(() => {}) }
+}
+
+function captureFrames(track: MediaStreamTrack, onFrame: (jpeg: Blob, at: number) => void): () => void {
+  const grabber = frameGrabber(track)
+  const canvas = document.createElement('canvas')
+  let busy = false
+  const stopTicker = startTicker(FRAME_INTERVAL_MS, async () => {
+    if (busy) return
+    busy = true
+    try {
+      const at = performance.now()
+      const jpeg = await grabber.grab(canvas)
+      if (jpeg) onFrame(jpeg, at)
+    } catch {
+      // No frame this tick (e.g. the shared window is minimised); try again next tick.
+    } finally {
+      busy = false
+    }
+  })
+  return () => {
+    stopTicker()
+    grabber.close()
+  }
+}
+
+interface FrameGrabber {
+  grab(canvas: HTMLCanvasElement): Promise<Blob | null>
+  close(): void
 }
 
 interface ImageCaptureLike {

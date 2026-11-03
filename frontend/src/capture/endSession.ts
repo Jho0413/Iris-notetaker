@@ -17,6 +17,16 @@ export class EndSessionError extends Error {
   }
 }
 
+/** The backend has not received every audio chunk; `missing` lists (some of) their seqs. */
+export class MissingAudioError extends EndSessionError {
+  readonly missing: number[]
+  constructor(message: string, missing: number[]) {
+    super(message)
+    this.name = 'MissingAudioError'
+    this.missing = missing
+  }
+}
+
 /** Ask the backend to stop recording and process the session. Safe to call again on failure. */
 export async function endLiveSession(
   sessionId: string,
@@ -37,8 +47,14 @@ export async function endLiveSession(
   if (res.status === 409) {
     const detail = ((await res.json().catch(() => null)) as { detail?: unknown } | null)?.detail
     if (detail && typeof detail === 'object' && 'missing_audio_chunks' in detail) {
-      const message = (detail as { message?: string }).message ?? 'audio chunks are missing'
-      throw new EndSessionError(`Iris has not received all the audio yet (${message}).`)
+      const { message, missing_audio_chunks: missing } = detail as {
+        message?: string
+        missing_audio_chunks?: number[]
+      }
+      throw new MissingAudioError(
+        `Iris has not received all the audio yet (${message ?? 'audio chunks are missing'}).`,
+        Array.isArray(missing) ? missing : [],
+      )
     }
     // Not recording: an earlier end request may have succeeded without its response arriving.
     const session = await fetchFn(`/api/sessions/${sessionId}`).catch(() => null)

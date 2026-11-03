@@ -185,6 +185,19 @@ def onset(samples: np.ndarray, after_s: float) -> int:
     return start + int(np.argmax(np.abs(samples[start:]) > 3000))
 
 
+@pytest.mark.parametrize("partial_id", [0, 2])
+def test_header_only_first_chunk_then_a_gap(paths: SessionPaths, webm: bytes, partial_id: int):
+    # MediaRecorder's first chunk can be the header alone (possibly ending with part of the next
+    # Cluster ID); losing chunk 1 must not lose the rest of the recording.
+    header_end = webm.find(CLUSTER_ID) + partial_id
+    chunks = [webm[:header_end], *split(webm[header_end:], 2000)]
+    write_chunks(paths, chunks, skip={1})
+    duration = finalize_audio(audio_chunks(paths), paths.audio, 16_000)
+    samples = read_wav(paths.audio)
+    assert duration == pytest.approx(SECONDS, abs=0.1)
+    assert loud(samples, 2) and loud(samples, 4) and not loud(samples, 5)
+
+
 def test_runs_split_at_missing_chunks(tmp_path: Path):
     p = [tmp_path / str(i) for i in range(6)]
     chunks = [(0, p[0]), (1, p[1]), (3, p[3]), (4, p[4]), (5, p[5])]

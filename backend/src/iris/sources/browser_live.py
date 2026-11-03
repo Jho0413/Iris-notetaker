@@ -235,12 +235,23 @@ def find_cluster(files: Sequence[Path], limit: int | None = None) -> tuple[int, 
 
 
 def stream_header(files: Sequence[Path]) -> bytes | None:
-    """The bytes before the first cluster: what a stream needs to decode a later cluster."""
+    """The bytes before the first cluster: what a stream needs to decode a later cluster.
+
+    If ``files`` hold no complete cluster (MediaRecorder's first chunk can be header only), all of
+    them are the header, minus any partial Cluster ID at the end. None if that is implausibly
+    large for a header.
+    """
     found = find_cluster(files, MAX_HEADER_BYTES)
-    if found is None:
+    if found is not None:
+        index, offset = found
+        return b"".join(p.read_bytes() for p in files[:index]) + files[index].read_bytes()[:offset]
+    if sum(p.stat().st_size for p in files) > MAX_HEADER_BYTES:
         return None
-    index, offset = found
-    return b"".join(p.read_bytes() for p in files[:index]) + files[index].read_bytes()[:offset]
+    data = b"".join(p.read_bytes() for p in files)
+    for k in range(len(CLUSTER_ID) - 1, 0, -1):
+        if data.endswith(CLUSTER_ID[:k]):
+            return data[:-k]
+    return data
 
 
 def finalize_audio(chunks: Sequence[tuple[int, Path]], dest: Path, rate: int) -> float:
@@ -260,7 +271,8 @@ def finalize_audio(chunks: Sequence[tuple[int, Path]], dest: Path, rate: int) ->
     try:
         with wave.open(str(tmp), "wb") as out:
             wav = PlacedWav(out, rate)
-            _decode_run([(p, 0) for p in runs[0]], wav, first=True)
+            # A first run that can't be opened is only fatal if nothing follows it.
+            _decode_run([(p, 0) for p in runs[0]], wav, required=len(runs) == 1)
             header = stream_header(runs[0]) if len(runs) > 1 else None
             for run in runs[1:]:
                 found = find_cluster(run)
@@ -269,7 +281,7 @@ def finalize_audio(chunks: Sequence[tuple[int, Path]], dest: Path, rate: int) ->
                     continue
                 index, offset = found
                 rest = [(p, 0) for p in run[index + 1 :]]
-                _decode_run([header, (run[index], offset), *rest], wav, first=False)
+                _decode_run([header, (run[index], offset), *rest], wav, required=False)
             wav.flush()
     except BaseException:
         tmp.unlink(missing_ok=True)
@@ -321,15 +333,18 @@ class PlacedWav:
         self.samples += frame.samples
 
 
-def _decode_run(parts: Sequence[Part], wav: PlacedWav, *, first: bool) -> None:
-    """Decode one stream (the first run, or the header plus a later run) into ``wav``."""
+def _decode_run(parts: Sequence[Part], wav: PlacedWav, *, required: bool) -> None:
+    """Decode one stream (the first run, or the header plus a later run) into ``wav``.
+
+    If the stream can't be opened, raise when ``required``, else log and skip it.
+    """
     with ChunkReader(parts) as reader:
         try:
             container = av.open(reader)
         except av.FFmpegError as e:
-            if first:
+            if required:
                 raise ValueError("the live audio is not a readable recording") from e
-            log.warning("skipping live audio after a gap that could not be opened: %s", e)
+            log.warning("skipping live audio that could not be opened: %s", e)
             return
         with container:
             if not container.streams.audio:

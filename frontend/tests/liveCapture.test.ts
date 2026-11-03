@@ -1,0 +1,297 @@
+// LiveCapture lifecycle with fake browser APIs (no real devices, recorder or network).
+import assert from 'node:assert/strict'
+import test from 'node:test'
+import { CaptureError } from '../src/capture/captureErrors.ts'
+import { LiveCapture } from '../src/capture/liveCapture.ts'
+
+class FakeTrack extends EventTarget {
+  kind: string
+  stopped = false
+  constructor(kind: string) {
+    super()
+    this.kind = kind
+  }
+  stop() {
+    this.stopped = true
+  }
+}
+
+function stream(...tracks: FakeTrack[]) {
+  return {
+    getTracks: () => tracks,
+    getAudioTracks: () => tracks.filter((t) => t.kind === 'audio'),
+    getVideoTracks: () => tracks.filter((t) => t.kind === 'video'),
+  }
+}
+
+class FakeRecorder extends EventTarget {
+  static isTypeSupported = () => true
+  static created: FakeRecorder[] = []
+  state = 'inactive'
+  ondataavailable: ((e: { data: Blob }) => void) | null = null
+  onerror: (() => void) | null = null
+  constructor() {
+    super()
+    FakeRecorder.created.push(this)
+  }
+  start() {
+    this.state = 'recording'
+    queueMicrotask(() => this.dispatchEvent(new Event('start')))
+  }
+  emit(text: string) {
+    this.ondataavailable?.({ data: new Blob([text]) })
+  }
+  stop() {
+    this.state = 'inactive'
+    this.emit('last') // MediaRecorder delivers the final chunk before 'stop'
+    queueMicrotask(() => this.dispatchEvent(new Event('stop')))
+  }
+}
+
+interface Call {
+  url: string
+  method: string
+  body?: unknown
+}
+
+function setup(overrides: Record<string, unknown> = {}) {
+  FakeRecorder.created = []
+  const calls: Call[] = []
+  const beacons: { url: string; body: Blob }[] = []
+  const display = new FakeTrack('video')
+  const mic = new FakeTrack('audio')
+  let onFrame: ((jpeg: Blob, at: number) => void) | undefined
+  let failing = (_url: string) => false
+  const env = {
+    mediaDevices: {
+      getDisplayMedia: async () => stream(display),
+      getUserMedia: async () => stream(mic),
+    },
+    MediaRecorder: FakeRecorder,
+    fetch: async (url: string, init?: RequestInit) => {
+      if (failing(url)) throw new TypeError('Failed to fetch')
+      calls.push({ url, method: init?.method ?? 'GET', body: init?.body })
+      const status = url.includes('/audio') || url.includes('/frame') || init?.method === 'DELETE' ? 204 : 200
+      return new Response(status === 204 ? null : JSON.stringify({ status: 'processing' }), { status })
+    },
+    sendBeacon: (url: string, body: Blob) => {
+      beacons.push({ url, body })
+      return true
+    },
+    page: new EventTarget(),
+    mixAudio: () => ({ stream: stream(), close() {} }),
+    captureFrames: (_track: unknown, cb: (jpeg: Blob, at: number) => void) => {
+      onFrame = cb
+      return () => {}
+    },
+    ...overrides,
+  }
+  return {
+    env,
+    calls,
+    beacons,
+    display,
+    mic,
+    frame: (at: number) => onFrame?.(new Blob(['jpeg']), at),
+    failWhen: (f: (url: string) => boolean) => (failing = f),
+    posted: (part: string) => calls.filter((c) => c.method === 'POST' && c.url.includes(part)),
+  }
+}
+
+const fast = { drainTimeoutMs: 200, uploads: { baseDelayMs: 1, maxDelayMs: 5 } }
+
+function capture(env: object, options = {}) {
+  // The fake env stands in for the browser APIs; its shapes are only what LiveCapture uses.
+  return new LiveCapture('s1', { ...fast, ...options }, env as never)
+}
+
+test('records, then stop uploads the last chunk and ends with the chunk count', async () => {
+  const t = setup()
+  const live = capture(t.env)
+  await live.start()
+  const recorder = FakeRecorder.created[0]
+  recorder.emit('a')
+  recorder.emit('b')
+  t.frame(performance.now())
+  await live.stop()
+
+  assert.deepEqual(
+    t.posted('/audio').map((c) => c.url),
+    ['/api/live/s1/audio?seq=0', '/api/live/s1/audio?seq=1', '/api/live/s1/audio?seq=2'],
+  )
+  assert.equal(t.posted('/frame').length, 1)
+  const end = t.posted('/end')
+  assert.equal(end.length, 1)
+  assert.deepEqual(JSON.parse(end[0].body as string), { audio_chunks: 3, allow_gaps: false })
+  assert.ok(t.display.stopped && t.mic.stopped)
+  // Finished: leaving the page no longer ends anything, and frames are no longer queued.
+  t.env.page.dispatchEvent(new Event('pagehide'))
+  t.frame(performance.now())
+  assert.equal(t.beacons.length, 0)
+  assert.equal(t.posted('/frame').length, 1)
+})
+
+test('stop called twice ends once', async () => {
+  const t = setup()
+  const live = capture(t.env)
+  await live.start()
+  const [a, b] = [live.stop(), live.stop()]
+  assert.equal(a, b)
+  await a
+  assert.equal(t.posted('/end').length, 1)
+})
+
+test('a failed stop can be retried without losing what was recorded', async () => {
+  const t = setup()
+  const live = capture(t.env)
+  await live.start()
+  FakeRecorder.created[0].emit('a')
+  t.failWhen((url) => url.includes('/audio'))
+  await assert.rejects(live.stop(), /haven't reached Iris/)
+  assert.equal(t.posted('/end').length, 0)
+
+  t.failWhen(() => false) // the backend is back
+  await live.stop()
+  assert.equal(t.posted('/audio').length, 2)
+  assert.deepEqual(JSON.parse(t.posted('/end')[0].body as string), { audio_chunks: 2, allow_gaps: false })
+})
+
+test('a failed end request can be retried', async () => {
+  const t = setup()
+  const live = capture(t.env)
+  await live.start()
+  t.failWhen((url) => url.endsWith('/end'))
+  await assert.rejects(live.stop(), /Could not reach Iris/)
+  t.failWhen(() => false)
+  await live.stop()
+  assert.equal(t.posted('/end').length, 1)
+})
+
+test('screen sharing stopped from the browser calls onEnded once', async () => {
+  const t = setup()
+  const reasons: string[] = []
+  const live = capture(t.env, { onEnded: (reason: string) => reasons.push(reason) })
+  await live.start()
+  t.display.dispatchEvent(new Event('ended'))
+  assert.deepEqual(reasons, ['screen-share-ended'])
+  const stopping = live.stop()
+  t.mic.dispatchEvent(new Event('ended')) // ignored while stopping
+  await stopping
+  assert.deepEqual(reasons, ['screen-share-ended'])
+})
+
+test('without an onEnded handler, capture finishes itself when sharing stops', async () => {
+  const t = setup()
+  const live = capture(t.env)
+  await live.start()
+  t.display.dispatchEvent(new Event('ended'))
+  await new Promise((r) => setTimeout(r, 20))
+  assert.equal(t.posted('/end').length, 1)
+})
+
+test('leaving the page while recording ends the session with what arrived', async () => {
+  const t = setup()
+  await capture(t.env).start()
+  const unload = new Event('beforeunload', { cancelable: true })
+  t.env.page.dispatchEvent(unload)
+  assert.equal(unload.defaultPrevented, true) // the browser asks "leave site?"
+  t.env.page.dispatchEvent(new Event('pagehide'))
+  assert.equal(t.beacons.length, 1)
+  assert.equal(t.beacons[0].url, '/api/live/s1/end')
+  assert.deepEqual(JSON.parse(await t.beacons[0].body.text()), { allow_gaps: true })
+})
+
+test('screen sharing denied: the mic is not requested and the empty session is deleted', async () => {
+  let micAsked = false
+  const t = setup({
+    mediaDevices: {
+      getDisplayMedia: async () => {
+        throw new DOMException('Permission denied', 'NotAllowedError')
+      },
+      getUserMedia: async () => {
+        micAsked = true
+        return stream()
+      },
+    },
+  })
+  await assert.rejects(capture(t.env).start(), (err: unknown) =>
+    err instanceof CaptureError && /Screen sharing was cancelled/.test(err.message),
+  )
+  assert.equal(micAsked, false)
+  await new Promise((r) => setTimeout(r, 0))
+  assert.deepEqual(t.calls.map((c) => `${c.method} ${c.url}`), ['DELETE /api/sessions/s1'])
+})
+
+test('mic denied: the screen share is released and the session deleted', async () => {
+  const display = new FakeTrack('video')
+  const t = setup({
+    mediaDevices: {
+      getDisplayMedia: async () => stream(display),
+      getUserMedia: async () => {
+        throw new DOMException('Permission denied', 'NotAllowedError')
+      },
+    },
+  })
+  await assert.rejects(capture(t.env).start(), /Microphone access was blocked/)
+  assert.equal(display.stopped, true)
+  assert.equal(FakeRecorder.created.length, 0)
+  await new Promise((r) => setTimeout(r, 0))
+  assert.deepEqual(t.calls.map((c) => `${c.method} ${c.url}`), ['DELETE /api/sessions/s1'])
+})
+
+test('stop while the mic prompt is open cancels the start instead of recording', async () => {
+  let grantMic: (s: unknown) => void = () => {}
+  const mic = new FakeTrack('audio')
+  const t = setup({
+    mediaDevices: {
+      getDisplayMedia: async () => stream(t.display),
+      getUserMedia: () => new Promise((resolve) => (grantMic = resolve)),
+    },
+  })
+  const live = capture(t.env)
+  const starting = live.start()
+  await new Promise((r) => setTimeout(r, 0)) // now waiting on the mic prompt
+  const stopping = live.stop()
+  grantMic(stream(mic)) // the user allows the mic after leaving the page
+  await assert.rejects(starting, /cancelled/)
+  await stopping
+  assert.equal(FakeRecorder.created.length, 0)
+  assert.ok(t.display.stopped && mic.stopped)
+  assert.equal(t.posted('/end').length, 0)
+  assert.equal(t.calls.filter((c) => c.method === 'DELETE').length, 1)
+})
+
+test('no WebM support: a clear error before asking for anything', async () => {
+  class NoWebm extends FakeRecorder {
+    static isTypeSupported = () => false
+  }
+  const t = setup({ MediaRecorder: NoWebm })
+  await assert.rejects(capture(t.env).start(), /can't record WebM audio/)
+})
+
+test('if the backend still misses audio after every upload landed, it ends with gaps', async () => {
+  const ends: unknown[] = []
+  const t = setup()
+  const env = {
+    ...t.env,
+    fetch: async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/end')) {
+        const body = JSON.parse(init!.body as string)
+        ends.push(body)
+        if (!body.allow_gaps) {
+          const detail = { message: '1 audio chunks are missing', missing_audio_chunks: [0] }
+          return new Response(JSON.stringify({ detail }), { status: 409 })
+        }
+        return new Response('{}', { status: 200 })
+      }
+      return new Response(null, { status: 204 })
+    },
+  }
+  const live = capture(env)
+  await live.start()
+  await live.stop()
+  assert.deepEqual(ends, [
+    { audio_chunks: 1, allow_gaps: false },
+    { audio_chunks: 1, allow_gaps: true },
+  ])
+})
