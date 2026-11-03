@@ -37,7 +37,8 @@ discussed is placed in the notes next to what was said about it.
   illustrations, or a cleaned-up screenshot where the screen is already clean
 - No restriction on visual type; each visual uses whichever renderer fits it best
 - Accurate to the session: every redraw is checked against the source frames and transcript before it
-  is used. Source frames stay on disk for verification and regeneration, not in the notes
+  is used. If no redraw passes, the original crop is shown instead. Source frames stay on disk for
+  verification and regeneration
 
 ### Notes
 - Worked examples are written step by step: what was written, why, with the visual for that step
@@ -66,7 +67,8 @@ PyAV ships with FFmpeg built in.
 make setup                        # install backend + frontend deps
 cp backend/.env.example backend/.env   # add OPENAI_API_KEY
 make dev                          # API on :8000, UI on http://localhost:5173
-make test                         # backend tests + frontend typecheck
+make test                         # backend tests, frontend tests and typecheck
+make lint                         # ruff + frontend lint (CI also runs build)
 make gen-api                      # regenerate the UI's typed client after API changes
 ```
 
@@ -86,16 +88,25 @@ backend/src/iris/
   api/            FastAPI routes: sessions, live input, SSE progress events, health
   sources/        upload + browser live: turn input into audio.wav + frames/ in a session
   pipeline/
-    stages/       transcribe, detect, align, select, write, render, assemble (one file in, one out)
+    stages/       transcribe, detect, align, select, write, render, assemble (read session files,
+                  write their own)
     __init__.py   stage registry and PLAN (stage order; groups run concurrently)
-    live.py       incremental processing while a live session runs
+    live.py       incremental processing while a live session runs (not implemented yet)
   jobs/runner.py  runs a session's PLAN as an asyncio task, publishes progress
-  store/          SQLite session index + on-disk session folder layout
+  store/          SQLite session index + on-disk session folder layout (layout.py lists every file)
   llm/            OpenAI client
+  config.py       Settings (IRIS_* environment variables, see backend/.env.example)
+  cli.py          the `iris` command
+  events.py       progress event bus
+  svg.py          sanitizing and rasterizing model-written SVG
+  markdown.py     math-safe markdown helpers
+  export.py       Markdown export with embedded figures
   models.py       shared types: API models and every stage's output format
 frontend/src/
   api/            typed client (generated from OpenAPI) + SSE hook
   capture/        browser mic + screen-share capture
+  components/     notes view (Markdown, KaTeX, figures) and stage progress
+  notes/          rehype transform for step cards, callouts and figures
   pages/          library, upload, live, session (notes view)
 ```
 
@@ -109,7 +120,8 @@ summary of already captured content is passed to later batches so nothing is lis
 `selection_batches/` directory; unchanged batches are reused after failures and on reruns.
 Transcript context is limited to 24,000 characters per batch, divided across its moments.
 Long context is explicitly marked as excerpts sampled from the start, middle, and end; the full
-transcript remains on disk for note writing. OCR context is limited to 1,000 characters per moment.
+transcript remains on disk for note writing. OCR context (not populated yet; RapidOCR is planned
+for alignment) is limited to 1,000 characters per moment.
 Selection outputs and progress events are saved after each batch.
 
 Note writing uses `IRIS_NOTES_MODEL` to produce meeting, lecture or demo notes from what was said
@@ -128,11 +140,13 @@ partial draft display in the UI and live processing remain future work.
 Rendering runs alongside note writing and rebuilds every figure professionally: `IRIS_DIAGRAM_MODEL`
 draws exact figures (graphs, charts, schematics) as sanitized SVG, and `IRIS_IMAGE_MODEL` draws
 realistic or illustrative figures from the brief. Figures that are already clean, or too detailed to
-redraw reliably (architecture diagrams, detailed maps, dense charts), are kept as sharp screenshots. `IRIS_VISION_MODEL` checks each result against the source and
-the brief; failures are retried with the problems as feedback (`IRIS_RENDER_ATTEMPTS` per renderer),
-then the other renderer is tried, and only if nothing passes is the source crop used (recorded in
-`renders.json` as unverified). Source crops stay on disk, never in the notes. Exports embed SVG
-figures as PNG, since Markdown viewers reject SVG data URIs.
+redraw reliably (architecture diagrams, detailed maps, dense charts), are kept as sharp screenshots.
+`IRIS_VISION_MODEL` checks each result against the source and the brief; failures are retried with
+the problems as feedback (`IRIS_RENDER_ATTEMPTS` per renderer), then the other renderer is tried.
+Notes never show a redraw that failed its check: if nothing passes, the source crop is used and
+recorded in `renders.json` as unverified. Up to `IRIS_RENDER_CONCURRENCY` figures render at once.
+Model-written SVG is sanitized before it is stored. Exports embed SVG figures as PNG, since Markdown
+viewers reject SVG data URIs.
 
 Session data lives in `backend/data/` (`iris.db` plus `sessions/<id>/`).
 
