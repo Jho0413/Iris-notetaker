@@ -184,3 +184,13 @@ def test_sanitize_svg_removes_active_and_external_content():
 def test_sanitize_svg_rejects_unsafe_or_invalid(svg):
     with pytest.raises(ValueError):
         sanitize_svg(svg)
+
+
+async def test_stale_renders_from_earlier_runs_are_removed(setup):
+    ctx, _, _, verdicts, _ = setup
+    (ctx.paths.root / "visuals/v9.svg").write_text("old")
+    (ctx.paths.root / "visuals/v1.png").write_bytes(b"old renderer output")
+    verdicts.append(ok())
+    await render.run(ctx)
+    names = sorted(p.name for p in ctx.paths.visuals_dir.iterdir())
+    assert names == ["v1.source.jpg", "v1.svg"]

@@ -56,23 +56,33 @@ Element kinds and content:
   written line, so a worked solution keeps its steps.
 - text: words on screen as Markdown (titles, bullets, labels, handwritten notes). Describe
   annotations such as arrows or circled terms in words, saying what they point to
-  (e.g. "Arrow from 6x to 3, labelled 'halved'").
+  (e.g. "Arrow from the first term to the result, labelled 'doubled'").
 - table: a Markdown table. code: source code exactly as shown.
 - figure: anything drawn or pictured that text cannot capture: diagrams, sketches, graphs, charts,
-  geometry, circuits, illustrations, UI, photos. Drawings connected by arrows or that explain one
-  idea together (a process, a sequence, a labelled scene) are ONE figure, including the labels and
-  annotations around them; only unrelated drawings are separate figures. Labels that belong to a
-  figure go in its description, not in separate text elements. Content is a self-contained brief
-  for an illustrator who will redesign the figure professionally: what it explains (using the
-  transcript), every component, label (spelled out in full where the transcript explains an
-  abbreviation, e.g. "ST" -> "spacetime"), value, axis, arrow and relationship, and how the parts
-  are arranged. Supply region (pixels x,y,w,h, origin top left, inside the image) covering the
-  whole figure with its labels, a short caption, and render_as:
-    svg: exactness matters (function graphs, charts, flowcharts, trees, timelines, geometry,
-      circuits, labelled schematics);
-    image: a polished illustration matters more than exact coordinates (physical scenes, objects,
-      anatomy, natural or conceptual drawings);
-    screenshot: already clean and professional (software UI, photos, rendered slide graphics).
+  geometry, circuits, illustrations, UI, photos. Notes follow the discussion step by step, so when a
+  drawing shows a process or sequence explained in stages (each stage drawn or discussed in turn,
+  often linked by arrows), make ONE figure PER STAGE, in order, each covering that stage's drawing
+  and labels; arrows that only lead to the next stage are not part of a figure. A single scene or
+  object explained as a whole is one figure. Labels that belong to a figure go in its description,
+  not in separate text elements. Content is a self-contained brief for an illustrator who will
+  redesign the figure professionally, describing the subject rather than the sketch's pen marks
+  (name what is drawn, e.g. "a heart", "a web server", not "a circle", "a box"): what it shows and
+  explains (using the transcript, including what the speaker said about this stage), every
+  component, label (spelled out in full where the transcript explains an abbreviation), value,
+  axis, arrow and relationship, how the parts are arranged, and how a professional publication in
+  the subject's field would depict each component. Base all of this on the screen and the
+  transcript; do not add components, labels or facts from outside the session.
+  Supply region (pixels x,y,w,h, origin top left, inside the image) covering the whole figure with
+  its labels, a short caption, and render_as:
+    svg: abstract diagrams where exact values or geometry matter (function graphs, charts,
+      flowcharts, trees, timelines, geometry, circuit diagrams);
+    image: anything real or physical, even when labelled (scenes, places, objects, devices and
+      machines, organisms and anatomy), and conceptual illustrations;
+    screenshot: already clean and professional (software UI, photos, rendered slide graphics), or
+      too detailed or complex to redraw reliably (architecture and system diagrams with many
+      components, detailed maps, dense charts and tables of data, intricate technical drawings),
+      where a redraw could drop or change detail. Such figures need a legible source; a rough
+      hand-drawn sketch is never a screenshot.
   Non-figures use region=null, caption="" and render_as=null.
 
 Never list the same content twice. earlier_content summarises moments before this batch; together
@@ -348,3 +358,7 @@ async def run(ctx: StageContext) -> None:
         write_model(ctx.paths.selection, selection)
     # Also produce a valid output for audio-only sessions without invoking a model.
     write_model(ctx.paths.selection, selection)
+    current = {v.source_path for v in selection.visuals}
+    for path in ctx.paths.visuals_dir.glob("v*.source.jpg"):
+        if f"visuals/{path.name}" not in current:
+            path.unlink(missing_ok=True)  # left by an earlier run with more figures

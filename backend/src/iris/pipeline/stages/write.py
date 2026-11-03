@@ -41,21 +41,30 @@ explain concepts, reasoning and examples. For demos capture the workflow, steps,
 limitations. Write like an excellent textbook or briefing: clear headings (## and ###), short
 paragraphs, precise language, no filler, no meta commentary about the recording.
 
-Worked examples and procedures are written step by step: state the problem first (bold
-"Problem:"), then each step as a bold "Step n: <what is done>" line, the working for that step as
-display math, and one or two sentences on why, drawing on what was said. End with the result in bold
-("Answer:" for a problem). Where the speaker stressed a tip or a common mistake, add a blockquote
+Follow the discussion: whatever unfolds in stages is written step by step, each step a bold
+"Step n: <what happens>" line followed by its explanation. This covers worked examples and
+procedures, and also processes, sequences of events, and how-it-works explanations. For a worked
+example, state the problem first (bold "Problem:"), give each step's working as display math with
+one or two sentences on why, drawing on what was said, and end with the result in bold ("Answer:").
+For a process or sequence, introduce it in one or two sentences, then give each stage as a step
+with what happens and why, and place that stage's visual right after its step (a visual of one
+stage belongs to that step); end with a bold "Result:" or "Summary:" line when the speaker drew a
+conclusion. Where the speaker stressed a tip or a common mistake, add a blockquote
 starting "**Key idea:**" or "**Watch out:**". Callouts restate what was said or shown; they never
 add outside knowledge.
 
-Math: all mathematics in LaTeX, $...$ inline and $$...$$ for display on lines of their own. Never
+Math: all mathematics in LaTeX, $...$ inline and $$...$$ for display on lines of their own. Plain
+quantities in prose ("about 1 billion years") are ordinary text, not math. Never
 use \\( \\) or \\[ \\], and never put math in code blocks.
 
 Format: CommonMark with GFM tables. No raw HTML, Markdown images or [visual:...] markers. Return
 blocks of markdown and the visual_ids that belong immediately after each block. Place each visual
-as early as it helps: right after the first paragraph that introduces what it shows, never at the
-end. A figure of a whole process goes after the paragraph that introduces the process. Only use
-supplied visual IDs and include each exactly once.
+right after the text it illustrates, never at the end: a visual of one stage or step goes inside
+that step, attached to the block holding that step's explanation (never to the introduction or a
+previous step). Write each step as its own block, so its visual can follow it: an introduction
+block, then a "Step 1" block with visual_ids of stage 1, then a "Step 2" block with stage 2's, and
+so on; an introduction before the steps has no visual_ids. Any other visual goes after the first
+paragraph that introduces what it shows. Only use supplied visual IDs and include each exactly once.
 Captions and descriptions describe images; do not claim they were spoken.
 Long sessions have multiple parts: write notes for this part only, without claiming that it covers
 the entire session. Avoid repeated overall introductions and conclusions. When a title is supplied

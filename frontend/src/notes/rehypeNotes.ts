@@ -28,7 +28,7 @@ function card(node: RootContent): Card | null {
   const t = lead(node)
   if (/^problem\b/i.test(t)) return 'problem'
   if (/^step\s*\d+/i.test(t)) return 'step'
-  if (/^(answer|result)\b/i.test(t)) return 'answer'
+  if (/^(answer|result|summary)\b/i.test(t)) return 'answer'
   return null
 }
 

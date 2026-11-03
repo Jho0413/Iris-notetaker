@@ -125,8 +125,9 @@ saved and a progress event emitted after each section. Final notes become availa
 partial draft display in the UI and live processing remain future work.
 
 Rendering runs alongside note writing and rebuilds every figure professionally: `IRIS_DIAGRAM_MODEL`
-draws exact figures (graphs, charts, schematics) as sanitized SVG, and `IRIS_IMAGE_MODEL` redesigns
-illustrations from the source crop. `IRIS_VISION_MODEL` checks each result against the source and
+draws exact figures (graphs, charts, schematics) as sanitized SVG, and `IRIS_IMAGE_MODEL` draws
+realistic or illustrative figures from the brief. Figures that are already clean, or too detailed to
+redraw reliably (architecture diagrams, detailed maps, dense charts), are kept as sharp screenshots. `IRIS_VISION_MODEL` checks each result against the source and
 the brief; failures are retried with the problems as feedback (`IRIS_RENDER_ATTEMPTS` per renderer),
 then the other renderer is tried, and only if nothing passes is the source crop used (recorded in
 `renders.json` as unverified). Source crops stay on disk, never in the notes. Exports embed SVG
