@@ -86,6 +86,43 @@ Every model call is recorded in the session's `usage.json` (also `GET /api/sessi
 tokens, images, audio seconds, latency and cost from the price table in `config.py`. Calls to
 models missing from the table are reported as unpriced, not guessed. Cached work costs nothing.
 
+### Live capture
+
+On the Live page, Iris asks for a screen, window or tab to share, then for the microphone. Audio is
+uploaded in 5-second chunks and the screen at about one frame per second, on the same clock.
+Failed uploads are retried, and **Stop** waits until everything has arrived before the session is
+processed like an upload. The captured chunks stay in the session folder (`live/`), so a failed run
+can be retried with `uv run iris run <session_id>`.
+
+| Browser (desktop) | Microphone | Shared audio | Status |
+|---|---|---|---|
+| Chrome, Edge | Yes | Tab audio when sharing a tab (keep "Also share tab audio" on). System audio when sharing the entire screen on Windows and ChromeOS. On macOS, tab audio only | Supported. Checked in Chrome 156 (headless, fake devices) |
+| Firefox | Yes | None (Firefox can't share audio) | Expected to work; not checked yet |
+| Safari | Yes | None | Untested; Iris says so if the browser can't record WebM audio |
+
+Shared-audio modes:
+
+- **Mic only:** sharing a window or screen without audio. Only the microphone is recorded.
+- **Mic plus shared audio:** sharing a tab (or a screen, where supported) with audio. Both are mixed
+  into one track. Use headphones, or the mic also picks up the shared audio from your speakers.
+
+What happens when capture is interrupted:
+
+- **Permission denied or picker cancelled:** Iris shows what to allow and discards the empty session.
+  Anything already granted (such as the screen share when the mic is then denied) is stopped.
+- **Sharing stopped, or you leave the Live page or close the tab, before recording starts** (for
+  example while the mic prompt is still open): the start fails, everything granted is stopped and
+  the empty session is discarded.
+- **"Stop sharing" in the browser's own bar, or the mic is disconnected:** the recording finishes and
+  is processed.
+- **Backend unreachable:** uploads are retried. Stop waits up to 30 seconds, then shows an error.
+  The page then shows **Recording stopped**: **Try again** resends what is still queued, then ends
+  the session. Nothing captured is discarded while the tab stays open.
+- **Closing the tab while recording:** the browser asks for confirmation. If you leave, the session
+  is processed with what arrived. If the browser crashes instead, the session stays `recording`;
+  finish it with
+  `curl -X POST http://127.0.0.1:8000/api/live/<session_id>/end`.
+
 ### Layout
 
 ```

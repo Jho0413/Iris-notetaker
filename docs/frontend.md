@@ -118,13 +118,15 @@ later, so this screen is built around *is it still recording?* and *how do I sto
   Microphone on) and **Stop and make notes**. Below it, centred and calm: a large timer, a small
   screen preview, and one line on what happens when you stop. A **Show live transcript** disclosure
   (closed by default) reveals the transcript as it arrives, once live processing emits events (§4).
-- **Screen sharing ended** (the user stopped sharing from the browser bar): Iris stops and makes
-  notes, the same as **Stop and make notes**. This follows the capture module's behaviour.
+- **Screen sharing ended** (the user stopped sharing from the browser bar), the microphone
+  disconnected or the browser's recorder failed: Iris stops and makes notes, the same as **Stop and
+  make notes**. The capture module reports these through its `onEnded` callback.
 - **Stopping:** "Finishing the upload…" with the stop button disabled, then the app goes to the
   session page, which takes over (processing). If capture stopped but the backend couldn't be told
-  to make notes, the page says **Recording stopped**, keeps the error in view and offers **Try
-  again** (which retries only the finish request) and **Open the session**. Nothing captured is
-  lost.
+  to make notes (uploads still queued, or the finish request failed), the page says **Recording
+  stopped**, keeps the error in view and offers **Try again** (which resends what is still queued,
+  then the finish request) and **Open the session**. Nothing captured is lost while the tab stays
+  open.
 - **Leaving while recording:** the browser warns before closing the tab, and in-app navigation asks
   for confirmation, because leaving ends the recording.
 
@@ -135,7 +137,10 @@ later, so this screen is built around *is it still recording?* and *how do I sto
 | Warning (no OpenAI key) | The same banner as elsewhere, before starting |
 
 Capture itself (`src/capture/`) is owned by live-capture work. This screen only calls
-`LiveCapture.start()` and `stop()` and watches the returned screen stream.
+`LiveCapture.start()` and `stop()`, shows the returned screen stream as the preview, and passes an
+`onEnded` callback that stops. It holds the capture from before `start()`, so leaving the page
+during a permission prompt cancels the start; the capture module then releases what was granted
+and deletes the empty session.
 
 ### Session (`/sessions/:id`): processing and finished notes
 
@@ -411,7 +416,7 @@ All of the above uses the existing API and event types, except:
 |---|---|---|
 | `visual_rendered` in the client's event list (`src/api/eventMessage.ts`) | Frontend fix in this work: it is in the schema but was missing from the list, so rendered figures were dropped | n/a |
 | Draft notes text: `GET /api/sessions/{id}/notes/draft` (returns `NotesDraft`) | Planned by live-processing work (phase 2) | The Notes tab shows draft progress ("2 of 4 sections done") without the text. `fetchDraft` in `src/session/draft.ts` is ready; set `DRAFT_ENDPOINT_ENABLED` once the endpoint exists |
-| Ending a crashed live session with gaps (`endLiveSession` with `allow_gaps`) | In the live-capture PR | **Finish and make notes** calls `POST /api/live/{id}/end` without a body; switch to `endLiveSession` once that PR is merged |
+| Ending a crashed live session with gaps (`endLiveSession` with `allow_gaps`) | Done in the live-capture PR. Without a body, `POST /api/live/{id}/end` skips the chunk check and ends with what arrived (missing audio becomes silence) | **Finish and make notes** calls `POST /api/live/{id}/end` without a body, which is already correct for a crashed session; `endLiveSession` is only needed to check the chunk count |
 | Per-session cost and time per stage | Cost-tracking work in progress | The rail's **Cost** slot and the library's **Cost** column are designed but not built; stage times come from events |
 | Verified status for finished sessions without events (`renders.json` via the API) | Not requested yet | Badges show only when known from this run's events |
 | `session.duration_s` set at ingest | Not set by the backend today | The session page takes the length from the transcript's last segment; the library has no Length column |

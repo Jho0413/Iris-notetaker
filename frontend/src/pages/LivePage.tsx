@@ -41,6 +41,7 @@ export function LivePage() {
   const [now, setNow] = useState(0)
   const capture = useRef<LiveCapture | null>(null)
   const stopping = useRef(false)
+  const unmounted = useRef(false)
   const [display, setDisplay] = useState<MediaStream | null>(null)
   const recording = phase === 'recording'
   const elapsed = recording || phase === 'stopping' ? (now - startedAt) / 1000 : 0
@@ -63,8 +64,15 @@ export function LivePage() {
     }
   }, [recording])
 
-  // If the page goes away mid-recording anyway, end the session so it gets processed.
-  useEffect(() => () => void capture.current?.stop().catch(() => {}), [])
+  // If the page goes away mid-recording anyway, end the session so it gets processed. During a
+  // start, stopping cancels it: everything granted is released and the empty session discarded.
+  useEffect(() => {
+    unmounted.current = false
+    return () => {
+      unmounted.current = true
+      void capture.current?.stop().catch(() => {})
+    }
+  }, [])
 
   async function start() {
     setError(null)
@@ -77,12 +85,19 @@ export function LivePage() {
       setError("Can't reach the Iris backend. Start it with make dev, then try again.")
       return
     }
-    const live = new LiveCapture(data.id)
+    if (unmounted.current) {
+      // Left the page while the session was being created: discard it, don't ask for the screen.
+      void api
+        .DELETE('/api/sessions/{session_id}', { params: { path: { session_id: data.id } } })
+        .catch(() => {})
+      return
+    }
+    // Sharing stopped from the browser's own controls, the mic went away or the recorder failed:
+    // finish. Held before start() so leaving the page during a prompt cancels the start.
+    const live = new LiveCapture(data.id, { onEnded: () => void stopRef.current() })
+    capture.current = live
     try {
       const screen = await live.start()
-      capture.current = live
-      // Sharing stopped from the browser's own controls: finish, as the capture module does.
-      screen.getVideoTracks()[0]?.addEventListener('ended', () => void stopRef.current())
       setDisplay(screen)
       setSessionId(data.id)
       const t = Date.now()
@@ -90,33 +105,35 @@ export function LivePage() {
       setNow(t)
       setPhase('recording')
     } catch (err) {
-      // Nothing was captured: remove the empty session so it doesn't clutter the library.
-      void api.DELETE('/api/sessions/{session_id}', { params: { path: { session_id: data.id } } })
+      // Nothing was captured, and the capture module has already discarded the empty session.
+      capture.current = null
       setPhase('idle')
       setError(captureError(err))
     }
   }
 
   /**
-   * Stop capture and hand over to processing. Stopping tears capture down before it tells the
-   * backend to finish, so a failure leaves the recording stopped but unfinished: the page then
-   * offers to retry only the finish request (`finish`). What was captured is already saved.
+   * Stop capture and hand over to processing. Stopping tears capture down, uploads what is still
+   * queued, then tells the backend to finish. A failure leaves the recording stopped but
+   * unfinished: the page then offers to retry (`finish`), which resends what is still queued and
+   * the finish request through the same capture. Resolves to the finished session's id, or null.
    */
-  async function stop(): Promise<boolean> {
+  async function stop(): Promise<string | null> {
     const live = capture.current
-    if (!live || stopping.current) return false
+    if (!live || stopping.current) return null
     stopping.current = true
     setError(null)
     setPhase('stopping')
     try {
       await live.stop()
-      return true
+      capture.current = null
+      return live.sessionId
     } catch (err) {
+      // Kept, so finishing again retries the uploads still queued as well as the end request.
       setPhase('unfinished')
       setError(err instanceof Error && err.message ? err.message : String(err))
-      return false
+      return null
     } finally {
-      capture.current = null
       stopping.current = false
     }
   }
@@ -125,6 +142,18 @@ export function LivePage() {
     if (!sessionId) return
     setPhase('finishing')
     setError(null)
+    const live = capture.current
+    if (live) {
+      try {
+        await live.stop()
+        capture.current = null
+        return navigate(`/sessions/${sessionId}`)
+      } catch (err) {
+        setPhase('unfinished')
+        setError(err instanceof Error && err.message ? err.message : String(err))
+        return
+      }
+    }
     const result = await act(api.POST('/api/live/{session_id}/end', { params: { path: { session_id: sessionId } } }))
     // 409: the session is no longer recording, so an earlier finish request did arrive.
     if (result.ok || result.status === 409) return navigate(`/sessions/${sessionId}`)
@@ -133,7 +162,9 @@ export function LivePage() {
   }
 
   async function stopAndOpen() {
-    if (await stop()) navigate(`/sessions/${sessionId}`)
+    // The id comes from the capture: `sessionId` state can lag if capture ends right after starting.
+    const id = await stop()
+    if (id) navigate(`/sessions/${id}`)
   }
   const stopRef = useRef(stopAndOpen)
   useEffect(() => {
