@@ -5,6 +5,7 @@ Writes: notes.json (Notes), notes.md
 """
 
 import re
+from pathlib import Path
 
 from iris.markdown import escape_text
 from iris.models import EventType, Notes, NotesDraft, Renders, Selection, Visual
@@ -45,18 +46,24 @@ def drop_title_heading(markdown: str, title: str) -> str:
     return markdown
 
 
+def with_renders(visuals: list[Visual], renders: Path) -> list[Visual]:
+    """Point each visual at its render where ``renders.json`` has one; the others keep their
+    selected path (the source crop)."""
+    if not renders.exists():
+        return visuals
+    rendered = {r.id: r for r in read_model(renders, Renders).visuals}
+    return [
+        v.model_copy(update={"path": r.path, "render_as": r.render_as})
+        if (r := rendered.get(v.id))
+        else v
+        for v in visuals
+    ]
+
+
 async def run(ctx: StageContext) -> None:
     draft = read_model(ctx.paths.notes_draft, NotesDraft)
     selection = read_model(ctx.paths.selection, Selection)
-    visuals = selection.visuals
-    if ctx.paths.renders.exists():
-        rendered = {r.id: r for r in read_model(ctx.paths.renders, Renders).visuals}
-        visuals = [
-            v.model_copy(update={"path": r.path, "render_as": r.render_as})
-            if (r := rendered.get(v.id))
-            else v
-            for v in visuals
-        ]
+    visuals = with_renders(selection.visuals, ctx.paths.renders)
     markdown = resolve_markers(drop_title_heading(draft.markdown, draft.title), visuals)
     notes = Notes(
         session_id=ctx.session_id,
