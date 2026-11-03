@@ -177,7 +177,7 @@ class Visual(BaseModel):
     path: str  # final visual, relative to the session folder
     description: str = ""  # what the figure shows; the brief for rendering and verification
     render_as: RenderAs = "screenshot"
-    source_path: str | None = None  # the source crop (kept on disk, never shown in notes)
+    source_path: str | None = None  # the source crop; notes show it only as the render fallback
 
 
 class Selection(BaseModel):

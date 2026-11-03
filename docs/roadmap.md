@@ -185,7 +185,8 @@ hosting, access-control and data-handling requirements.
 
 ## Immediate sequence within milestone 1
 
-1. Merge the pipeline work (`feat/pipeline`) into `main`.
+1. ~~Merge the pipeline work (`feat/pipeline`) into `main`.~~ Done (PR #1), with CI and the review
+   process (PRs #2, #3).
 2. Add cost tracking and controls; confirm where the cost goes and bring sessions within budget.
    Collect the varied recordings alongside, so costs are measured on realistic sessions.
 3. Improve the frontend: write `docs/frontend.md`, then build the designed screens with partial
