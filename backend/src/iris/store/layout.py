@@ -5,6 +5,14 @@ sessions/<id>/
     live/audio/<n>.webm   live audio chunks, by sequence number (browser live source only)
     live/frames/<t_ms>.jpg
                           live screen frames as captured (browser live source only)
+    live/audio.pcm        live: the contiguous audio decoded so far, 16-bit mono at
+                          audio_sample_rate (sample i is at i / rate seconds)
+    live/transcript_windows/<i>_<start_ms>_<end_ms>.json
+                          live: one transcribed window each (cache, like transcript_chunks/)
+    live/transcript.json  live: Transcript committed so far (complete up to transcribed_to)
+    live/frames.json      live: FrameIndex of the normalised frames fed to detection so far
+    live/moments.json     live: Moments closed so far
+    live/selection.json   live: Selection of the moments read so far
     audio.wav             16 kHz mono
     frames/<t_ms>.jpg     sampled frames
     frames.json           FrameIndex
@@ -55,6 +63,35 @@ class SessionPaths:
     @property
     def live_frames_dir(self) -> Path:
         return self.root / "live" / "frames"
+
+    # Live processing outputs (iris/live/). Each lane writes only its own; see the docstring above.
+    @property
+    def live_dir(self) -> Path:
+        return self.root / "live"
+
+    @property
+    def live_pcm(self) -> Path:
+        return self.live_dir / "audio.pcm"
+
+    @property
+    def live_transcript_windows_dir(self) -> Path:
+        return self.live_dir / "transcript_windows"
+
+    @property
+    def live_transcript(self) -> Path:
+        return self.live_dir / "transcript.json"
+
+    @property
+    def live_frame_index(self) -> Path:
+        return self.live_dir / "frames.json"
+
+    @property
+    def live_moments(self) -> Path:
+        return self.live_dir / "moments.json"
+
+    @property
+    def live_selection(self) -> Path:
+        return self.live_dir / "selection.json"
 
     @property
     def audio(self) -> Path:

@@ -113,19 +113,99 @@ moments as they are found, figures as they are rendered, and the notes as they a
 
 ### Life of a session: live
 
-The same stages run incrementally, while the session is happening.
+The same work as an upload, done while the session is happening. What is done live *is* the final
+work: at stop, only the last few seconds are new, so finished notes arrive about a minute after stop
+however long the session was. Live processing is best effort: the captured chunks stay the
+recording, and if anything live fails the session is processed like an upload.
 
-1. **Capture.** The browser records the mic (and tab audio if shared) and the screen share. It sends
-   short audio chunks every few seconds, and screen frames at a low fixed rate. Because the backend is
-   local, bandwidth is not a concern, so change detection stays in one place (Python) rather than
-   being duplicated in the browser.
-2. **Store.** The backend appends audio and frames to the session as they arrive. That is the
-   recording, so a live session can be fully re-processed afterwards like an upload.
-3. **Process as it goes.** The transcript extends every chunk. A moment closes when the screen moves
-   on, which triggers selection for it. The notes are kept as a running draft, updated section by
-   section.
-4. **End.** The last moment closes, the final notes pass runs over the whole session, and the result
-   replaces the draft.
+```
+Browser                    API routes                 LiveProcessor (one per recording, asyncio tasks)
+MediaRecorder 5 s chunks ─▶ POST /live/{id}/audio ─wake─▶ audio lane:  reorder ▸ decode ▸ cut at pauses ▸ transcribe ─┐
+Frame ticker 1 fps ───────▶ POST /live/{id}/frame ─wake─▶ screen lane: hold back ▸ normalise ▸ MomentDetector ─────────┤
+                                                                                                                       ▼
+                                                          live timeline: transcript, moments, selection, watermarks
+                                                                                                                       │
+                                                          select lane: gate ▸ align ▸ select ▸ render (background) ◀──┤
+                                                          draft lane:  horizon ▸ frozen sections + tail ▸ notes_draft ◀┘
+Stop ─────────────────────▶ POST /live/{id}/end ───────▶ job: finish lanes ▸ ingest ▸ promote live outputs ▸ PLAN from write
+Live + Session pages ◀──── SSE events, GET /sessions/{id}/notes/draft
+```
+
+**Capture and store** (unchanged from the live-capture work). The browser posts 5 s WebM chunks
+(`seq` 0, 1, 2, ...) and ~1 fps JPEG frames (`t` = seconds since start, the audio's clock). Each is
+stored atomically under `live/` and never modified; the route then wakes the lane that consumes it
+and returns without waiting for any processing.
+
+**Lanes.** `iris/live/` holds one processor per recording session (`LiveRegistry`, owned by the
+job runner, started at `POST /live`, or on the first chunk after a backend restart). It runs four
+lanes as asyncio tasks. Lanes communicate only through the **live timeline**
+(`iris/live/timeline.py`), which holds what each lane has finished and up to when:
+
+| Watermark | Meaning | Advanced by |
+|---|---|---|
+| `transcribed_to` (T_a) | the transcript is complete up to here | audio lane |
+| `closed_to` (T_m) | every moment that ends by here is closed | screen lane |
+| `selected_to` (T_s) | every closed moment that ends by here has been read | select lane |
+| `horizon` | `min(T_a, T_s)`: evidence before it is final | (derived) |
+
+Lanes wait on watermarks (an `asyncio.Condition`), never poll. A lane that has finished (after
+stop) or failed counts as "through" any time, so nothing downstream waits forever.
+
+| Lane | Input | Does | Publishes |
+|---|---|---|---|
+| **Audio** | `live/audio/*.webm` | Decodes the contiguous run of chunks into one PCM stream (`live/audio.pcm`). Cuts windows at the quietest point 10–30 s after the last cut (never at a chunk edge) and transcribes them, at most `IRIS_LIVE_TRANSCRIBE_CONCURRENCY` at once, each prompted with the previous window's text. Commits windows in order | transcript segments, T_a, `TRANSCRIPT_CHUNK` |
+| **Screen** | `live/frames/*.jpg` | Holds frames back `IRIS_LIVE_FRAME_HOLDBACK_S` to order them, samples them onto the `frame_fps` grid and normalises them exactly as ingest does (size fixed by the first frame), writing `frames/` with ingest's names and bytes, and feeds `MomentDetector` | closed moments, T_m, `MOMENT_FOUND` |
+| **Select** | closed moments + transcript | Gates each moment until T_a ≥ its end + `IRIS_LIVE_SPEECH_PAD_S`, aligns it, and reads it with one select call in flight (moments that close meanwhile go in the next batch, up to `selection_batch_size`). Renders each figure in the background (`IRIS_LIVE_RENDER_CONCURRENCY`); the draft shows the source crop until it passes | contents, visuals, T_s, `VISUAL_SELECTED`, `VISUAL_RENDERED` |
+| **Draft** | timeline | Packs evidence before the horizon into sections like write does. A section is *frozen* once the horizon passes a moment boundary beyond its budget, and written once (cached in `notes_sections/`); the open *tail* is rewritten at most every `IRIS_LIVE_DRAFT_REFRESH_S` | `notes_draft.json`, `NOTES_UPDATED` |
+
+**Joining what was split.** Inputs arrive in pieces, so each lane has a rule for putting them back
+together:
+
+- *Words split across chunks:* raw chunks are never transcribed (only chunk 0 has the WebM header,
+  and edges fall mid-word). Windows are cut at pauses in the decoded stream, and the previous
+  window's text is passed as the prompt.
+- *Late, repeated or lost chunks:* the decoder only consumes the contiguous run of `seq`. A missing
+  chunk is waited for `IRIS_LIVE_AUDIO_GAP_WAIT_S` (longer than the browser's upload timeout plus a
+  retry), then decoding resumes at the next WebM cluster and the gap is silence, as in ingest.
+  Frames are ordered by holding them back briefly; a frame later than that is skipped live.
+- *Content built up over time:* `MomentDetector` keeps a slide build or a worked example as one
+  moment with ordered builds, and closes it only when the next screen has settled and lasted
+  `min_moment_s`, so a brief switch to another window never splits it. Open moments are not read.
+- *Speech that outlasts the screen:* the select gate waits for the transcript past the moment's end.
+- *Topics spanning sections:* sections freeze only behind the horizon and at moment boundaries;
+  select is given earlier moments' content. Whole-session consolidation is the synthesis pass.
+
+Late data is never lost: everything captured stays on disk and the final run uses all of it.
+
+**Stop.** `POST /live/{id}/end` (after the browser has flushed its uploads) starts the job:
+
+1. **Finish the lanes.** Each lane flushes: the last audio window is cut wherever the audio ends,
+   the detector closes the last moment (`finish`), the last moments are read, figures still
+   rendering complete, and the tail section is written.
+2. **Ingest** as before: `audio.wav` and `frames.json` from the captured chunks.
+3. **Promote.** If every lane finished without failing and no captured input was skipped live (a
+   late chunk or frame), the live transcript, moments, alignment and selection are written as
+   `transcript.json`, `moments.json`, `alignment.json` and `selection.json`, and the pipeline runs
+   from write: frozen sections and live renders hit their caches, so only the tail is new work.
+   Otherwise the full pipeline runs, as for an upload (with model caches still reused where inputs
+   match).
+4. **Synthesis** (planned, also for long uploads): see "Final synthesis" below.
+
+Live processing can be turned off with `IRIS_LIVE_PROCESSING=false`; a live session is then
+processed after stop like an upload, as before.
+
+### Final synthesis (planned)
+
+Live notes are written forwards and never look back. After the notes are assembled and shown, a
+synthesis pass consolidates them across the whole session, and its result replaces them; if it
+fails, the assembled notes stay.
+
+1. *Local sweep (no model calls):* compare moments and figures across the session to flag repeats
+   (returning to an earlier slide, the same figure picked twice).
+2. *Edit plan:* a model reads the section notes (with `[visual:<id>]` markers), an outline and the
+   flagged repeats, and returns structured edits: merge a split worked example, apply a later
+   correction, drop a repeated point, point duplicate figures at one. Only the sections the edits
+   touch are rewritten; every visual marker must still resolve.
 
 ### Sources are pluggable
 

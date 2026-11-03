@@ -4,7 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # --- Model prices (cost tracking) --------------------------------------------------------------
@@ -107,6 +107,17 @@ class Settings(BaseSettings):
     # Serialized evidence characters per notes call (plus prompt and small metadata).
     notes_context_chars: int = Field(default=24_000, ge=2_000, le=60_000)
 
+    # Live processing while recording (architecture section 1, "Life of a session: live").
+    live_processing: bool = True  # off: a live session is processed after stop, like an upload
+    live_audio_gap_wait_s: float = Field(default=35.0, gt=0)  # wait for a missing chunk, then skip
+    live_window_min_s: float = Field(default=10.0, gt=0)  # transcription windows are cut at the
+    live_window_max_s: float = Field(default=30.0, gt=0)  # quietest point between these lengths
+    live_transcribe_concurrency: int = Field(default=2, ge=1, le=8)
+    live_frame_holdback_s: float = Field(default=2.0, ge=0)  # frames wait this long to be ordered
+    live_speech_pad_s: float = Field(default=5.0, ge=0)  # transcript past a moment before select
+    live_render_concurrency: int = Field(default=2, ge=1, le=16)
+    live_draft_refresh_s: float = Field(default=180.0, gt=0)  # the open tail section, at most
+
     # Cost controls: reasoning effort per call type; unset uses ``reasoning_effort``.
     select_reasoning_effort: Effort | None = None  # screen reading
     notes_reasoning_effort: Effort | None = None
@@ -124,6 +135,12 @@ class Settings(BaseSettings):
 
     # Server
     cors_origins: list[str] = ["http://localhost:5173"]
+
+    @model_validator(mode="after")
+    def _check_live_windows(self) -> "Settings":
+        if self.live_window_min_s >= self.live_window_max_s:
+            raise ValueError("live_window_min_s must be shorter than live_window_max_s")
+        return self
 
     @property
     def sessions_dir(self) -> Path:

@@ -134,7 +134,8 @@ backend/src/iris/
     stages/       transcribe, detect, align, select, write, render, assemble (read session files,
                   write their own)
     __init__.py   stage registry and PLAN (stage order; groups run concurrently)
-    live.py       incremental processing while a live session runs (not implemented yet)
+  live/           processing while a live session records: lanes over a shared timeline
+                  (in progress; lanes are placeholders until built)
   jobs/runner.py  runs a session's PLAN as an asyncio task, publishes progress
   store/          SQLite session index + on-disk session folder layout (layout.py lists every file)
   llm/            OpenAI client; usage.py records every model call and its cost (usage.json)

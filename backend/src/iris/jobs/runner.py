@@ -5,8 +5,9 @@ import logging
 
 from iris.config import Settings
 from iris.events import EventBus
+from iris.live import LiveRegistry
 from iris.llm import usage
-from iris.models import EventType, SessionStatus, Stage
+from iris.models import EventType, SessionStatus, SourceKind, Stage
 from iris.pipeline import STAGES, plan_from
 from iris.pipeline.context import StageContext
 from iris.store.db import SessionStore
@@ -21,6 +22,8 @@ class JobRunner:
         self.bus = bus
         self.settings = settings
         self._tasks: dict[str, asyncio.Task[None]] = {}
+        # Processors of live sessions being recorded (iris/live/); finished when the run starts.
+        self.live = LiveRegistry(self.context, enabled=settings.live_processing)
 
     def is_running(self, session_id: str) -> bool:
         task = self._tasks.get(session_id)
@@ -49,6 +52,11 @@ class JobRunner:
         self.store.clear_error(session_id)
         self._set_status(session_id, SessionStatus.PROCESSING)
         try:
+            if ctx.source == SourceKind.BROWSER_LIVE:
+                # Recording has stopped: let the live lanes flush before ingest reads live/.
+                # Promoting their outputs (so only the tail is new work) is not built yet, so the
+                # full plan runs and reuses model caches where inputs match.
+                await self.live.finish(session_id)
             for group in plan_from(from_stage):
                 await asyncio.gather(*(self.run_stage(ctx, s) for s in group))
         except Exception as exc:
@@ -75,6 +83,7 @@ class JobRunner:
         self.bus.publish(session_id, EventType.STATUS, {"status": status})
 
     async def shutdown(self) -> None:
+        await self.live.shutdown()
         for task in self._tasks.values():
             task.cancel()
         await asyncio.gather(*self._tasks.values(), return_exceptions=True)

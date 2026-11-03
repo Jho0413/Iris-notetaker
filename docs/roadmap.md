@@ -196,4 +196,13 @@ hosting, access-control and data-handling requirements.
 3. Improve the frontend: write `docs/frontend.md`, then build the designed screens with partial
    results, clear states and per-session cost.
 4. Live sessions: final synthesis pass, live ingestion, then processing while recording.
+   Processing while recording is designed in architecture section 1 ("Life of a session: live")
+   and built on `feat/live-processing`: the foundation (timeline, processor, lane contracts)
+   first, then these branches from it, in parallel, each merged back by PR:
+   - `feat/live-audio`: the audio lane (decode as chunks arrive, cut at pauses, transcribe).
+   - `feat/live-screen`: the screen lane and the select lane (moments, screen reading, renders).
+   - `feat/live-draft`: the draft lane, `GET /sessions/{id}/notes/draft` and the live UI.
+   - `feat/synthesis`: the final synthesis pass (also for long uploads).
+   Then `feat/live-finish`: promote the live outputs at stop, end-to-end checks on real
+   recordings. `feat/live-processing` merges to `main` once that is done.
 5. Run end-to-end real-session checks, fix the gaps and document the MVP's supported behavior.

@@ -47,9 +47,10 @@ def get_session(session: SessionDep) -> Session:
 
 
 @router.delete("/{session_id}", status_code=204)
-def delete_session(session: SessionDep, paths: PathsDep, store: StoreDep, runner: RunnerDep):
+async def delete_session(session: SessionDep, paths: PathsDep, store: StoreDep, runner: RunnerDep):
     if runner.is_running(session.id):
         raise HTTPException(409, "session is processing")
+    await runner.live.cancel(session.id)  # stop live processing before its files go
     store.delete(session.id)
     shutil.rmtree(paths.root, ignore_errors=True)
 
