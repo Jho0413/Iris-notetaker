@@ -295,3 +295,110 @@ test('if the backend still misses audio after every upload landed, it ends with 
     { audio_chunks: 1, allow_gaps: true },
   ])
 })
+
+// --- Partial starts: whatever was acquired before a failure is released at once ---------------
+
+/** Fails instead of hanging when `p` doesn't settle in time. */
+function within<T>(p: Promise<T>, ms = 200): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`still pending after ${ms} ms`)), ms)
+  })
+  return Promise.race([p, timeout]).finally(() => clearTimeout(timer))
+}
+
+const tick = () => new Promise((r) => setTimeout(r, 0))
+
+test('mic denied with tab audio shared: every screen track is stopped', async () => {
+  const video = new FakeTrack('video')
+  const tabAudio = new FakeTrack('audio')
+  const t = setup({
+    mediaDevices: {
+      getDisplayMedia: async () => stream(video, tabAudio),
+      getUserMedia: async () => {
+        throw new DOMException('Requested device not found', 'NotFoundError')
+      },
+    },
+  })
+  await assert.rejects(capture(t.env).start(), /No microphone was found/)
+  assert.ok(video.stopped && tabAudio.stopped)
+  await tick()
+  assert.deepEqual(t.calls.map((c) => `${c.method} ${c.url}`), ['DELETE /api/sessions/s1'])
+})
+
+test('stop while the mic prompt stays open releases the screen share without waiting', async () => {
+  const t = setup({
+    mediaDevices: {
+      getDisplayMedia: async () => stream(t.display),
+      getUserMedia: () => new Promise(() => {}), // the user never answers the prompt
+    },
+  })
+  const live = capture(t.env)
+  const starting = live.start()
+  await tick() // now waiting on the mic prompt
+  await within(live.stop())
+  await assert.rejects(within(starting), /cancelled/)
+  assert.equal(t.display.stopped, true)
+  assert.equal(FakeRecorder.created.length, 0)
+  assert.deepEqual(t.calls.map((c) => `${c.method} ${c.url}`), ['DELETE /api/sessions/s1'])
+})
+
+test('screen sharing stopped during the mic prompt fails the start and releases the mic too', async () => {
+  let grantMic: (s: unknown) => void = () => {}
+  const t = setup({
+    mediaDevices: {
+      getDisplayMedia: async () => stream(t.display),
+      getUserMedia: () => new Promise((resolve) => (grantMic = resolve)),
+    },
+  })
+  const starting = capture(t.env).start()
+  await tick()
+  t.display.dispatchEvent(new Event('ended')) // "Stop sharing" in the browser's bar
+  await assert.rejects(within(starting), /Screen sharing stopped before recording started/)
+  grantMic(stream(t.mic)) // the user answers the prompt afterwards
+  await tick()
+  assert.equal(t.mic.stopped, true)
+  assert.equal(FakeRecorder.created.length, 0)
+  assert.deepEqual(t.calls.map((c) => `${c.method} ${c.url}`), ['DELETE /api/sessions/s1'])
+})
+
+test('the recorder failing before it starts releases the screen and mic', async () => {
+  class FailingRecorder extends FakeRecorder {
+    start() {
+      this.state = 'recording'
+      queueMicrotask(() => {
+        this.state = 'inactive'
+        this.onerror?.()
+      })
+    }
+  }
+  const t = setup({ MediaRecorder: FailingRecorder })
+  await assert.rejects(within(capture(t.env).start()), /could not start recording/)
+  assert.ok(t.display.stopped && t.mic.stopped)
+  await tick()
+  assert.equal(t.posted('/audio').length, 0)
+  assert.deepEqual(t.calls.map((c) => `${c.method} ${c.url}`), ['DELETE /api/sessions/s1'])
+})
+
+test('the recorder refusing the stream releases the screen, mic and audio mixer', async () => {
+  let mixerClosed = false
+  class RefusingRecorder extends FakeRecorder {
+    constructor() {
+      super()
+      throw new DOMException('Unsupported stream', 'NotSupportedError')
+    }
+  }
+  const tabAudio = new FakeTrack('audio')
+  const t = setup({
+    MediaRecorder: RefusingRecorder,
+    mediaDevices: {
+      getDisplayMedia: async () => stream(t.display, tabAudio),
+      getUserMedia: async () => stream(t.mic),
+    },
+    mixAudio: () => ({ stream: stream(), close: () => (mixerClosed = true) }),
+  })
+  await assert.rejects(capture(t.env).start(), CaptureError)
+  assert.ok(t.display.stopped && tabAudio.stopped && t.mic.stopped && mixerClosed)
+  await tick()
+  assert.deepEqual(t.calls.map((c) => `${c.method} ${c.url}`), ['DELETE /api/sessions/s1'])
+})

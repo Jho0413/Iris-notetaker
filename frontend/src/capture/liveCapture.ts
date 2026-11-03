@@ -17,6 +17,13 @@ const UPLOAD_TIMEOUT_MS = 30_000 // a hung request becomes a retry instead of bl
 
 export type EndReason = 'screen-share-ended' | 'microphone-ended' | 'recorder-error'
 
+/** Why `start()` failed when capture ended before recording began. */
+const START_FAILED: Record<EndReason, string> = {
+  'screen-share-ended': 'Screen sharing stopped before recording started. Share again to start.',
+  'microphone-ended': 'The microphone was disconnected before recording started. Try again.',
+  'recorder-error': 'The browser could not start recording. Try again.',
+}
+
 export interface LiveCaptureOptions {
   /**
    * Capture ended on its own: the user stopped sharing, the mic went away, or the recorder
@@ -74,6 +81,7 @@ export class LiveCapture {
   private finished = false
   private opening?: Promise<MediaStream>
   private cancelled = false
+  private cancelOpening?: (err: CaptureError) => void
   private stopping?: Promise<void>
 
   constructor(sessionId: string, options: LiveCaptureOptions = {}, env: CaptureEnv = browserEnv()) {
@@ -97,21 +105,27 @@ export class LiveCapture {
 
   /**
    * Ask for the screen and the mic, then start recording. On failure (permission denied, the
-   * picker cancelled, an unsupported browser, or `stop()` called meanwhile) everything acquired
-   * is released, the empty session is deleted, and a `CaptureError` with a user-facing message
-   * is thrown.
+   * picker cancelled, an unsupported browser, sharing stopped or the recorder failing before
+   * recording began, or `stop()` called meanwhile) everything acquired is released at once, the
+   * empty session is deleted, and a `CaptureError` with a user-facing message is thrown. A
+   * failure while a permission prompt is still open doesn't wait for the prompt: a stream granted
+   * afterwards is stopped as soon as it arrives.
    */
   async start(): Promise<MediaStream> {
-    this.opening = this.open()
+    const cancelled = new Promise<never>((_, reject) => (this.cancelOpening = reject))
+    this.opening = Promise.race([this.open(), cancelled])
     try {
       return await this.opening
     } catch (err) {
+      // A recorder that failed while starting can still deliver a chunk: nothing to upload.
+      if (this.recorder) this.recorder.ondataavailable = null
       this.release()
       void this.env.fetch(`/api/sessions/${this.sessionId}`, { method: 'DELETE' }).catch(() => {})
       if (err instanceof CaptureError) throw err
       throw new CaptureError(`Could not start recording: ${err}`, { cause: err })
     } finally {
       this.opening = undefined
+      this.cancelOpening = undefined
     }
   }
 
@@ -143,38 +157,36 @@ export class LiveCapture {
       )
     }
 
-    const display = await getDisplay(devices)
-    this.streams.push(display)
-    this.throwIfCancelled()
+    const display = this.acquired(await getDisplay(devices))
+    // Listen from the start: sharing stopped during the mic prompt must fail the start too.
+    display.getVideoTracks()[0]?.addEventListener('ended', () =>
+      this.ended('screen-share-ended', 'Screen sharing stopped, so the recording was finished.'),
+    )
     let mic: MediaStream
     try {
-      mic = await devices.getUserMedia({ audio: true })
+      mic = this.acquired(await devices.getUserMedia({ audio: true }))
     } catch (err) {
+      if (err instanceof CaptureError) throw err
       throw new CaptureError(describeCaptureError(err, 'microphone'), { cause: err })
     }
-    this.streams.push(mic)
-    this.throwIfCancelled()
+    mic.getAudioTracks()[0]?.addEventListener('ended', () =>
+      this.ended('microphone-ended', 'The microphone was disconnected, so the recording was finished.'),
+    )
 
     const recorder = new Recorder(this.audioToRecord(display, mic), { mimeType })
+    this.recorder = recorder
     recorder.ondataavailable = (e) => {
       if (e.data.size) this.queue.add('audio', `audio?seq=${this.seq++}`, e.data)
     }
     recorder.onerror = () => this.ended('recorder-error', 'Recording stopped: the browser failed.')
     const started = new Promise((resolve) => recorder.addEventListener('start', resolve, { once: true }))
     recorder.start(AUDIO_CHUNK_MS)
-    this.recorder = recorder
     await started
     this.throwIfCancelled()
     // The audio's time 0: WebM timestamps start at the first recorded sample.
     this.startedAt = performance.now()
     this.recording = true
 
-    display.getVideoTracks()[0]?.addEventListener('ended', () =>
-      this.ended('screen-share-ended', 'Screen sharing stopped, so the recording was finished.'),
-    )
-    mic.getAudioTracks()[0]?.addEventListener('ended', () =>
-      this.ended('microphone-ended', 'The microphone was disconnected, so the recording was finished.'),
-    )
     this.env.page.addEventListener('beforeunload', this.onBeforeUnload)
     this.env.page.addEventListener('pagehide', this.onPageHide)
     const track = display.getVideoTracks()[0]
@@ -191,6 +203,22 @@ export class LiveCapture {
     if (this.cancelled) throw new CaptureError('Recording was cancelled before it started.')
   }
 
+  /** Keep `stream` for release, or stop it at once if the start was cancelled meanwhile. */
+  private acquired(stream: MediaStream): MediaStream {
+    if (this.cancelled) {
+      stream.getTracks().forEach((t) => t.stop())
+      this.throwIfCancelled()
+    }
+    this.streams.push(stream)
+    return stream
+  }
+
+  /** Fail a start in progress now, without waiting for whatever it is awaiting (a prompt). */
+  private cancel(message: string) {
+    this.cancelled = true
+    this.cancelOpening?.(new CaptureError(message))
+  }
+
   /** The mic alone, or the mic mixed with the shared tab/system audio into one track. */
   private audioToRecord(display: MediaStream, mic: MediaStream): MediaStream {
     if (!display.getAudioTracks().length) return mic
@@ -200,6 +228,7 @@ export class LiveCapture {
   }
 
   private ended(reason: EndReason, message: string) {
+    if (this.opening && !this.recording) return this.cancel(START_FAILED[reason])
     if (!this.recording || this.stopping) return
     if (this.options.onEnded) this.options.onEnded(reason, message)
     else void this.stop().catch(() => {})
@@ -207,8 +236,8 @@ export class LiveCapture {
 
   private async finish(): Promise<void> {
     if (this.opening) {
-      // start() sees the flag after its current await, then releases and discards the session.
-      this.cancelled = true
+      // start() fails now, releasing what it has and discarding the session.
+      this.cancel('Recording was cancelled before it started.')
       await this.opening.catch(() => {})
       return
     }
@@ -251,7 +280,6 @@ export class LiveCapture {
     this.stopFrames?.()
     this.stopFrames = undefined
     if (this.recorder && this.recorder.state !== 'inactive') {
-      this.recorder.ondataavailable = null // a start that was cancelled: nothing to upload
       this.recorder.stop()
     }
     this.streams.forEach((s) => s.getTracks().forEach((t) => t.stop()))
