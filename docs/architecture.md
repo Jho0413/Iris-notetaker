@@ -192,10 +192,10 @@ Late data is never lost: everything captured stays on disk and the final run use
    Otherwise the full pipeline runs, as for an upload (with model caches still reused where inputs
    match); skipped input is recorded per lane, so a later version can re-run less. The draft
    lane's failure doesn't block promotion: its sections are only a cache.
+4. **Synthesis** (planned, also for long uploads): see "Final synthesis" below.
 
 A lane whose upstream lane failed (`upstream_failed`) stops making model calls for the rest of the
 recording: nothing it makes can be promoted.
-4. **Synthesis** (planned, also for long uploads): see "Final synthesis" below.
 
 Live processing can be turned off with `IRIS_LIVE_PROCESSING=false`; a live session is then
 processed after stop like an upload, as before.

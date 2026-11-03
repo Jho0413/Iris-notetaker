@@ -68,6 +68,9 @@ class LiveTimeline:
     ending: bool = False  # stop requested: lanes flush what they hold, then return
     finished: set[Lane] = field(default_factory=set)
     failed: dict[Lane, str] = field(default_factory=dict)
+    absent: set[Lane] = field(
+        default_factory=set
+    )  # not run by this processor: done, never finished
     # Lanes that left some captured input unused (a late frame, an undecodable chunk); their
     # outputs miss it, so stop re-runs from the stage they replace.
     skipped_input: set[Lane] = field(default_factory=set)
@@ -76,8 +79,8 @@ class LiveTimeline:
     # --- Reading ---------------------------------------------------------------------------------
 
     def done(self, lane: Lane) -> bool:
-        """The lane will publish nothing more (finished or failed)."""
-        return lane in self.finished or lane in self.failed
+        """The lane will publish nothing more (finished, failed or absent)."""
+        return lane in self.finished or lane in self.failed or lane in self.absent
 
     def _through(self, lane: Lane, watermark: float, t: float) -> bool:
         return self.done(lane) or watermark >= t

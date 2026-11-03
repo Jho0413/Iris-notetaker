@@ -45,9 +45,10 @@ class LiveProcessor:
             if lane.lane in self.lanes:
                 raise ValueError(f"two {lane.lane} lanes")
             self.lanes[lane.lane] = lane
-        # A lane this processor doesn't run publishes nothing: it is finished from the start, so
-        # a lane waiting on it is never stuck (no one is waiting yet, so no notify is needed).
-        self.timeline.finished.update(set(Lane) - self.lanes.keys())
+        # A lane this processor doesn't run publishes nothing: it is done from the start, so a
+        # lane waiting on it is never stuck (no one is waiting yet, so no notify is needed). It
+        # is not finished, so the timeline is never complete without it.
+        self.timeline.absent.update(set(Lane) - self.lanes.keys())
         self._tasks: dict[Lane, asyncio.Task[None]] = {}
 
     def start(self) -> None:
@@ -90,14 +91,21 @@ class LiveProcessor:
         """Ask every lane to flush, wait for all of them, and return the final timeline.
 
         Lanes still running after ``finish_timeout_s`` are cancelled and marked failed, so a stuck
-        lane delays stop by at most that long; stop then runs the full pipeline.
+        lane delays stop by at most that long; stop then runs the full pipeline. Cancelling the
+        caller cancels the lanes too.
         """
         await self.timeline.request_end()
         for lane in self.lanes.values():
             lane.wake()
         tasks = list(self._tasks.values())
         if tasks:
-            _, pending = await asyncio.wait(tasks, timeout=self.finish_timeout_s)
+            try:
+                _, pending = await asyncio.wait(tasks, timeout=self.finish_timeout_s)
+            except asyncio.CancelledError:
+                # The job was cancelled (backend shutdown): the lanes go with it. asyncio.wait,
+                # unlike gather, doesn't cancel what it waits for.
+                await self.cancel()
+                raise
             if pending:
                 log.warning(
                     "session %s: live lanes %s did not finish in %ss; cancelled",

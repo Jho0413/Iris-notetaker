@@ -219,13 +219,15 @@ async def test_a_failing_lane_does_not_stop_the_others(tmp_path: Path):
     assert not timeline.complete
 
 
-async def test_missing_lanes_count_as_finished(tmp_path: Path):
-    factory, _ = fake_lanes(only={Lane.AUDIO})
+async def test_missing_lanes_are_done_but_never_complete(tmp_path: Path):
+    factory, _ = fake_lanes(only={Lane.SELECT})
     processor = LiveProcessor(ctx(tmp_path), factory)
     processor.start()
     processor.notify_frame()  # no screen lane: ignored
+    assert processor.timeline.transcribed_through(1e9)  # nothing waits on an absent lane
     timeline = await asyncio.wait_for(processor.finish(), 1)
-    assert timeline.complete
+    assert Lane.SELECT in timeline.finished
+    assert not timeline.complete  # no transcript or moments were made to promote
 
 
 async def test_two_lanes_of_one_kind_are_refused(tmp_path: Path):
@@ -316,6 +318,26 @@ async def test_a_lane_waiting_on_an_absent_lane_completes(tmp_path: Path):
     processor.start()
     timeline = await asyncio.wait_for(processor.finish(), 1)
     assert Lane.SELECT in timeline.finished
+
+
+class SlowFlushLane(LiveLane):
+    lane = Lane.AUDIO
+
+    async def run(self) -> None:
+        await self.timeline.wait_until(lambda: self.timeline.ending)
+        await asyncio.sleep(30)  # still flushing when the backend shuts down
+
+
+async def test_cancelling_finish_cancels_the_lanes(tmp_path: Path):
+    processor = LiveProcessor(ctx(tmp_path), lambda c, tl: [SlowFlushLane(c, tl)])
+    processor.start()
+    job = asyncio.create_task(processor.finish())
+    await settle()
+    job.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await job
+    assert all(task.done() for task in processor._tasks.values())
+    assert Lane.AUDIO in processor.timeline.failed
 
 
 async def test_registry_starts_once_finishes_and_forgets(tmp_path: Path):
