@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { followScrollTop, isAtBottom } from '../session/follow'
 import { formatClock, type Segment } from '../session/state'
 import { Icon } from './Icon'
 
@@ -10,15 +11,18 @@ export function TranscriptList({ segments, follow = false }: { segments: Segment
   const box = useRef<HTMLDivElement>(null)
   const [atBottom, setAtBottom] = useState(true)
 
+  // Before paint, so a followed line never flashes below the fold (and nothing jumps).
   useLayoutEffect(() => {
     const el = box.current
-    if (follow && el && atBottom) el.scrollTop = el.scrollHeight
+    if (!follow || !el) return
+    const top = followScrollTop(atBottom, el)
+    if (top !== null) el.scrollTop = top
   }, [segments, follow, atBottom])
 
   useEffect(() => {
     const el = box.current
     if (!follow || !el) return
-    const onScroll = () => setAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 24)
+    const onScroll = () => setAtBottom(isAtBottom(el))
     el.addEventListener('scroll', onScroll, { passive: true })
     return () => el.removeEventListener('scroll', onScroll)
   }, [follow])

@@ -310,6 +310,11 @@ h1, h2, h3 { line-height: 1.2; letter-spacing: -0.01em; text-wrap: balance; }
 .disclosure > summary .icon { transition: transform var(--fast) var(--ease); }
 .disclosure[open] > summary .icon { transform: rotate(90deg); }
 .disclosure > .disclosure-body { border-top: 1px solid var(--border); padding: 4px 16px 16px; }
+/* Live panels keep one height whatever they hold, so arriving lines never move the page. */
+.disclosure > .live-panel { height: 320px; display: flex; flex-direction: column; padding: 0; }
+.live-panel > .live-transcript { flex: 1; min-height: 0; max-height: none; padding: 4px 16px 0; }
+.live-panel > .placeholder { margin: 0; padding: 16px; }
+.disclosure > .live-notes { height: 480px; display: block; overflow: auto; padding: 4px 24px 16px; }
 
 /* ---- Session ----------------------------------------------------------------------------------- */
 

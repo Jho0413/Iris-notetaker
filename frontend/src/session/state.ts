@@ -55,7 +55,11 @@ export interface RunState {
   figures: Record<string, FigureState>
   /** Figure ids in the order they were selected. */
   figureOrder: string[]
-  notes: { final: boolean; completed: number; total: number } | null
+  /**
+   * Notes progress from `notes_updated`. `updatedAt` is the latest such event's time: it changes
+   * whenever the draft does (a section added or the live tail rewritten), so pages refetch on it.
+   */
+  notes: { final: boolean; completed: number; total: number; updatedAt?: number } | null
   error?: string
   /** When the current run started (its `status: processing` event), in ms since the epoch. */
   runStart?: number
@@ -188,6 +192,7 @@ export function applyEvent(state: RunState, event: IrisEvent): RunState {
           final: final || state.notes?.final === true,
           completed: Math.max(completed, state.notes?.completed ?? 0),
           total: Math.max(total, state.notes?.total ?? 0),
+          updatedAt: timed ? Math.max(at, state.notes?.updatedAt ?? at) : state.notes?.updatedAt,
         },
       }
     }

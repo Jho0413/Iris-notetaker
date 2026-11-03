@@ -5,7 +5,9 @@ import { LiveCapture } from '../capture/liveCapture'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { HealthBanner } from '../components/HealthBanner'
 import { Icon } from '../components/Icon'
+import { NotesView } from '../components/NotesView'
 import { TranscriptList } from '../components/TranscriptList'
+import { draftRefreshKey, fetchDraft, type NotesDraft } from '../session/draft'
 import { act } from '../session/request'
 import { formatClock, transcriptSegments } from '../session/state'
 import { useSessionStream } from '../session/useSessionStream'
@@ -50,6 +52,21 @@ export function LivePage() {
 
   const stream = useSessionStream(recording ? sessionId ?? undefined : undefined)
   const segments = useMemo(() => transcriptSegments(stream.run, null), [stream.run])
+  // Disclosure contents mount only while open, so an opened transcript starts at the latest line.
+  const [showTranscript, setShowTranscript] = useState(false)
+  const [showNotes, setShowNotes] = useState(false)
+
+  // The notes so far, refetched on every `notes_updated` from the live draft.
+  const [draft, setDraft] = useState<NotesDraft | null>(null)
+  const draftKey = recording && sessionId ? draftRefreshKey('recording', stream.run) : null
+  useEffect(() => {
+    if (draftKey === null || !sessionId) return
+    let live = true
+    void fetchDraft(sessionId).then((d) => live && d && setDraft(d))
+    return () => {
+      live = false
+    }
+  }, [sessionId, draftKey])
 
   // Leaving ends the recording: the browser asks before closing the tab, the app before navigating.
   const blocker = useBlocker(recording)
@@ -308,17 +325,36 @@ export function LivePage() {
           writing the notes. You can close this window afterwards and find the session in the
           library.
         </p>
-        <details className="disclosure">
+        <details className="disclosure" onToggle={(e) => setShowTranscript(e.currentTarget.open)}>
           <summary>
             <Icon name="chevron" /> Show live transcript
           </summary>
-          <div className="disclosure-body">
-            {segments.length ? (
-              <TranscriptList segments={segments} follow />
-            ) : (
-              <p className="placeholder">Nothing transcribed yet. Lines appear here as they're processed.</p>
-            )}
-          </div>
+          {showTranscript && (
+            <div className="disclosure-body live-panel">
+              {segments.length ? (
+                <TranscriptList segments={segments} follow />
+              ) : (
+                <p className="placeholder">Nothing transcribed yet. Lines appear here as they're processed.</p>
+              )}
+            </div>
+          )}
+        </details>
+        <details className="disclosure" onToggle={(e) => setShowNotes(e.currentTarget.open)}>
+          <summary>
+            <Icon name="chevron" /> Show notes so far
+          </summary>
+          {showNotes && (
+            <div className="disclosure-body live-panel live-notes">
+              {draft ? (
+                <NotesView sessionId={sessionId ?? ''} title={draft.title} markdown={draft.markdown} />
+              ) : (
+                <p className="placeholder">
+                  No notes yet. A draft appears here once enough has been said and shown, and it's
+                  refreshed every few minutes. Figures show the original crop until they're redrawn.
+                </p>
+              )}
+            </div>
+          )}
         </details>
       </div>
 
