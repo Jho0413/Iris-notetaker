@@ -12,6 +12,14 @@ live"):
 A lane that has finished (flushed everything after stop) or failed counts as through any time
 (``through``), so a lane waiting on it never waits forever. Watermarks only move forward.
 
+A failed lane is not a finished one, though: everything downstream of it is working on
+incomplete evidence. ``upstream_failed(lane)`` tells a lane so; it then stops making paid model
+calls and only waits for stop (the session is processed like an upload at stop anyway).
+
+``complete`` decides whether stop may promote the live outputs. It covers the lanes whose outputs
+are promoted (audio, screen, select); the draft lane only fills caches, so its failure costs
+nothing at stop. Input skipped live is recorded per lane, so stop can re-run only what it affects.
+
 Every method runs on the event loop; none blocks. Waiters are woken by ``asyncio.Condition``.
 """
 
@@ -29,6 +37,17 @@ class Lane(StrEnum):
     SCREEN = "screen"
     SELECT = "select"
     DRAFT = "draft"
+
+
+# The lanes whose results each lane uses, directly or through another lane.
+UPSTREAM: dict[Lane, frozenset[Lane]] = {
+    Lane.AUDIO: frozenset(),
+    Lane.SCREEN: frozenset(),
+    Lane.SELECT: frozenset({Lane.AUDIO, Lane.SCREEN}),
+    Lane.DRAFT: frozenset({Lane.AUDIO, Lane.SCREEN, Lane.SELECT}),
+}
+# The lanes whose outputs stop promotes (transcript, moments, alignment, selection).
+PROMOTED: frozenset[Lane] = frozenset({Lane.AUDIO, Lane.SCREEN, Lane.SELECT})
 
 
 @dataclass
@@ -49,7 +68,9 @@ class LiveTimeline:
     ending: bool = False  # stop requested: lanes flush what they hold, then return
     finished: set[Lane] = field(default_factory=set)
     failed: dict[Lane, str] = field(default_factory=dict)
-    skipped_input: bool = False  # some captured input was not used live (late or undecodable)
+    # Lanes that left some captured input unused (a late frame, an undecodable chunk); their
+    # outputs miss it, so stop re-runs from the stage they replace.
+    skipped_input: set[Lane] = field(default_factory=set)
     _changed: asyncio.Condition = field(default_factory=asyncio.Condition, repr=False)
 
     # --- Reading ---------------------------------------------------------------------------------
@@ -78,11 +99,19 @@ class LiveTimeline:
         s = math.inf if self.done(Lane.SELECT) else self.selected_to
         return min(a, s)
 
+    def upstream_failed(self, lane: Lane) -> bool:
+        """A lane this one depends on failed: its evidence is incomplete from now on."""
+        return any(up in self.failed for up in UPSTREAM[lane])
+
     @property
     def complete(self) -> bool:
-        """Every lane finished without failing and no captured input was skipped, so the live
-        outputs can replace the pipeline's transcribe, detect, align and select."""
-        return not self.failed and not self.skipped_input and self.finished >= set(Lane)
+        """The promoted lanes all finished, none failed, and none skipped captured input, so the
+        live transcript, moments and selection can replace the pipeline's own at stop."""
+        return (
+            self.finished >= PROMOTED
+            and not (PROMOTED & self.failed.keys())
+            and not (PROMOTED & self.skipped_input)
+        )
 
     def transcript(self) -> Transcript:
         return Transcript(language=self.language, segments=list(self.segments))
@@ -147,9 +176,9 @@ class LiveTimeline:
         self.selected_to = max(self.selected_to, selected_to)
         await self._notify()
 
-    async def mark_skipped_input(self) -> None:
-        """Any lane: some captured input was not used live, so stop must re-run from ingest."""
-        self.skipped_input = True
+    async def mark_skipped_input(self, lane: Lane) -> None:
+        """Any lane: some captured input was not used live, so its outputs are incomplete."""
+        self.skipped_input.add(lane)
         await self._notify()
 
     # --- Lifecycle (the processor calls these) ----------------------------------------------------
@@ -159,9 +188,11 @@ class LiveTimeline:
         await self._notify()
 
     async def finish_lane(self, lane: Lane) -> None:
-        self.finished.add(lane)
-        await self._notify()
+        if lane not in self.failed:
+            self.finished.add(lane)
+            await self._notify()
 
     async def fail_lane(self, lane: Lane, message: str) -> None:
+        self.finished.discard(lane)
         self.failed[lane] = message
         await self._notify()

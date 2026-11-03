@@ -8,9 +8,12 @@ A lane:
   or waits on watermarks with ``timeline.wait_until``;
 - runs CPU-bound work (decoding, OpenCV) in ``asyncio.to_thread``, and wraps model calls in
   ``usage.recording(ctx, <stage>)`` so their cost is recorded under the matching stage;
-- once ``timeline.ending`` is set, flushes everything it holds, publishes its final results and
-  returns. The processor then marks it finished. An exception marks it failed instead; the
-  recording carries on and stop falls back to the full pipeline;
+- returns only once ``timeline.ending`` is set, after flushing everything it holds and publishing
+  its final results; the processor then marks it finished. Returning earlier, raising, or still
+  running ``live_finish_timeout_s`` after stop marks it failed instead: the recording carries on,
+  and stop falls back to the full pipeline;
+- when ``timeline.upstream_failed(lane)``, stops making paid model calls (its evidence is
+  incomplete and nothing it makes can be promoted) and just waits for stop;
 - must survive a backend restart mid-recording: a fresh lane starts from the captured files, and
   content-keyed caches (transcript windows, ``selection_batches/``, render and notes caches) mean
   work done before the restart is not paid for again.

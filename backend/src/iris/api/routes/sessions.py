@@ -50,9 +50,11 @@ def get_session(session: SessionDep) -> Session:
 async def delete_session(session: SessionDep, paths: PathsDep, store: StoreDep, runner: RunnerDep):
     if runner.is_running(session.id):
         raise HTTPException(409, "session is processing")
-    await runner.live.cancel(session.id)  # stop live processing before its files go
+    # Remove the row before any await, so live input or an end request arriving meanwhile is
+    # refused (404) instead of restarting processing on a session being deleted.
     store.delete(session.id)
-    shutil.rmtree(paths.root, ignore_errors=True)
+    await runner.live.cancel(session.id)  # stop live processing before its files go
+    await asyncio.to_thread(shutil.rmtree, paths.root, ignore_errors=True)
 
 
 @router.post("/{session_id}/run", response_model=Session)

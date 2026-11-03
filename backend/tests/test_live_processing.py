@@ -5,6 +5,7 @@ Lanes are fakes here; each lane's own behaviour is tested with that lane.
 
 import asyncio
 import math
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -93,18 +94,47 @@ async def test_a_done_lane_releases_everything_waiting_on_it():
     await asyncio.wait_for(asyncio.gather(*waiters), 1)
 
 
-async def test_complete_needs_every_lane_finished_and_nothing_skipped():
+async def finished_timeline() -> LiveTimeline:
     tl = LiveTimeline()
     for lane in Lane:
         await tl.finish_lane(lane)
+    return tl
+
+
+async def test_complete_needs_the_promoted_lanes_finished_with_nothing_skipped():
+    tl = await finished_timeline()
     assert tl.complete
-    await tl.mark_skipped_input()
+    await tl.mark_skipped_input(Lane.SCREEN)
     assert not tl.complete
+    assert tl.skipped_input == {Lane.SCREEN}
+
+    tl = await finished_timeline()
+    await tl.fail_lane(Lane.SELECT, "x")
+    assert not tl.complete
+    assert not tl.done(Lane.SELECT) or Lane.SELECT not in tl.finished
+
+
+async def test_a_failed_draft_does_not_block_promotion():
+    tl = await finished_timeline()
+    await tl.fail_lane(Lane.DRAFT, "rate limited")
+    await tl.mark_skipped_input(Lane.DRAFT)
+    assert tl.complete
+
+
+async def test_downstream_lanes_learn_their_evidence_is_incomplete():
     tl = LiveTimeline()
-    for lane in Lane:
-        await tl.finish_lane(lane)
-    await tl.fail_lane(Lane.DRAFT, "x")
-    assert not tl.complete
+    await tl.fail_lane(Lane.AUDIO, "decoder crashed")
+    assert tl.upstream_failed(Lane.SELECT)
+    assert tl.upstream_failed(Lane.DRAFT)
+    assert not tl.upstream_failed(Lane.SCREEN)
+    assert not tl.upstream_failed(Lane.AUDIO)
+
+
+async def test_a_failed_lane_stays_failed():
+    tl = LiveTimeline()
+    await tl.fail_lane(Lane.AUDIO, "x")
+    await tl.finish_lane(Lane.AUDIO)
+    assert Lane.AUDIO in tl.failed and Lane.AUDIO not in tl.finished
 
 
 # --- Processor --------------------------------------------------------------------------------
@@ -119,6 +149,7 @@ class FakeLane(LiveLane):
         self.fail = fail
         self.wakes = 0
         self.flushed = False
+        self.flushed_at: datetime | None = None
 
     async def run(self) -> None:
         while True:
@@ -127,6 +158,7 @@ class FakeLane(LiveLane):
                 raise RuntimeError("lane broke")
             if self.timeline.ending:
                 self.flushed = True
+                self.flushed_at = datetime.now(UTC)
                 return
             self.wakes += 1
 
@@ -204,6 +236,88 @@ async def test_two_lanes_of_one_kind_are_refused(tmp_path: Path):
         LiveProcessor(ctx(tmp_path), factory)
 
 
+class StubbornLane(LiveLane):
+    """Ignores stop entirely."""
+
+    lane = Lane.SELECT
+
+    async def run(self) -> None:
+        await asyncio.Event().wait()
+
+
+async def test_a_lane_that_ignores_stop_is_cut_off(tmp_path: Path):
+    processor = LiveProcessor(
+        ctx(tmp_path), lambda c, tl: [StubbornLane(c, tl)], finish_timeout_s=0.05
+    )
+    processor.start()
+    timeline = await asyncio.wait_for(processor.finish(), 1)
+    assert Lane.SELECT in timeline.failed
+    assert not timeline.complete
+
+
+class EarlyLane(LiveLane):
+    lane = Lane.AUDIO
+
+    async def run(self) -> None:
+        return  # gave up before stop
+
+
+async def test_a_lane_that_returns_before_stop_has_failed(tmp_path: Path):
+    processor = LiveProcessor(ctx(tmp_path), lambda c, tl: [EarlyLane(c, tl)])
+    processor.start()
+    await settle()
+    assert "before stop" in processor.timeline.failed[Lane.AUDIO]
+    timeline = await asyncio.wait_for(processor.finish(), 1)
+    assert not timeline.complete
+
+
+class AbandonedLane(LiveLane):
+    """Awaits a future someone else cancels."""
+
+    lane = Lane.AUDIO
+
+    def __init__(self, ctx, timeline):
+        super().__init__(ctx, timeline)
+        self.future: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+
+    async def run(self) -> None:
+        await self.future
+
+
+async def test_a_cancelled_lane_releases_its_waiters(tmp_path: Path):
+    made: list[AbandonedLane] = []
+
+    def factory(c, tl):
+        made.append(AbandonedLane(c, tl))
+        return made
+
+    processor = LiveProcessor(ctx(tmp_path), factory)
+    processor.start()
+    tl = processor.timeline
+    waiter = asyncio.create_task(tl.wait_until(lambda: tl.transcribed_through(1e9)))
+    await settle()
+    made[0].future.cancel()
+    await asyncio.wait_for(waiter, 1)
+    assert Lane.AUDIO in tl.failed
+
+
+class WaitsForScreen(LiveLane):
+    """Follows the select lane's stop contract: waits for the screen lane to finish."""
+
+    lane = Lane.SELECT
+
+    async def run(self) -> None:
+        await self.timeline.wait_until(lambda: self.timeline.done(Lane.SCREEN))
+        await self.timeline.wait_until(lambda: self.timeline.ending)
+
+
+async def test_a_lane_waiting_on_an_absent_lane_completes(tmp_path: Path):
+    processor = LiveProcessor(ctx(tmp_path), lambda c, tl: [WaitsForScreen(c, tl)])
+    processor.start()
+    timeline = await asyncio.wait_for(processor.finish(), 1)
+    assert Lane.SELECT in timeline.finished
+
+
 async def test_registry_starts_once_finishes_and_forgets(tmp_path: Path):
     factory, lanes = fake_lanes()
     registry = LiveRegistry(lambda sid: ctx(tmp_path), lanes=factory)
@@ -223,7 +337,7 @@ async def test_registry_cancel_and_shutdown_stop_lanes(tmp_path: Path):
     await settle()
     await registry.cancel("s1")
     assert registry.get("s1") is None
-    assert all(task.done() for task in processor._tasks)
+    assert all(task.done() for task in processor._tasks.values())
     assert not any(lane.flushed for lane in lanes.values())
 
     registry.ensure("s2")
@@ -277,6 +391,11 @@ def test_recording_wakes_lanes_and_stop_flushes_them_before_processing(
     assert all(lane.flushed for lane in lanes.values())
     assert processor.timeline.finished == set(Lane)
     assert registry(client).get(sid) is None
+    bus = client.app.state.bus  # type: ignore[attr-defined]
+    ingest = next(
+        e for e in bus.history(sid) if e.type == "stage_started" and e.data["stage"] == "ingest"
+    )
+    assert all(lane.flushed_at and lane.flushed_at <= ingest.at for lane in lanes.values())
 
 
 def test_first_chunk_after_a_restart_starts_a_processor(
@@ -301,7 +420,30 @@ def test_deleting_a_recording_session_stops_its_processor(
     assert processor is not None
     assert client.delete(f"/api/sessions/{sid}").status_code == 204
     assert registry(client).get(sid) is None
-    assert all(task.done() for task in processor._tasks)
+    assert all(task.done() for task in processor._tasks.values())
+
+
+def test_delete_refuses_live_input_before_stopping_processing(
+    client: TestClient, lanes: dict[Lane, FakeLane], monkeypatch
+):
+    sid = start(client)
+    live = registry(client)
+    store = client.app.state.store  # type: ignore[attr-defined]
+    rows_while_cancelling: list[object] = []
+    real_cancel = live.cancel
+
+    async def cancel(session_id: str) -> None:
+        # Live input is refused (404) once the row is gone, so posts arriving while the
+        # processor stops can't start a new one.
+        rows_while_cancelling.append(store.get(session_id))
+        await real_cancel(session_id)
+
+    monkeypatch.setattr(live, "cancel", cancel)
+    assert client.delete(f"/api/sessions/{sid}").status_code == 204
+    assert rows_while_cancelling == [None]
+    assert live.get(sid) is None
+    assert post_frame(client, sid, 2.0, jpeg((0, 255, 0))) == 404
+    assert live.get(sid) is None
 
 
 def test_live_processing_can_be_turned_off(tmp_path: Path, recording: bytes):

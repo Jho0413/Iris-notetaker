@@ -180,15 +180,21 @@ Late data is never lost: everything captured stays on disk and the final run use
 **Stop.** `POST /live/{id}/end` (after the browser has flushed its uploads) starts the job:
 
 1. **Finish the lanes.** Each lane flushes: the last audio window is cut wherever the audio ends,
-   the detector closes the last moment (`finish`), the last moments are read, figures still
-   rendering complete, and the tail section is written.
+   the detector closes the last moment (`finish`), the last moments are read and figures still
+   rendering complete. The draft lane just stops; the write stage writes the tail. A lane still
+   flushing after `IRIS_LIVE_FINISH_TIMEOUT_S` is cancelled and counts as failed.
 2. **Ingest** as before: `audio.wav` and `frames.json` from the captured chunks.
-3. **Promote.** If every lane finished without failing and no captured input was skipped live (a
-   late chunk or frame), the live transcript, moments, alignment and selection are written as
+3. **Promote.** If the audio, screen and select lanes finished without failing and none skipped
+   captured input (a late chunk or frame), the live transcript, moments, alignment and selection
+   are written as
    `transcript.json`, `moments.json`, `alignment.json` and `selection.json`, and the pipeline runs
    from write: frozen sections and live renders hit their caches, so only the tail is new work.
    Otherwise the full pipeline runs, as for an upload (with model caches still reused where inputs
-   match).
+   match); skipped input is recorded per lane, so a later version can re-run less. The draft
+   lane's failure doesn't block promotion: its sections are only a cache.
+
+A lane whose upstream lane failed (`upstream_failed`) stops making model calls for the rest of the
+recording: nothing it makes can be promoted.
 4. **Synthesis** (planned, also for long uploads): see "Final synthesis" below.
 
 Live processing can be turned off with `IRIS_LIVE_PROCESSING=false`; a live session is then

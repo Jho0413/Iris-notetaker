@@ -32,7 +32,7 @@ sessions/<id>/
     renders.json          Renders
     notes_sections/<hash>.json
                           validated writing sections, keyed by model, prompt and inputs
-    notes_draft.json      NotesDraft
+    notes_draft.json      NotesDraft (written by write, and by the live draft lane while recording)
     notes.json            Notes
     notes.md              final markdown (for export)
     usage_calls.jsonl     one UsageRecord per model call, appended by iris.llm.usage

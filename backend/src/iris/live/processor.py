@@ -29,34 +29,54 @@ def default_lanes(ctx: StageContext, timeline: LiveTimeline) -> list[LiveLane]:
 
 
 class LiveProcessor:
-    def __init__(self, ctx: StageContext, lanes: LaneFactory = default_lanes):
+    def __init__(
+        self,
+        ctx: StageContext,
+        lanes: LaneFactory = default_lanes,
+        finish_timeout_s: float | None = None,
+    ):
         self.ctx = ctx
         self.timeline = LiveTimeline()
+        self.finish_timeout_s = (
+            ctx.settings.live_finish_timeout_s if finish_timeout_s is None else finish_timeout_s
+        )
         self.lanes: dict[Lane, LiveLane] = {}
         for lane in lanes(ctx, self.timeline):
             if lane.lane in self.lanes:
                 raise ValueError(f"two {lane.lane} lanes")
             self.lanes[lane.lane] = lane
-        self._tasks: list[asyncio.Task[None]] = []
+        # A lane this processor doesn't run publishes nothing: it is finished from the start, so
+        # a lane waiting on it is never stuck (no one is waiting yet, so no notify is needed).
+        self.timeline.finished.update(set(Lane) - self.lanes.keys())
+        self._tasks: dict[Lane, asyncio.Task[None]] = {}
 
     def start(self) -> None:
         if self._tasks:
             return
-        self._tasks = [
-            asyncio.create_task(self._run_lane(lane), name=f"live-{self.ctx.session_id}-{name}")
+        self._tasks = {
+            name: asyncio.create_task(
+                self._run_lane(lane), name=f"live-{self.ctx.session_id}-{name}"
+            )
             for name, lane in self.lanes.items()
-        ]
+        }
 
     async def _run_lane(self, lane: LiveLane) -> None:
+        """Run one lane; however it ends, it ends finished or failed, never neither."""
         try:
             await lane.run()
+            if not self.timeline.ending:
+                raise RuntimeError("the lane returned before stop was requested")
         except asyncio.CancelledError:
+            await self.timeline.fail_lane(lane.lane, "cancelled")
             raise
         except Exception as exc:
             log.exception("session %s: live %s lane failed", self.ctx.session_id, lane.lane)
             await self.timeline.fail_lane(lane.lane, f"{type(exc).__name__}: {exc}")
         else:
             await self.timeline.finish_lane(lane.lane)
+        finally:
+            if not self.timeline.done(lane.lane):  # e.g. cancelled while failing
+                self.timeline.failed[lane.lane] = "stopped"
 
     def notify_audio(self) -> None:
         if lane := self.lanes.get(Lane.AUDIO):
@@ -69,23 +89,31 @@ class LiveProcessor:
     async def finish(self) -> LiveTimeline:
         """Ask every lane to flush, wait for all of them, and return the final timeline.
 
-        Lanes absent from this processor count as finished, so a processor built with fewer lanes
-        (tests, or a lane turned off) still completes.
+        Lanes still running after ``finish_timeout_s`` are cancelled and marked failed, so a stuck
+        lane delays stop by at most that long; stop then runs the full pipeline.
         """
         await self.timeline.request_end()
         for lane in self.lanes.values():
             lane.wake()
-        if self._tasks:
-            await asyncio.gather(*self._tasks, return_exceptions=True)
-        for lane in Lane:
-            if lane not in self.lanes:
-                await self.timeline.finish_lane(lane)
+        tasks = list(self._tasks.values())
+        if tasks:
+            _, pending = await asyncio.wait(tasks, timeout=self.finish_timeout_s)
+            if pending:
+                log.warning(
+                    "session %s: live lanes %s did not finish in %ss; cancelled",
+                    self.ctx.session_id,
+                    sorted(name for name, t in self._tasks.items() if t in pending),
+                    self.finish_timeout_s,
+                )
+                for task in pending:
+                    task.cancel()
+                await asyncio.gather(*pending, return_exceptions=True)
         return self.timeline
 
     async def cancel(self) -> None:
-        for task in self._tasks:
+        for task in self._tasks.values():
             task.cancel()
-        await asyncio.gather(*self._tasks, return_exceptions=True)
+        await asyncio.gather(*self._tasks.values(), return_exceptions=True)
 
 
 class LiveRegistry:

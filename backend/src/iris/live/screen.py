@@ -7,7 +7,7 @@ Publishes: closed moments and ``closed_to``; emits MOMENT_FOUND per moment.
 
 To build (track B, architecture section 1, "Life of a session: live"):
   1. Hold frames back ``live_frame_holdback_s`` so they are fed in time order; a frame arriving
-     later than that is skipped live (``timeline.mark_skipped_input()``).
+     later than that is skipped live (``timeline.mark_skipped_input(Lane.SCREEN)``).
   2. Sample onto the ``frame_fps`` grid and normalise exactly as ``finalize_frames`` does (size
      fixed by the first readable frame), so ingest at stop produces identical frames.
   3. Feed ``MomentDetector``; publish each moment it returns, and advance ``closed_to``.
@@ -23,5 +23,5 @@ class ScreenLane(LiveLane):
 
     async def run(self) -> None:
         # Placeholder until track B.
-        await self.timeline.mark_skipped_input()
+        await self.timeline.mark_skipped_input(self.lane)
         await self.timeline.wait_until(lambda: self.timeline.ending)
