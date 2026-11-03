@@ -121,8 +121,10 @@ later, so this screen is built around *is it still recording?* and *how do I sto
 - **Screen sharing ended** (the user stopped sharing from the browser bar): Iris stops and makes
   notes, the same as **Stop and make notes**. This follows the capture module's behaviour.
 - **Stopping:** "Finishing the upload…" with the stop button disabled, then the app goes to the
-  session page, which takes over (processing). If finishing fails, the page stays in the recording
-  state with the error, and stopping again retries; nothing captured is lost.
+  session page, which takes over (processing). If capture stopped but the backend couldn't be told
+  to make notes, the page says **Recording stopped**, keeps the error in view and offers **Try
+  again** (which retries only the finish request) and **Open the session**. Nothing captured is
+  lost.
 - **Leaving while recording:** the browser warns before closing the tab, and in-app navigation asks
   for confirmation, because leaving ends the recording.
 
@@ -235,6 +237,12 @@ tested function (`src/session/state.ts`).
 - **Idempotent:** the stream replays history on every reconnect. Replays are dropped by key in the
   hook, and every event is keyed in the reducer as well (stage name, chunk index, figure id), so a
   replayed event changes nothing.
+- **Runs:** a run starts with `status: processing`. Events older than the current run's start are
+  ignored, so a run resumed after a backend restart never mixes with the one that died.
+- **Batched and incremental:** new events are handed over every 50 ms and applied to the current
+  state, so a replayed history of up to 1,000 events renders once rather than re-reducing it per
+  event. The connection logic lives in `src/session/stream.ts` and is tested with a fake
+  EventSource.
 - **Reconnects:** the browser retries dropped connections. When it gives up (a failed response,
   such as while the backend restarts), the hook reconnects itself after 1, 2, 5, then every 10
   seconds.
@@ -345,8 +353,10 @@ pairs are checked to WCAG AA (4.5:1 for text, 3:1 for icons and focus rings) in 
   - Centred on a **plate**: a white rounded rectangle with a hairline border, 12 px padding and max
     height 520 px. The plate stays white in dark mode because redraws and screenshots are drawn on
     white, and inverting them would falsify them.
-  - The caption sits below in `--text-2` at 14 px.
-  - An unverified original crop gets a small "Original crop · not verified" tag under the caption.
+  - The caption sits below in `--text-2` at 14 px, followed by when the figure was shown ("Shown
+    at 1:14") and, for an unverified original crop, an "Original crop · not verified" tag.
+  - Badges in the Figures tab: **Verified redraw** (a redraw only reaches the notes after passing
+    its check), **Screenshot**, or **Original crop · not verified** when this run's events say so.
 - **Tables and code:** tables use hairline rows with a `--surface-2` header, and scroll sideways
   when wide. Code blocks sit on `--surface-2` in the system monospace font at 14 px.
 
@@ -355,7 +365,9 @@ pairs are checked to WCAG AA (4.5:1 for text, 3:1 for icons and focus rings) in 
 One element ties the UI to what Iris does: **the session ribbon**, a thin horizontal bar under the
 session header that represents the session's length.
 
-- **Figures:** each one is a small square marker at its source time (`frame.t`). It is hollow while
+- **Scale:** a baseline with a tick every tenth of the session, the start and end times, and a
+  label ("3 figures, placed where they were shown").
+- **Figures:** each one is a small pin at its source time (`frame.t`). It is hollow while
   being redrawn and filled once done, amber if it's an unverified original crop. Hovering or focusing
   a marker shows its time and caption; activating it scrolls the notes to that figure, or opens the
   Figures tab at it while the notes aren't ready.
