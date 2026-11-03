@@ -154,8 +154,8 @@ stop) or failed counts as "through" any time, so nothing downstream waits foreve
 | Lane | Input | Does | Publishes |
 |---|---|---|---|
 | **Audio** | `live/audio/*.webm` | Decodes the contiguous run of chunks into one PCM stream (`live/audio.pcm`). Cuts windows at the quietest point 10–30 s after the last cut (never at a chunk edge) and transcribes them, at most `IRIS_LIVE_TRANSCRIBE_CONCURRENCY` at once, each prompted with the previous window's text. Commits windows in order | transcript segments, T_a, `TRANSCRIPT_CHUNK` |
-| **Screen** | `live/frames/*.jpg` | Holds frames back `IRIS_LIVE_FRAME_HOLDBACK_S` to order them, samples them onto the `frame_fps` grid and normalises them exactly as ingest does (size fixed by the first frame), writing `frames/` with ingest's names and bytes, and feeds `MomentDetector` | closed moments, T_m, `MOMENT_FOUND` |
-| **Select** | closed moments + transcript | Gates each moment until T_a ≥ its end + `IRIS_LIVE_SPEECH_PAD_S`, aligns it, and reads it with one select call in flight (moments that close meanwhile go in the next batch, up to `selection_batch_size`). Renders each figure in the background (`IRIS_LIVE_RENDER_CONCURRENCY`); the draft shows the source crop until it passes | contents, visuals, T_s, `VISUAL_SELECTED`, `VISUAL_RENDERED` |
+| **Screen** | `live/frames/*.jpg` | Holds frames back `IRIS_LIVE_FRAME_HOLDBACK_S` (session time) to order them, samples them onto the `frame_fps` grid and normalises them with ingest's own helpers (size fixed by the first readable frame), writing `frames/` with ingest's names and bytes, and feeds `MomentDetector` the frames read back from `frames/`, as detect reads them | closed moments, T_m, `MOMENT_FOUND` |
+| **Select** | closed moments + transcript | Gates each moment until T_a ≥ its end + `IRIS_LIVE_SPEECH_PAD_S`, aligns it, and reads it with the select stage's batch step and one call in flight (moments that pass the gate meanwhile go together in the next batch, up to `selection_batch_size`; visual ids continue across batches). Renders each figure in the background (`IRIS_LIVE_RENDER_CONCURRENCY`); a failed render is left to the render stage; the draft shows the source crop until it passes | contents, visuals, T_s, `VISUAL_SELECTED`, `VISUAL_RENDERED` |
 | **Draft** | timeline | Packs evidence before the horizon into sections like write does. A section is *frozen* once the horizon passes a moment boundary beyond its budget, and written once (cached in `notes_sections/`); the open *tail* is rewritten at most every `IRIS_LIVE_DRAFT_REFRESH_S` | `notes_draft.json`, `NOTES_UPDATED` |
 
 **Joining what was split.** Inputs arrive in pieces, so each lane has a rule for putting them back
@@ -167,7 +167,9 @@ together:
 - *Late, repeated or lost chunks:* the decoder only consumes the contiguous run of `seq`. A missing
   chunk is waited for `IRIS_LIVE_AUDIO_GAP_WAIT_S` (longer than the browser's upload timeout plus a
   retry), then decoding resumes at the next WebM cluster and the gap is silence, as in ingest.
-  Frames are ordered by holding them back briefly; a frame later than that is skipped live.
+  Frames are ordered by holding them back briefly; a frame later than that is skipped live, and
+  recorded as skipped input only if ingest would have sampled it (its grid cell has no earlier
+  frame).
 - *Content built up over time:* `MomentDetector` keeps a slide build or a worked example as one
   moment with ordered builds, and closes it only when the next screen has settled and lasted
   `min_moment_s`, so a brief switch to another window never splits it. Open moments are not read.
@@ -181,7 +183,8 @@ Late data is never lost: everything captured stays on disk and the final run use
 
 1. **Finish the lanes.** Each lane flushes: the last audio window is cut wherever the audio ends,
    the detector closes the last moment (`finish`), the last moments are read and figures still
-   rendering complete. The draft lane just stops; the write stage writes the tail. A lane still
+   rendering complete (figures not yet started are left to the render stage, which renders every
+   figure at stop and reuses the live renders from its cache). The draft lane just stops; the write stage writes the tail. A lane still
    flushing after `IRIS_LIVE_FINISH_TIMEOUT_S` is cancelled and counts as failed.
 2. **Ingest** as before: `audio.wav` and `frames.json` from the captured chunks.
 3. **Promote.** If the audio, screen and select lanes finished without failing and none skipped
