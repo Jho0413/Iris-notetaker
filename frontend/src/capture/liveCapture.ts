@@ -118,8 +118,8 @@ export class LiveCapture {
   async start(): Promise<MediaStream> {
     const cancelled = new Promise<never>((_, reject) => (this.cancelOpening = reject))
     this.opening = Promise.race([this.open(), cancelled])
-    // Closing the tab during a prompt runs no cleanup: discard the empty session on the way out.
-    this.env.page.addEventListener('pagehide', this.discardSession)
+    // Closing the tab during a prompt runs no React cleanup: fail the start on the way out.
+    this.env.page.addEventListener('pagehide', this.onPageHideWhileStarting)
     try {
       return await this.opening
     } catch (err) {
@@ -131,7 +131,7 @@ export class LiveCapture {
       if (err instanceof CaptureError) throw err
       throw new CaptureError(`Could not start recording: ${err}`, { cause: err })
     } finally {
-      this.env.page.removeEventListener('pagehide', this.discardSession)
+      this.env.page.removeEventListener('pagehide', this.onPageHideWhileStarting)
       this.opening = undefined
       this.cancelOpening = undefined
     }
@@ -300,7 +300,14 @@ export class LiveCapture {
     this.mixer = undefined
   }
 
-  private discardSession = () => {
+  /**
+   * The page is going away during a prompt. Fail the start, whose cleanup discards the session
+   * right away (microtasks run before the page unloads). A page restored from the back/forward
+   * cache then can't record into the deleted session.
+   */
+  private onPageHideWhileStarting = () => this.cancel('Recording was cancelled before it started.')
+
+  private discardSession() {
     const url = `/api/sessions/${this.sessionId}`
     void this.env.fetch(url, { method: 'DELETE', keepalive: true }).catch(() => {})
   }

@@ -42,7 +42,9 @@ export function LivePage() {
     if (error || !data) return setError('Could not start a session')
     if (unmounted.current) {
       // Left the page while the session was being created: discard it, don't ask for the screen.
-      void api.DELETE('/api/sessions/{session_id}', { params: { path: { session_id: data.id } } })
+      void api
+        .DELETE('/api/sessions/{session_id}', { params: { path: { session_id: data.id } } })
+        .catch(() => {})
       return
     }
     try {

@@ -199,6 +199,8 @@ test('leaving the page while recording ends the session with what arrived', asyn
   assert.equal(t.beacons.length, 1)
   assert.equal(t.beacons[0].url, '/api/live/s1/end')
   assert.deepEqual(JSON.parse(await t.beacons[0].body.text()), { allow_gaps: true })
+  await tick()
+  assert.equal(t.calls.filter((c) => c.method === 'DELETE').length, 0) // what was recorded is kept
 })
 
 test('screen sharing denied: the mic is not requested and the empty session is deleted', async () => {
@@ -456,10 +458,11 @@ test('closing the tab during a prompt discards the empty session', async () => {
       getUserMedia: () => new Promise(() => {}),
     },
   })
-  void capture(t.env).start()
+  const starting = capture(t.env).start()
   await tick()
   t.env.page.dispatchEvent(new Event('pagehide'))
-  await tick()
+  await assert.rejects(within(starting), /cancelled/) // a page restored from cache can't record
+  assert.equal(t.display.stopped, true)
   assert.deepEqual(t.calls.map((c) => `${c.method} ${c.url}`), ['DELETE /api/sessions/s1'])
   assert.equal(t.beacons.length, 0) // nothing to end: it never recorded
 })
