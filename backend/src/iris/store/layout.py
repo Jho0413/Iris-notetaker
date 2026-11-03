@@ -33,6 +33,11 @@ sessions/<id>/
     notes_sections/<hash>.json
                           validated writing sections, keyed by model, prompt and inputs
     notes_draft.json      NotesDraft (written by write, and by the live draft lane while recording)
+    synthesis_cache/<hash>.json
+                          synthesis edit plans and section rewrites, keyed by model, prompt
+                          and inputs
+    notes_synthesis.json  SynthesizedDraft: the notes draft after the synthesis pass
+    synthesis.json        SynthesisReport: what synthesis did, or why it skipped or failed
     notes.json            Notes
     notes.md              final markdown (for export)
     usage_calls.jsonl     one UsageRecord per model call, appended by iris.llm.usage
@@ -136,6 +141,18 @@ class SessionPaths:
     @property
     def notes_draft(self) -> Path:
         return self.root / "notes_draft.json"
+
+    @property
+    def synthesis_cache_dir(self) -> Path:
+        return self.root / "synthesis_cache"
+
+    @property
+    def notes_synthesis(self) -> Path:
+        return self.root / "notes_synthesis.json"
+
+    @property
+    def synthesis_report(self) -> Path:
+        return self.root / "synthesis.json"
 
     @property
     def notes(self) -> Path:

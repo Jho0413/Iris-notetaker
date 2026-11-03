@@ -36,6 +36,7 @@ class Stage(StrEnum):
     WRITE = "write"
     RENDER = "render"
     ASSEMBLE = "assemble"
+    SYNTHESIZE = "synthesize"  # consolidates the assembled notes, then assembles them again
 
 
 class SessionType(StrEnum):
@@ -219,6 +220,67 @@ class Notes(BaseModel):
     title: str
     markdown: str  # markers resolved to image links
     visuals: list[Visual]
+
+
+# --- Synthesize output -------------------------------------------------------------------------
+
+RepeatKind = Literal["slide", "figure"]
+
+
+class Repeat(BaseModel):
+    """Items the local sweep found to look the same: a slide returned to, or a figure picked twice.
+
+    ``ids`` are moment ids (slides) or visual ids (figures), in chronological order.
+    """
+
+    kind: RepeatKind
+    ids: list[str]
+
+
+EditKind = Literal["merge", "correct", "drop_repeat", "dedupe_figure"]
+
+
+class SynthesisEdit(BaseModel):
+    """One consolidation of the notes, planned across the whole session.
+
+    Sections are indexes into the notes split at their top-level headings. ``sections`` are
+    rewritten; ``context_sections`` are only read. Only ``dedupe_figure`` removes visual markers
+    (``drop_visual_ids``, pointing readers at ``keep_visual_id`` instead).
+    """
+
+    kind: EditKind
+    sections: list[int]
+    context_sections: list[int]
+    instruction: str
+    keep_visual_id: str | None
+    drop_visual_ids: list[str]
+
+
+SynthesisStatus = Literal["applied", "unchanged", "skipped", "failed"]
+
+
+class SynthesisReport(BaseModel):
+    """What the synthesis pass did (``synthesis.json``). A failure here never fails the session."""
+
+    status: SynthesisStatus
+    reason: str | None = None  # why it was skipped, changed nothing or failed
+    repeats: list[Repeat] = Field(default_factory=list)
+    edits: list[SynthesisEdit] = Field(default_factory=list)  # validated edits that were applied
+    sections: int = 0  # sections the notes were split into
+    rewritten_sections: list[int] = Field(default_factory=list)
+    failed_sections: list[int] = Field(default_factory=list)  # rewrites rejected; left as written
+
+
+class SynthesizedDraft(BaseModel):
+    """The notes after synthesis (``notes_synthesis.json``) and what they were made from.
+
+    Assemble uses ``draft`` only while ``based_on`` equals the current notes draft and
+    ``visual_ids`` the current selection, so a re-run never shows a stale synthesis.
+    """
+
+    based_on: NotesDraft
+    visual_ids: list[str]  # sorted ids of the selected visuals
+    draft: NotesDraft
 
 
 # --- Progress events ---------------------------------------------------------------------------
