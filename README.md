@@ -70,6 +70,7 @@ make dev                          # API on :8000, UI on http://localhost:5173
 make test                         # backend tests, frontend tests and typecheck
 make lint                         # ruff + frontend lint (CI also runs build)
 make gen-api                      # regenerate the UI's typed client after API changes
+make usage [<session_id>]         # model usage and cost (most recent session by default)
 ```
 
 Running the pipeline without the UI:
@@ -79,7 +80,7 @@ cd backend
 uv run iris process path/to/recording.mp4   # new session, full pipeline
 uv run iris run <session_id> --from select  # re-run from a stage
 uv run iris stage <session_id> detect       # run one stage on its own
-uv run iris cost <session_id>               # model calls and cost per stage, model and purpose
+uv run iris cost [<session_id>]             # model calls and cost per stage, model and purpose
 ```
 
 Every model call is recorded in the session's `usage.json` (also `GET /api/sessions/{id}/usage`):
