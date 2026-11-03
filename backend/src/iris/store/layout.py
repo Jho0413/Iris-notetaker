@@ -25,6 +25,8 @@ sessions/<id>/
     notes_draft.json      NotesDraft
     notes.json            Notes
     notes.md              final markdown (for export)
+    usage_calls.jsonl     one UsageRecord per model call, appended by iris.llm.usage
+    usage.json            SessionUsage: those records with totals, refreshed after each stage
 """
 
 from dataclasses import dataclass
@@ -99,6 +101,15 @@ class SessionPaths:
     @property
     def notes_md(self) -> Path:
         return self.root / "notes.md"
+
+    # Cost tracking: written by iris.llm.usage around every model call, not by one stage.
+    @property
+    def usage_log(self) -> Path:
+        return self.root / "usage_calls.jsonl"
+
+    @property
+    def usage(self) -> Path:
+        return self.root / "usage.json"
 
     def ensure(self) -> "SessionPaths":
         for d in (self.root, self.frames_dir, self.visuals_dir):

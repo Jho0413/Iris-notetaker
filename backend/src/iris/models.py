@@ -241,3 +241,60 @@ class Event(BaseModel):
     session_id: str
     data: dict = Field(default_factory=dict)
     at: datetime
+
+
+# --- Usage (cost tracking) ---------------------------------------------------------------------
+
+
+class UsageRecord(BaseModel):
+    """One model call. Token counts are as billed; breakdowns are subsets of their totals."""
+
+    at: datetime
+    stage: Stage | None = None
+    purpose: str  # transcription, screen_reading, notes, svg, image, figure_check, ...
+    operation: str  # SDK method, e.g. "chat.completions.parse"
+    model: str
+    latency_s: float
+    input_tokens: int = 0  # all input, including cached, image and audio tokens
+    cached_input_tokens: int = 0
+    input_image_tokens: int = 0
+    input_audio_tokens: int = 0
+    output_tokens: int = 0  # all output, including reasoning and image tokens
+    reasoning_tokens: int = 0
+    output_image_tokens: int = 0
+    images: int = 0  # images returned
+    audio_seconds: float = 0  # billed seconds of audio (duration-billed models)
+    cost_usd: float | None = None  # None: unpriced (see ``unpriced``)
+    unpriced: str | None = None  # why no cost could be computed
+    error: str | None = None  # the call failed (no usage reported)
+
+
+class UsageTotals(BaseModel):
+    calls: int = 0
+    unpriced_calls: int = 0
+    failed_calls: int = 0
+    cost_usd: float = 0  # priced calls only; unpriced calls are counted in ``unpriced_calls``
+    latency_s: float = 0
+    input_tokens: int = 0
+    cached_input_tokens: int = 0
+    input_image_tokens: int = 0
+    input_audio_tokens: int = 0
+    output_tokens: int = 0
+    reasoning_tokens: int = 0
+    output_image_tokens: int = 0
+    images: int = 0
+    audio_seconds: float = 0
+
+
+class SessionUsage(BaseModel):
+    """Every model call made for a session, across all runs, with totals (``usage.json``).
+
+    Cache hits make no call, so a re-run that reuses cached work adds nothing here.
+    """
+
+    prices_checked: str  # date the price table was checked against OpenAI's pricing page
+    records: list[UsageRecord] = []
+    total: UsageTotals = UsageTotals()
+    by_stage: dict[str, UsageTotals] = {}
+    by_model: dict[str, UsageTotals] = {}
+    by_purpose: dict[str, UsageTotals] = {}

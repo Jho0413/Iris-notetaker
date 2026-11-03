@@ -215,7 +215,7 @@ async def generate_section(ctx: StageContext, payload: str) -> WrittenSection:
         model=ctx.settings.notes_model,
         messages=[{"role": "system", "content": PROMPT}, {"role": "user", "content": payload}],
         response_format=WrittenSection,
-        reasoning_effort=ctx.settings.reasoning_effort,
+        reasoning_effort=ctx.settings.notes_reasoning_effort or ctx.settings.reasoning_effort,
         max_completion_tokens=32_000,  # includes reasoning tokens
     )
     if not response.choices:
