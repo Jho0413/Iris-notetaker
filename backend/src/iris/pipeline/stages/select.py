@@ -256,7 +256,7 @@ async def choose(ctx: StageContext, content: list[ChatCompletionContentPartParam
         model=ctx.settings.vision_model,
         messages=[{"role": "system", "content": PROMPT}, {"role": "user", "content": content}],
         response_format=Decisions,
-        reasoning_effort=ctx.settings.reasoning_effort,
+        reasoning_effort=ctx.settings.select_reasoning_effort or ctx.settings.reasoning_effort,
     )
     if not completion.choices:
         raise ValueError("vision model returned no selection")

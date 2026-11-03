@@ -21,9 +21,11 @@ import json
 import shutil
 from collections.abc import Awaitable, Callable
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel
 
+from iris.llm import usage
 from iris.llm.client import get_openai
 from iris.models import EventType, RenderAs, RenderedVisual, Renders, Selection, Visual
 from iris.pipeline.context import StageContext
@@ -117,6 +119,13 @@ def _parsed[M: BaseModel](completion, what: str) -> M:
     return message.parsed
 
 
+def _effort(ctx: StageContext, call: Literal["diagram", "check"]) -> str:
+    """Per-call reasoning effort (``IRIS_DIAGRAM_/CHECK_REASONING_EFFORT``), else the default."""
+    s = ctx.settings
+    override = s.diagram_reasoning_effort if call == "diagram" else s.check_reasoning_effort
+    return override or s.reasoning_effort
+
+
 async def draw_svg(
     ctx: StageContext, visual: Visual, source: bytes, feedback: list[str]
 ) -> tuple[bytes, bytes]:
@@ -129,15 +138,16 @@ async def draw_svg(
         content.append(
             {"type": "text", "text": json.dumps({"feedback_from_previous_attempt": feedback})}
         )
-    completion = await get_openai(ctx.settings).chat.completions.parse(
-        model=ctx.settings.diagram_model,
-        messages=[
-            {"role": "system", "content": SVG_PROMPT},
-            {"role": "user", "content": content},
-        ],
-        response_format=SvgDrawing,
-        reasoning_effort=ctx.settings.reasoning_effort,
-    )
+    with usage.purpose("svg"):
+        completion = await get_openai(ctx.settings).chat.completions.parse(
+            model=ctx.settings.diagram_model,
+            messages=[
+                {"role": "system", "content": SVG_PROMPT},
+                {"role": "user", "content": content},
+            ],
+            response_format=SvgDrawing,
+            reasoning_effort=_effort(ctx, "diagram"),
+        )
     svg = sanitize_svg(_parsed(completion, "diagram model").svg)
     png = await asyncio.to_thread(rasterize_svg, svg)
     return svg.encode(), png
@@ -155,13 +165,14 @@ async def draw_image(
     extra = ""
     if feedback:
         extra = "\nA previous attempt had these problems; avoid them:\n- " + "\n- ".join(feedback)
-    result = await get_openai(ctx.settings).images.generate(
-        model=ctx.settings.image_model,
-        prompt=IMAGE_PROMPT.format(description=visual.description, feedback=extra),
-        quality=ctx.settings.image_quality,
-        size="auto",
-        output_format="png",
-    )
+    with usage.purpose("image"):
+        result = await get_openai(ctx.settings).images.generate(
+            model=ctx.settings.image_model,
+            prompt=IMAGE_PROMPT.format(description=visual.description, feedback=extra),
+            quality=ctx.settings.image_quality,
+            size="auto",
+            output_format="png",
+        )
     if not result.data or not result.data[0].b64_json:
         raise ValueError("image model returned no image")
     png = base64.b64decode(result.data[0].b64_json)
@@ -169,22 +180,29 @@ async def draw_image(
 
 
 async def check(ctx: StageContext, visual: Visual, source: bytes, candidate: bytes) -> Check:
-    completion = await get_openai(ctx.settings).chat.completions.parse(
-        model=ctx.settings.vision_model,
-        messages=[
-            {"role": "system", "content": CHECK_PROMPT},
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": _brief(visual)},
-                    {"type": "image_url", "image_url": {"url": _data_url(source, "image/jpeg")}},
-                    {"type": "image_url", "image_url": {"url": _data_url(candidate, "image/png")}},
-                ],
-            },
-        ],
-        response_format=Check,
-        reasoning_effort=ctx.settings.reasoning_effort,
-    )
+    with usage.purpose("figure_check"):
+        completion = await get_openai(ctx.settings).chat.completions.parse(
+            model=ctx.settings.vision_model,
+            messages=[
+                {"role": "system", "content": CHECK_PROMPT},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": _brief(visual)},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": _data_url(source, "image/jpeg")},
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": _data_url(candidate, "image/png")},
+                        },
+                    ],
+                },
+            ],
+            response_format=Check,
+            reasoning_effort=_effort(ctx, "check"),
+        )
     result = _parsed(completion, "vision model")
     # A check that lists problems has not passed, whatever its flag says.
     return Check(matches=result.matches and not result.problems, problems=result.problems)
@@ -207,6 +225,12 @@ def _cache_key(ctx: StageContext, visual: Visual, source: bytes) -> str:
         "models": [s.diagram_model, s.image_model, s.vision_model, s.image_quality],
         "effort": s.reasoning_effort,
         "attempts": s.render_attempts,
+        # Only when set, so caches written before per-call efforts existed stay valid.
+        **(
+            {"efforts": [_effort(ctx, "diagram"), _effort(ctx, "check")]}
+            if s.diagram_reasoning_effort or s.check_reasoning_effort
+            else {}
+        ),
         "visual": visual.model_dump(mode="json", exclude={"id", "path", "source_path"}),
         "source": hashlib.sha256(source).hexdigest(),
     }

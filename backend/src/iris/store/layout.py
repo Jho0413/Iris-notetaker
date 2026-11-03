@@ -25,6 +25,7 @@ sessions/<id>/
     notes_draft.json      NotesDraft
     notes.json            Notes
     notes.md              final markdown (for export)
+    usage.json            SessionUsage: every model call, written by iris.llm.usage
 """
 
 from dataclasses import dataclass
@@ -99,6 +100,11 @@ class SessionPaths:
     @property
     def notes_md(self) -> Path:
         return self.root / "notes.md"
+
+    # Cost tracking: written by iris.llm.usage around every model call, not by one stage.
+    @property
+    def usage(self) -> Path:
+        return self.root / "usage.json"
 
     def ensure(self) -> "SessionPaths":
         for d in (self.root, self.frames_dir, self.visuals_dir):

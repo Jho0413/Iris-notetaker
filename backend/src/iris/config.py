@@ -4,8 +4,74 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field
+from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# --- Model prices (cost tracking) --------------------------------------------------------------
+
+
+class ModelPrice(BaseModel):
+    """What one model costs, in USD. Token prices are per million tokens.
+
+    A price left as ``None`` is unknown: a call that uses that part of the price is reported as
+    unpriced, never guessed (``iris.llm.usage.price_call``).
+    """
+
+    input: float | None = None  # text input (and, for chat models, image input)
+    cached_input: float | None = None
+    output: float | None = None  # text output, including reasoning tokens
+    image_input: float | None = None  # image models bill image input tokens separately
+    image_output: float | None = None
+    audio_input: float | None = None  # token-billed transcription models
+    audio_per_second: float | None = None  # duration-billed models, per second rounded up
+    # Requests with more than this many input tokens are billed at ``long_context`` instead.
+    long_context_above: int | None = None
+    long_context: "ModelPrice | None" = None
+
+
+# Standard-tier prices from https://developers.openai.com/api/docs/pricing, checked on the date
+# below. Update both together. Models missing here (e.g. gpt-transcribe, listed only with a
+# per-minute estimate) are reported as unpriced.
+PRICES_CHECKED = "2026-11-03"
+MODEL_PRICES: dict[str, ModelPrice] = {
+    "gpt-5.5": ModelPrice(
+        input=5.00,
+        cached_input=0.50,
+        output=30.00,
+        long_context_above=272_000,
+        long_context=ModelPrice(input=10.00, cached_input=1.00, output=45.00),
+    ),
+    "gpt-5.4": ModelPrice(
+        input=2.50,
+        cached_input=0.25,
+        output=15.00,
+        long_context_above=272_000,
+        long_context=ModelPrice(input=5.00, cached_input=0.50, output=22.50),
+    ),
+    "gpt-5.4-mini": ModelPrice(input=0.75, cached_input=0.075, output=4.50),
+    "gpt-5": ModelPrice(input=1.25, cached_input=0.125, output=10.00),
+    "gpt-5-mini": ModelPrice(input=0.25, cached_input=0.025, output=2.00),
+    "gpt-5-nano": ModelPrice(input=0.05, cached_input=0.005, output=0.40),
+    "gpt-4.1": ModelPrice(input=2.00, cached_input=0.50, output=8.00),
+    "gpt-4.1-mini": ModelPrice(input=0.40, cached_input=0.10, output=1.60),
+    "gpt-4o": ModelPrice(input=2.50, cached_input=1.25, output=10.00),
+    "gpt-4o-mini": ModelPrice(input=0.15, cached_input=0.075, output=0.60),
+    # Image models: no text output price is listed for gpt-image-2 or gpt-image-1-mini.
+    "gpt-image-2": ModelPrice(input=5.00, cached_input=1.25, image_input=8.00, image_output=30.00),
+    "gpt-image-1.5": ModelPrice(
+        input=5.00, cached_input=1.25, image_input=8.00, image_output=32.00, output=10.00
+    ),
+    "gpt-image-1-mini": ModelPrice(
+        input=2.00, cached_input=0.20, image_input=2.50, image_output=8.00
+    ),
+    # Transcription. Whisper is $0.006 per minute, billed per second (rounded up).
+    "whisper-1": ModelPrice(audio_per_second=0.0001),
+    "gpt-4o-transcribe": ModelPrice(input=2.50, audio_input=2.50, output=10.00),
+    "gpt-4o-transcribe-diarize": ModelPrice(input=2.50, audio_input=2.50, output=10.00),
+    "gpt-4o-mini-transcribe": ModelPrice(input=1.25, audio_input=1.25, output=5.00),
+}
+
+Effort = Literal["low", "medium", "high"]
 
 
 class Settings(BaseSettings):
@@ -38,6 +104,21 @@ class Settings(BaseSettings):
 
     # Serialized evidence characters per notes call (plus prompt and small metadata).
     notes_context_chars: int = Field(default=24_000, ge=2_000, le=60_000)
+
+    # Cost controls: reasoning effort per call type; unset uses ``reasoning_effort``.
+    select_reasoning_effort: Effort | None = None  # screen reading
+    notes_reasoning_effort: Effort | None = None
+    diagram_reasoning_effort: Effort | None = None  # SVG figures
+    check_reasoning_effort: Effort | None = None  # figure checks
+
+    # Model price table (USD). IRIS_MODEL_PRICES is JSON whose entries add to or replace the
+    # defaults, e.g. {"my-model": {"input": 1.0, "output": 4.0}}.
+    model_prices: dict[str, ModelPrice] = Field(default_factory=lambda: dict(MODEL_PRICES))
+
+    @field_validator("model_prices", mode="after")
+    @classmethod
+    def _merge_default_prices(cls, prices: dict[str, ModelPrice]) -> dict[str, ModelPrice]:
+        return {**MODEL_PRICES, **prices}
 
     # Server
     cors_origins: list[str] = ["http://localhost:5173"]
