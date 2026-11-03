@@ -1,7 +1,9 @@
 import asyncio
 import shutil
+import unicodedata
 from pathlib import Path
 from typing import Annotated
+from urllib.parse import quote
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, PlainTextResponse
@@ -84,11 +86,31 @@ def export_notes(session: SessionDep, paths: PathsDep) -> PlainTextResponse:
         raise HTTPException(404, "notes not ready")
     notes = read_model(paths.notes, Notes)
     body = export_markdown_embedded(notes, paths.root)
-    filename = f"{session.title or session.id}.md"
     return PlainTextResponse(
         body,
         media_type="text/markdown",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={"Content-Disposition": _attachment_header(session.title, session.id)},
+    )
+
+
+def _attachment_header(title: str, fallback: str) -> str:
+    """``Content-Disposition`` for a download named after ``title`` (RFC 6266 / RFC 5987).
+
+    Header values must be ASCII, so ``filename`` carries an ASCII approximation (accents
+    folded, quotes, backslashes and other unsafe characters replaced) and ``filename*`` the
+    full UTF-8 name, which browsers prefer. ``fallback`` names the file if nothing is left.
+    """
+    # Control characters (newlines, tabs) and path separators never belong in a filename.
+    stem = "".join(
+        "_" if c in "/\\" else " " if unicodedata.category(c) == "Cc" else c for c in title
+    )
+    stem = " ".join(stem.split()) or fallback
+    ascii_stem = unicodedata.normalize("NFKD", stem).encode("ascii", "ignore").decode()
+    ascii_stem = " ".join(ascii_stem.replace('"', "_").split())
+    if not any(c.isalnum() for c in ascii_stem):
+        ascii_stem = fallback
+    return (
+        f"attachment; filename=\"{ascii_stem}.md\"; filename*=UTF-8''{quote(stem + '.md', safe='')}"
     )
 
 
