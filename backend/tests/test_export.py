@@ -131,7 +131,9 @@ def test_export_api_embeds_captioned_image(client, settings):
     response = client.get(f"/api/sessions/{sid}/export")
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/markdown")
-    assert response.headers["content-disposition"] == 'attachment; filename="Review.md"'
+    assert response.headers["content-disposition"] == (
+        "attachment; filename=\"Review.md\"; filename*=UTF-8''Review.md"
+    )
     image = images(response.text)[0]
     assert image.attrGet("src") == "data:image/jpeg;base64,aW1hZ2UgYnl0ZXM="
     assert "".join(t.content for t in image.children) == visual.caption

@@ -1,7 +1,9 @@
 import asyncio
 import shutil
+import unicodedata
 from pathlib import Path
 from typing import Annotated
+from urllib.parse import quote
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, PlainTextResponse
@@ -84,12 +86,50 @@ def export_notes(session: SessionDep, paths: PathsDep) -> PlainTextResponse:
         raise HTTPException(404, "notes not ready")
     notes = read_model(paths.notes, Notes)
     body = export_markdown_embedded(notes, paths.root)
-    filename = f"{session.title or session.id}.md"
     return PlainTextResponse(
         body,
         media_type="text/markdown",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={"Content-Disposition": _attachment_header(session.title, session.id)},
     )
+
+
+def _attachment_header(title: str, fallback: str) -> str:
+    """``Content-Disposition`` for a download named after ``title`` (RFC 6266 / RFC 5987).
+
+    Header values must be ASCII, so ``filename`` carries an ASCII approximation (accents
+    folded, quotes, backslashes and other unsafe characters replaced) and ``filename*`` the
+    full UTF-8 name, which browsers prefer. ``fallback`` names the file if nothing is left.
+    """
+    stem = _clean_filename(title)
+    if all(c.isspace() or unicodedata.category(c) == "Cf" for c in stem):  # blank/invisible
+        stem = fallback
+    # NFKD folds accents off letters, but also turns full-width forms into ASCII "/", "\\"
+    # and '"', so the folded name is cleaned again.
+    folded = unicodedata.normalize("NFKD", stem).encode("ascii", "ignore").decode()
+    ascii_stem = _clean_filename(folded).replace('"', "_")
+    if not any(c.isalnum() for c in ascii_stem):
+        ascii_stem = fallback
+    return (
+        f"attachment; filename=\"{ascii_stem}.md\"; filename*=UTF-8''{quote(stem + '.md', safe='')}"
+    )
+
+
+_BIDI_CONTROLS = frozenset(
+    "\u061c\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069"
+)
+
+
+def _clean_filename(name: str) -> str:
+    """Replace path separators, drop bidi controls, turn control characters into spaces."""
+    out = []
+    for c in name:
+        if c in "/\\":
+            out.append("_")
+        elif unicodedata.category(c) == "Cc":
+            out.append(" ")
+        elif c not in _BIDI_CONTROLS:
+            out.append(c)
+    return " ".join("".join(out).split())
 
 
 @router.get("/{session_id}/files/{subdir}/{name}")
