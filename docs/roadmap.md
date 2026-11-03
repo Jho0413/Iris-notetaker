@@ -28,7 +28,9 @@ fixed release dates; revisit their scope after the MVP is in use.
   $2.50 was spent in one day of development runs before tracking; the figure checks, screen
   reading, notes and SVG calls on `gpt-5.5` are suspected to be the main driver, alongside image
   generation. This now needs measuring on real sessions.
-- Long transcripts are processed in sections and joined; there is no final synthesis pass yet.
+- Long transcripts are processed in sections and joined, then a final synthesis pass consolidates
+  them (merges split worked examples, applies later corrections, drops repeats, deduplicates
+  figures). Its quality on real long sessions is untested.
 - Live ingestion and incremental processing are not implemented; ending a live session fails.
 - Library, upload, live and session screens are basic; the intended UI design is not done.
 
@@ -93,13 +95,15 @@ capture. Live functionality and a well-designed UI are part of this milestone.
 
 ### Produce coherent finished notes
 
-- [ ] Add a final synthesis pass for long and live sessions that consolidates repeated points and
+- [x] Add a final synthesis pass for long and live sessions that consolidates repeated points and
       reconciles later corrections while preserving distinct explanations and useful visuals.
-- [ ] Keep a worked example or process that spans writing sections in one piece, and deduplicate
+- [x] Keep a worked example or process that spans writing sections in one piece, and deduplicate
       figures across the whole session, not only recent moments.
 - [ ] Keep one visual style across a session's generated figures.
 - [ ] Preserve evidence behind decisions, action items and uncertainty; avoid invented conclusions.
-- [ ] Validate visual references after synthesis and retain recovery/caching behavior.
+      (Synthesis rejects rewrites that lose decision, action-item or uncertainty wording, math or
+      figures; not yet measured on real sessions.)
+- [x] Validate visual references after synthesis and retain recovery/caching behavior.
 
 ### Complete live capture and ingestion
 

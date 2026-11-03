@@ -16,7 +16,8 @@ discussed is placed in the notes next to what was said about it.
 5. **Select** the moments worth keeping and rebuild each as a professional visual, checked against
    what was shown and said.
 6. **Write** notes in a style suited to the session (meeting, lecture or demo), with each visual placed
-   where it belongs.
+   where it belongs, then consolidate them across the whole session (split worked examples joined,
+   later corrections applied, repeats and duplicate figures removed).
 7. **Show and export** the finished notes, with visuals embedded.
 
 ## Requirements
@@ -131,8 +132,8 @@ backend/src/iris/
   api/            FastAPI routes: sessions, live input, SSE progress events, health
   sources/        upload + browser live: turn input into audio.wav + frames/ in a session
   pipeline/
-    stages/       transcribe, detect, align, select, write, render, assemble (read session files,
-                  write their own)
+    stages/       transcribe, detect, align, select, write, render, assemble, synthesize (read
+                  session files, write their own)
     __init__.py   stage registry and PLAN (stage order; groups run concurrently)
   live/           processing while a live session records: lanes over a shared timeline
                   (in progress; lanes are placeholders until built)
