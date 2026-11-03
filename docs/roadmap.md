@@ -23,9 +23,11 @@ fixed release dates; revisit their scope after the MVP is in use.
 - Validated so far on two short tablet recordings (a worked algebra example and a sketched physics
   explanation), with prompts free of sample-specific examples. Slides, meetings, demos, code,
   camera-filmed whiteboards, long sessions and the screenshot path are untested.
-- Model cost is not tracked. About $2.50 was spent in one day of development runs; the figure
-  checks, screen reading, notes and SVG calls on `gpt-5.5` are suspected to be the main driver,
-  alongside image generation. This needs measuring.
+- Every model call is recorded per session (`usage.json`, `GET /api/sessions/{id}/usage`,
+  `iris cost`) with tokens, images, audio seconds, latency and cost from a price table. About
+  $2.50 was spent in one day of development runs before tracking; the figure checks, screen
+  reading, notes and SVG calls on `gpt-5.5` are suspected to be the main driver, alongside image
+  generation. This now needs measuring on real sessions.
 - Long transcripts are processed in sections and joined; there is no final synthesis pass yet.
 - Live ingestion and incremental processing are not implemented; ending a live session fails.
 - Library, upload, live and session screens are basic; the intended UI design is not done.
@@ -49,15 +51,17 @@ capture. Live functionality and a well-designed UI are part of this milestone.
 
 ### Cost tracking and controls (next)
 
-- [ ] Record every model call: stage, model, input/cached/output/reasoning tokens, image tokens,
+- [x] Record every model call: stage, model, input/cached/output/reasoning tokens, image tokens,
       audio seconds and latency.
-- [ ] Keep model prices in a configuration table checked against OpenAI's pricing page, and write
+- [x] Keep model prices in a configuration table checked against OpenAI's pricing page, and write
       per-stage and per-model totals to each session (`usage.json`, API and `iris cost`).
 - [ ] Confirm the main cost drivers, starting with `gpt-5.5` (screen reading, notes, figure checks,
       SVG) and image generation.
 - [ ] Add controls: model per stage (try cheaper models where quality holds, e.g. for figure checks),
       reasoning effort, image quality, a cap on generated figures per hour (screenshots beyond it)
-      and render attempts.
+      and render attempts. Done so far: reasoning effort per call type
+      (`IRIS_{SELECT,NOTES,DIAGRAM,CHECK}_REASONING_EFFORT`), alongside the existing image quality
+      and render attempts settings. Still to do: a figure cap, and a separate figure-check model.
 - [ ] Measure cost and latency per hour of session for each recording type against the README's
       goals ($0.50–2 per hour; notes within a few minutes for a 1-hour upload).
 

@@ -2,7 +2,9 @@
 
 sessions/<id>/
     source.<ext>          uploaded recording (upload source only)
-    live/audio/<n>.webm   live audio chunks (browser live source only)
+    live/audio/<n>.webm   live audio chunks, by sequence number (browser live source only)
+    live/frames/<t_ms>.jpg
+                          live screen frames as captured (browser live source only)
     audio.wav             16 kHz mono
     frames/<t_ms>.jpg     sampled frames
     frames.json           FrameIndex
@@ -25,6 +27,8 @@ sessions/<id>/
     notes_draft.json      NotesDraft
     notes.json            Notes
     notes.md              final markdown (for export)
+    usage_calls.jsonl     one UsageRecord per model call, appended by iris.llm.usage
+    usage.json            SessionUsage: those records with totals, refreshed after each stage
 """
 
 from dataclasses import dataclass
@@ -47,6 +51,10 @@ class SessionPaths:
     @property
     def live_audio_dir(self) -> Path:
         return self.root / "live" / "audio"
+
+    @property
+    def live_frames_dir(self) -> Path:
+        return self.root / "live" / "frames"
 
     @property
     def audio(self) -> Path:
@@ -99,6 +107,15 @@ class SessionPaths:
     @property
     def notes_md(self) -> Path:
         return self.root / "notes.md"
+
+    # Cost tracking: written by iris.llm.usage around every model call, not by one stage.
+    @property
+    def usage_log(self) -> Path:
+        return self.root / "usage_calls.jsonl"
+
+    @property
+    def usage(self) -> Path:
+        return self.root / "usage.json"
 
     def ensure(self) -> "SessionPaths":
         for d in (self.root, self.frames_dir, self.visuals_dir):

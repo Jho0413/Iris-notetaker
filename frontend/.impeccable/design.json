@@ -1,0 +1,1257 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-03T19:16:17.171Z",
+  "title": "Design System: Iris",
+  "extensions": {
+    "theming": {
+      "attribute": "data-theme on <html>",
+      "values": [
+        "light",
+        "dark"
+      ],
+      "userChoice": "light | dark | system, stored in localStorage \"iris-theme\"; resolved before first paint by an inline script in index.html and kept current by src/components/theme.ts",
+      "tokenSuffix": "Frontmatter keys ending in -dark are the :root[data-theme=dark] values of the same custom property; plate has no dark value (it stays white).",
+      "source": "src/index.css",
+      "rationale": "../docs/frontend.md#5-visual-design"
+    },
+    "colorMeta": {
+      "bg": {
+        "role": "neutral",
+        "displayName": "Cool Ground",
+        "theme": "light",
+        "cssVar": "--bg",
+        "canonical": "#f6f6f9",
+        "oklch": "oklch(97.4% 0.004 286.3)",
+        "tonalRamp": [
+          "oklch(15% 0.004 286.3)",
+          "oklch(26.4% 0.004 286.3)",
+          "oklch(37.9% 0.004 286.3)",
+          "oklch(49.3% 0.004 286.3)",
+          "oklch(60.7% 0.004 286.3)",
+          "oklch(72.1% 0.004 286.3)",
+          "oklch(83.6% 0.004 286.3)",
+          "oklch(95% 0.004 286.3)"
+        ]
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "Paper",
+        "theme": "light",
+        "cssVar": "--surface",
+        "canonical": "#ffffff",
+        "oklch": "oklch(100% 0 89.9)",
+        "tonalRamp": [
+          "oklch(15% 0 89.9)",
+          "oklch(26.4% 0 89.9)",
+          "oklch(37.9% 0 89.9)",
+          "oklch(49.3% 0 89.9)",
+          "oklch(60.7% 0 89.9)",
+          "oklch(72.1% 0 89.9)",
+          "oklch(83.6% 0 89.9)",
+          "oklch(95% 0 89.9)"
+        ]
+      },
+      "surface-2": {
+        "role": "neutral",
+        "displayName": "Desk",
+        "theme": "light",
+        "cssVar": "--surface-2",
+        "canonical": "#eeeef3",
+        "oklch": "oklch(95.1% 0.007 286.3)",
+        "tonalRamp": [
+          "oklch(15% 0.007 286.3)",
+          "oklch(26.4% 0.007 286.3)",
+          "oklch(37.9% 0.007 286.3)",
+          "oklch(49.3% 0.007 286.3)",
+          "oklch(60.7% 0.007 286.3)",
+          "oklch(72.1% 0.007 286.3)",
+          "oklch(83.6% 0.007 286.3)",
+          "oklch(95% 0.007 286.3)"
+        ]
+      },
+      "surface-3": {
+        "role": "neutral",
+        "displayName": "Desk Pressed",
+        "theme": "light",
+        "cssVar": "--surface-3",
+        "canonical": "#e4e4ec",
+        "oklch": "oklch(92.1% 0.011 286.2)",
+        "tonalRamp": [
+          "oklch(15% 0.011 286.2)",
+          "oklch(26.4% 0.011 286.2)",
+          "oklch(37.9% 0.011 286.2)",
+          "oklch(49.3% 0.011 286.2)",
+          "oklch(60.7% 0.011 286.2)",
+          "oklch(72.1% 0.011 286.2)",
+          "oklch(83.6% 0.011 286.2)",
+          "oklch(95% 0.011 286.2)"
+        ]
+      },
+      "border": {
+        "role": "neutral",
+        "displayName": "Hairline",
+        "theme": "light",
+        "cssVar": "--border",
+        "canonical": "#dedee6",
+        "oklch": "oklch(90.3% 0.011 286.2)",
+        "tonalRamp": [
+          "oklch(15% 0.011 286.2)",
+          "oklch(26.4% 0.011 286.2)",
+          "oklch(37.9% 0.011 286.2)",
+          "oklch(49.3% 0.011 286.2)",
+          "oklch(60.7% 0.011 286.2)",
+          "oklch(72.1% 0.011 286.2)",
+          "oklch(83.6% 0.011 286.2)",
+          "oklch(95% 0.011 286.2)"
+        ]
+      },
+      "border-strong": {
+        "role": "neutral",
+        "displayName": "Control Edge",
+        "theme": "light",
+        "cssVar": "--border-strong",
+        "canonical": "#c9c9d4",
+        "oklch": "oklch(83.9% 0.015 286.1)",
+        "tonalRamp": [
+          "oklch(15% 0.015 286.1)",
+          "oklch(26.4% 0.015 286.1)",
+          "oklch(37.9% 0.015 286.1)",
+          "oklch(49.3% 0.015 286.1)",
+          "oklch(60.7% 0.015 286.1)",
+          "oklch(72.1% 0.015 286.1)",
+          "oklch(83.6% 0.015 286.1)",
+          "oklch(95% 0.015 286.1)"
+        ]
+      },
+      "text": {
+        "role": "neutral",
+        "displayName": "Ink",
+        "theme": "light",
+        "cssVar": "--text",
+        "canonical": "#17171c",
+        "oklch": "oklch(20.7% 0.01 285.5)",
+        "tonalRamp": [
+          "oklch(15% 0.01 285.5)",
+          "oklch(26.4% 0.01 285.5)",
+          "oklch(37.9% 0.01 285.5)",
+          "oklch(49.3% 0.01 285.5)",
+          "oklch(60.7% 0.01 285.5)",
+          "oklch(72.1% 0.01 285.5)",
+          "oklch(83.6% 0.01 285.5)",
+          "oklch(95% 0.01 285.5)"
+        ]
+      },
+      "text-2": {
+        "role": "neutral",
+        "displayName": "Muted Ink",
+        "theme": "light",
+        "cssVar": "--text-2",
+        "canonical": "#5b5b68",
+        "oklch": "oklch(47.6% 0.021 285.6)",
+        "tonalRamp": [
+          "oklch(15% 0.021 285.6)",
+          "oklch(26.4% 0.021 285.6)",
+          "oklch(37.9% 0.021 285.6)",
+          "oklch(49.3% 0.021 285.6)",
+          "oklch(60.7% 0.021 285.6)",
+          "oklch(72.1% 0.021 285.6)",
+          "oklch(83.6% 0.021 285.6)",
+          "oklch(95% 0.021 285.6)"
+        ]
+      },
+      "accent": {
+        "role": "primary",
+        "displayName": "Iris Indigo",
+        "theme": "light",
+        "cssVar": "--accent",
+        "canonical": "#4b44d6",
+        "oklch": "oklch(49.1% 0.215 277.1)",
+        "tonalRamp": [
+          "oklch(15% 0.16 277.1)",
+          "oklch(26.4% 0.16 277.1)",
+          "oklch(37.9% 0.16 277.1)",
+          "oklch(49.3% 0.16 277.1)",
+          "oklch(60.7% 0.16 277.1)",
+          "oklch(72.1% 0.16 277.1)",
+          "oklch(83.6% 0.16 277.1)",
+          "oklch(95% 0.16 277.1)"
+        ]
+      },
+      "accent-hover": {
+        "role": "primary",
+        "displayName": "Iris Indigo Hover",
+        "theme": "light",
+        "cssVar": "--accent-hover",
+        "canonical": "#3d36c2",
+        "oklch": "oklch(44.2% 0.208 275.9)",
+        "tonalRamp": [
+          "oklch(15% 0.16 275.9)",
+          "oklch(26.4% 0.16 275.9)",
+          "oklch(37.9% 0.16 275.9)",
+          "oklch(49.3% 0.16 275.9)",
+          "oklch(60.7% 0.16 275.9)",
+          "oklch(72.1% 0.16 275.9)",
+          "oklch(83.6% 0.16 275.9)",
+          "oklch(95% 0.16 275.9)"
+        ]
+      },
+      "accent-text": {
+        "role": "primary",
+        "displayName": "On Indigo",
+        "theme": "light",
+        "cssVar": "--accent-text",
+        "canonical": "#ffffff",
+        "oklch": "oklch(100% 0 89.9)",
+        "tonalRamp": [
+          "oklch(15% 0 89.9)",
+          "oklch(26.4% 0 89.9)",
+          "oklch(37.9% 0 89.9)",
+          "oklch(49.3% 0 89.9)",
+          "oklch(60.7% 0 89.9)",
+          "oklch(72.1% 0 89.9)",
+          "oklch(83.6% 0 89.9)",
+          "oklch(95% 0 89.9)"
+        ]
+      },
+      "accent-soft": {
+        "role": "primary",
+        "displayName": "Indigo Wash",
+        "theme": "light",
+        "cssVar": "--accent-soft",
+        "canonical": "#ecebff",
+        "oklch": "oklch(94.7% 0.027 288.2)",
+        "tonalRamp": [
+          "oklch(15% 0.027 288.2)",
+          "oklch(26.4% 0.027 288.2)",
+          "oklch(37.9% 0.027 288.2)",
+          "oklch(49.3% 0.027 288.2)",
+          "oklch(60.7% 0.027 288.2)",
+          "oklch(72.1% 0.027 288.2)",
+          "oklch(83.6% 0.027 288.2)",
+          "oklch(95% 0.027 288.2)"
+        ]
+      },
+      "accent-line": {
+        "role": "primary",
+        "displayName": "Indigo Hairline",
+        "theme": "light",
+        "cssVar": "--accent-line",
+        "canonical": "#cfccfa",
+        "oklch": "oklch(86.3% 0.063 288)",
+        "tonalRamp": [
+          "oklch(15% 0.063 288)",
+          "oklch(26.4% 0.063 288)",
+          "oklch(37.9% 0.063 288)",
+          "oklch(49.3% 0.063 288)",
+          "oklch(60.7% 0.063 288)",
+          "oklch(72.1% 0.063 288)",
+          "oklch(83.6% 0.063 288)",
+          "oklch(95% 0.063 288)"
+        ]
+      },
+      "recording": {
+        "role": "secondary",
+        "displayName": "Recording Red",
+        "theme": "light",
+        "cssVar": "--recording",
+        "canonical": "#c92a2a",
+        "oklch": "oklch(54.6% 0.195 26.6)",
+        "tonalRamp": [
+          "oklch(15% 0.16 26.6)",
+          "oklch(26.4% 0.16 26.6)",
+          "oklch(37.9% 0.16 26.6)",
+          "oklch(49.3% 0.16 26.6)",
+          "oklch(60.7% 0.16 26.6)",
+          "oklch(72.1% 0.16 26.6)",
+          "oklch(83.6% 0.16 26.6)",
+          "oklch(95% 0.16 26.6)"
+        ]
+      },
+      "recording-soft": {
+        "role": "secondary",
+        "displayName": "Recording Red Wash",
+        "theme": "light",
+        "cssVar": "--recording-soft",
+        "canonical": "#fdecec",
+        "oklch": "oklch(95.7% 0.018 17.5)",
+        "tonalRamp": [
+          "oklch(15% 0.018 17.5)",
+          "oklch(26.4% 0.018 17.5)",
+          "oklch(37.9% 0.018 17.5)",
+          "oklch(49.3% 0.018 17.5)",
+          "oklch(60.7% 0.018 17.5)",
+          "oklch(72.1% 0.018 17.5)",
+          "oklch(83.6% 0.018 17.5)",
+          "oklch(95% 0.018 17.5)"
+        ]
+      },
+      "recording-line": {
+        "role": "secondary",
+        "displayName": "Recording Red Hairline",
+        "theme": "light",
+        "cssVar": "--recording-line",
+        "canonical": "#f3c4c4",
+        "oklch": "oklch(86.1% 0.054 18.2)",
+        "tonalRamp": [
+          "oklch(15% 0.054 18.2)",
+          "oklch(26.4% 0.054 18.2)",
+          "oklch(37.9% 0.054 18.2)",
+          "oklch(49.3% 0.054 18.2)",
+          "oklch(60.7% 0.054 18.2)",
+          "oklch(72.1% 0.054 18.2)",
+          "oklch(83.6% 0.054 18.2)",
+          "oklch(95% 0.054 18.2)"
+        ]
+      },
+      "success": {
+        "role": "secondary",
+        "displayName": "Finished Green",
+        "theme": "light",
+        "cssVar": "--success",
+        "canonical": "#1d7a3e",
+        "oklch": "oklch(51.2% 0.126 150.5)",
+        "tonalRamp": [
+          "oklch(15% 0.126 150.5)",
+          "oklch(26.4% 0.126 150.5)",
+          "oklch(37.9% 0.126 150.5)",
+          "oklch(49.3% 0.126 150.5)",
+          "oklch(60.7% 0.126 150.5)",
+          "oklch(72.1% 0.126 150.5)",
+          "oklch(83.6% 0.126 150.5)",
+          "oklch(95% 0.126 150.5)"
+        ]
+      },
+      "success-soft": {
+        "role": "secondary",
+        "displayName": "Finished Green Wash",
+        "theme": "light",
+        "cssVar": "--success-soft",
+        "canonical": "#e9f6ee",
+        "oklch": "oklch(96.1% 0.017 159.1)",
+        "tonalRamp": [
+          "oklch(15% 0.017 159.1)",
+          "oklch(26.4% 0.017 159.1)",
+          "oklch(37.9% 0.017 159.1)",
+          "oklch(49.3% 0.017 159.1)",
+          "oklch(60.7% 0.017 159.1)",
+          "oklch(72.1% 0.017 159.1)",
+          "oklch(83.6% 0.017 159.1)",
+          "oklch(95% 0.017 159.1)"
+        ]
+      },
+      "success-line": {
+        "role": "secondary",
+        "displayName": "Finished Green Hairline",
+        "theme": "light",
+        "cssVar": "--success-line",
+        "canonical": "#bfe3cc",
+        "oklch": "oklch(88.4% 0.049 157.2)",
+        "tonalRamp": [
+          "oklch(15% 0.049 157.2)",
+          "oklch(26.4% 0.049 157.2)",
+          "oklch(37.9% 0.049 157.2)",
+          "oklch(49.3% 0.049 157.2)",
+          "oklch(60.7% 0.049 157.2)",
+          "oklch(72.1% 0.049 157.2)",
+          "oklch(83.6% 0.049 157.2)",
+          "oklch(95% 0.049 157.2)"
+        ]
+      },
+      "warning": {
+        "role": "secondary",
+        "displayName": "Draft Amber",
+        "theme": "light",
+        "cssVar": "--warning",
+        "canonical": "#8f5a00",
+        "oklch": "oklch(51.4% 0.111 70.3)",
+        "tonalRamp": [
+          "oklch(15% 0.111 70.3)",
+          "oklch(26.4% 0.111 70.3)",
+          "oklch(37.9% 0.111 70.3)",
+          "oklch(49.3% 0.111 70.3)",
+          "oklch(60.7% 0.111 70.3)",
+          "oklch(72.1% 0.111 70.3)",
+          "oklch(83.6% 0.111 70.3)",
+          "oklch(95% 0.111 70.3)"
+        ]
+      },
+      "warning-soft": {
+        "role": "secondary",
+        "displayName": "Draft Amber Wash",
+        "theme": "light",
+        "cssVar": "--warning-soft",
+        "canonical": "#fdf3e1",
+        "oklch": "oklch(96.7% 0.026 82.4)",
+        "tonalRamp": [
+          "oklch(15% 0.026 82.4)",
+          "oklch(26.4% 0.026 82.4)",
+          "oklch(37.9% 0.026 82.4)",
+          "oklch(49.3% 0.026 82.4)",
+          "oklch(60.7% 0.026 82.4)",
+          "oklch(72.1% 0.026 82.4)",
+          "oklch(83.6% 0.026 82.4)",
+          "oklch(95% 0.026 82.4)"
+        ]
+      },
+      "warning-line": {
+        "role": "secondary",
+        "displayName": "Draft Amber Hairline",
+        "theme": "light",
+        "cssVar": "--warning-line",
+        "canonical": "#efd6a6",
+        "oklch": "oklch(88.5% 0.068 83.5)",
+        "tonalRamp": [
+          "oklch(15% 0.068 83.5)",
+          "oklch(26.4% 0.068 83.5)",
+          "oklch(37.9% 0.068 83.5)",
+          "oklch(49.3% 0.068 83.5)",
+          "oklch(60.7% 0.068 83.5)",
+          "oklch(72.1% 0.068 83.5)",
+          "oklch(83.6% 0.068 83.5)",
+          "oklch(95% 0.068 83.5)"
+        ]
+      },
+      "info": {
+        "role": "secondary",
+        "displayName": "Key-idea Blue",
+        "theme": "light",
+        "cssVar": "--info",
+        "canonical": "#2457c5",
+        "oklch": "oklch(49.1% 0.181 262.8)",
+        "tonalRamp": [
+          "oklch(15% 0.16 262.8)",
+          "oklch(26.4% 0.16 262.8)",
+          "oklch(37.9% 0.16 262.8)",
+          "oklch(49.3% 0.16 262.8)",
+          "oklch(60.7% 0.16 262.8)",
+          "oklch(72.1% 0.16 262.8)",
+          "oklch(83.6% 0.16 262.8)",
+          "oklch(95% 0.16 262.8)"
+        ]
+      },
+      "info-soft": {
+        "role": "secondary",
+        "displayName": "Key-idea Blue Wash",
+        "theme": "light",
+        "cssVar": "--info-soft",
+        "canonical": "#eaf0fd",
+        "oklch": "oklch(95.4% 0.019 266)",
+        "tonalRamp": [
+          "oklch(15% 0.019 266)",
+          "oklch(26.4% 0.019 266)",
+          "oklch(37.9% 0.019 266)",
+          "oklch(49.3% 0.019 266)",
+          "oklch(60.7% 0.019 266)",
+          "oklch(72.1% 0.019 266)",
+          "oklch(83.6% 0.019 266)",
+          "oklch(95% 0.019 266)"
+        ]
+      },
+      "info-line": {
+        "role": "secondary",
+        "displayName": "Key-idea Blue Hairline",
+        "theme": "light",
+        "cssVar": "--info-line",
+        "canonical": "#c4d4f6",
+        "oklch": "oklch(86.9% 0.05 265.4)",
+        "tonalRamp": [
+          "oklch(15% 0.05 265.4)",
+          "oklch(26.4% 0.05 265.4)",
+          "oklch(37.9% 0.05 265.4)",
+          "oklch(49.3% 0.05 265.4)",
+          "oklch(60.7% 0.05 265.4)",
+          "oklch(72.1% 0.05 265.4)",
+          "oklch(83.6% 0.05 265.4)",
+          "oklch(95% 0.05 265.4)"
+        ]
+      },
+      "plate": {
+        "role": "neutral",
+        "displayName": "Plate White",
+        "theme": "light",
+        "cssVar": "--plate",
+        "canonical": "#ffffff",
+        "oklch": "oklch(100% 0 89.9)",
+        "tonalRamp": [
+          "oklch(15% 0 89.9)",
+          "oklch(26.4% 0 89.9)",
+          "oklch(37.9% 0 89.9)",
+          "oklch(49.3% 0 89.9)",
+          "oklch(60.7% 0 89.9)",
+          "oklch(72.1% 0 89.9)",
+          "oklch(83.6% 0 89.9)",
+          "oklch(95% 0 89.9)"
+        ]
+      },
+      "scrim": {
+        "role": "neutral",
+        "displayName": "Scrim",
+        "theme": "light",
+        "cssVar": "--scrim",
+        "canonical": "rgb(14 15 19 / 0.45)"
+      },
+      "bg-dark": {
+        "role": "neutral",
+        "displayName": "Cool Ground (dark)",
+        "theme": "dark",
+        "cssVar": "--bg",
+        "canonical": "#0e0f13",
+        "oklch": "oklch(16.9% 0.008 274.4)",
+        "tonalRamp": [
+          "oklch(15% 0.008 274.4)",
+          "oklch(26.4% 0.008 274.4)",
+          "oklch(37.9% 0.008 274.4)",
+          "oklch(49.3% 0.008 274.4)",
+          "oklch(60.7% 0.008 274.4)",
+          "oklch(72.1% 0.008 274.4)",
+          "oklch(83.6% 0.008 274.4)",
+          "oklch(95% 0.008 274.4)"
+        ]
+      },
+      "surface-dark": {
+        "role": "neutral",
+        "displayName": "Paper (dark)",
+        "theme": "dark",
+        "cssVar": "--surface",
+        "canonical": "#16171d",
+        "oklch": "oklch(20.6% 0.012 277.8)",
+        "tonalRamp": [
+          "oklch(15% 0.012 277.8)",
+          "oklch(26.4% 0.012 277.8)",
+          "oklch(37.9% 0.012 277.8)",
+          "oklch(49.3% 0.012 277.8)",
+          "oklch(60.7% 0.012 277.8)",
+          "oklch(72.1% 0.012 277.8)",
+          "oklch(83.6% 0.012 277.8)",
+          "oklch(95% 0.012 277.8)"
+        ]
+      },
+      "surface-2-dark": {
+        "role": "neutral",
+        "displayName": "Desk (dark)",
+        "theme": "dark",
+        "cssVar": "--surface-2",
+        "canonical": "#1c1d24",
+        "oklch": "oklch(23.3% 0.014 278.9)",
+        "tonalRamp": [
+          "oklch(15% 0.014 278.9)",
+          "oklch(26.4% 0.014 278.9)",
+          "oklch(37.9% 0.014 278.9)",
+          "oklch(49.3% 0.014 278.9)",
+          "oklch(60.7% 0.014 278.9)",
+          "oklch(72.1% 0.014 278.9)",
+          "oklch(83.6% 0.014 278.9)",
+          "oklch(95% 0.014 278.9)"
+        ]
+      },
+      "surface-3-dark": {
+        "role": "neutral",
+        "displayName": "Desk Pressed (dark)",
+        "theme": "dark",
+        "cssVar": "--surface-3",
+        "canonical": "#262732",
+        "oklch": "oklch(27.7% 0.02 280.9)",
+        "tonalRamp": [
+          "oklch(15% 0.02 280.9)",
+          "oklch(26.4% 0.02 280.9)",
+          "oklch(37.9% 0.02 280.9)",
+          "oklch(49.3% 0.02 280.9)",
+          "oklch(60.7% 0.02 280.9)",
+          "oklch(72.1% 0.02 280.9)",
+          "oklch(83.6% 0.02 280.9)",
+          "oklch(95% 0.02 280.9)"
+        ]
+      },
+      "border-dark": {
+        "role": "neutral",
+        "displayName": "Hairline (dark)",
+        "theme": "dark",
+        "cssVar": "--border",
+        "canonical": "#2b2c36",
+        "oklch": "oklch(29.6% 0.018 280.7)",
+        "tonalRamp": [
+          "oklch(15% 0.018 280.7)",
+          "oklch(26.4% 0.018 280.7)",
+          "oklch(37.9% 0.018 280.7)",
+          "oklch(49.3% 0.018 280.7)",
+          "oklch(60.7% 0.018 280.7)",
+          "oklch(72.1% 0.018 280.7)",
+          "oklch(83.6% 0.018 280.7)",
+          "oklch(95% 0.018 280.7)"
+        ]
+      },
+      "border-strong-dark": {
+        "role": "neutral",
+        "displayName": "Control Edge (dark)",
+        "theme": "dark",
+        "cssVar": "--border-strong",
+        "canonical": "#3a3b48",
+        "oklch": "oklch(35.7% 0.022 281.7)",
+        "tonalRamp": [
+          "oklch(15% 0.022 281.7)",
+          "oklch(26.4% 0.022 281.7)",
+          "oklch(37.9% 0.022 281.7)",
+          "oklch(49.3% 0.022 281.7)",
+          "oklch(60.7% 0.022 281.7)",
+          "oklch(72.1% 0.022 281.7)",
+          "oklch(83.6% 0.022 281.7)",
+          "oklch(95% 0.022 281.7)"
+        ]
+      },
+      "text-dark": {
+        "role": "neutral",
+        "displayName": "Ink (dark)",
+        "theme": "dark",
+        "cssVar": "--text",
+        "canonical": "#ececf2",
+        "oklch": "oklch(94.5% 0.008 286.2)",
+        "tonalRamp": [
+          "oklch(15% 0.008 286.2)",
+          "oklch(26.4% 0.008 286.2)",
+          "oklch(37.9% 0.008 286.2)",
+          "oklch(49.3% 0.008 286.2)",
+          "oklch(60.7% 0.008 286.2)",
+          "oklch(72.1% 0.008 286.2)",
+          "oklch(83.6% 0.008 286.2)",
+          "oklch(95% 0.008 286.2)"
+        ]
+      },
+      "text-2-dark": {
+        "role": "neutral",
+        "displayName": "Muted Ink (dark)",
+        "theme": "dark",
+        "cssVar": "--text-2",
+        "canonical": "#a2a2b0",
+        "oklch": "oklch(71.7% 0.02 285.9)",
+        "tonalRamp": [
+          "oklch(15% 0.02 285.9)",
+          "oklch(26.4% 0.02 285.9)",
+          "oklch(37.9% 0.02 285.9)",
+          "oklch(49.3% 0.02 285.9)",
+          "oklch(60.7% 0.02 285.9)",
+          "oklch(72.1% 0.02 285.9)",
+          "oklch(83.6% 0.02 285.9)",
+          "oklch(95% 0.02 285.9)"
+        ]
+      },
+      "accent-dark": {
+        "role": "primary",
+        "displayName": "Iris Indigo (dark)",
+        "theme": "dark",
+        "cssVar": "--accent",
+        "canonical": "#8f8cff",
+        "oklch": "oklch(69.4% 0.165 282.4)",
+        "tonalRamp": [
+          "oklch(15% 0.16 282.4)",
+          "oklch(26.4% 0.16 282.4)",
+          "oklch(37.9% 0.16 282.4)",
+          "oklch(49.3% 0.16 282.4)",
+          "oklch(60.7% 0.16 282.4)",
+          "oklch(72.1% 0.16 282.4)",
+          "oklch(83.6% 0.16 282.4)",
+          "oklch(95% 0.16 282.4)"
+        ]
+      },
+      "accent-hover-dark": {
+        "role": "primary",
+        "displayName": "Iris Indigo Hover (dark)",
+        "theme": "dark",
+        "cssVar": "--accent-hover",
+        "canonical": "#a7a5ff",
+        "oklch": "oklch(75.9% 0.128 283.9)",
+        "tonalRamp": [
+          "oklch(15% 0.128 283.9)",
+          "oklch(26.4% 0.128 283.9)",
+          "oklch(37.9% 0.128 283.9)",
+          "oklch(49.3% 0.128 283.9)",
+          "oklch(60.7% 0.128 283.9)",
+          "oklch(72.1% 0.128 283.9)",
+          "oklch(83.6% 0.128 283.9)",
+          "oklch(95% 0.128 283.9)"
+        ]
+      },
+      "accent-text-dark": {
+        "role": "primary",
+        "displayName": "On Indigo (dark)",
+        "theme": "dark",
+        "cssVar": "--accent-text",
+        "canonical": "#0e0f13",
+        "oklch": "oklch(16.9% 0.008 274.4)",
+        "tonalRamp": [
+          "oklch(15% 0.008 274.4)",
+          "oklch(26.4% 0.008 274.4)",
+          "oklch(37.9% 0.008 274.4)",
+          "oklch(49.3% 0.008 274.4)",
+          "oklch(60.7% 0.008 274.4)",
+          "oklch(72.1% 0.008 274.4)",
+          "oklch(83.6% 0.008 274.4)",
+          "oklch(95% 0.008 274.4)"
+        ]
+      },
+      "accent-soft-dark": {
+        "role": "primary",
+        "displayName": "Indigo Wash (dark)",
+        "theme": "dark",
+        "cssVar": "--accent-soft",
+        "canonical": "#25244a",
+        "oklch": "oklch(28.3% 0.068 282.3)",
+        "tonalRamp": [
+          "oklch(15% 0.068 282.3)",
+          "oklch(26.4% 0.068 282.3)",
+          "oklch(37.9% 0.068 282.3)",
+          "oklch(49.3% 0.068 282.3)",
+          "oklch(60.7% 0.068 282.3)",
+          "oklch(72.1% 0.068 282.3)",
+          "oklch(83.6% 0.068 282.3)",
+          "oklch(95% 0.068 282.3)"
+        ]
+      },
+      "accent-line-dark": {
+        "role": "primary",
+        "displayName": "Indigo Hairline (dark)",
+        "theme": "dark",
+        "cssVar": "--accent-line",
+        "canonical": "#3d3b78",
+        "oklch": "oklch(38.7% 0.101 282.1)",
+        "tonalRamp": [
+          "oklch(15% 0.101 282.1)",
+          "oklch(26.4% 0.101 282.1)",
+          "oklch(37.9% 0.101 282.1)",
+          "oklch(49.3% 0.101 282.1)",
+          "oklch(60.7% 0.101 282.1)",
+          "oklch(72.1% 0.101 282.1)",
+          "oklch(83.6% 0.101 282.1)",
+          "oklch(95% 0.101 282.1)"
+        ]
+      },
+      "recording-dark": {
+        "role": "secondary",
+        "displayName": "Recording Red (dark)",
+        "theme": "dark",
+        "cssVar": "--recording",
+        "canonical": "#ff6b6b",
+        "oklch": "oklch(71.2% 0.181 22.8)",
+        "tonalRamp": [
+          "oklch(15% 0.16 22.8)",
+          "oklch(26.4% 0.16 22.8)",
+          "oklch(37.9% 0.16 22.8)",
+          "oklch(49.3% 0.16 22.8)",
+          "oklch(60.7% 0.16 22.8)",
+          "oklch(72.1% 0.16 22.8)",
+          "oklch(83.6% 0.16 22.8)",
+          "oklch(95% 0.16 22.8)"
+        ]
+      },
+      "recording-soft-dark": {
+        "role": "secondary",
+        "displayName": "Recording Red Wash (dark)",
+        "theme": "dark",
+        "cssVar": "--recording-soft",
+        "canonical": "#3a1a1d",
+        "oklch": "oklch(26.5% 0.051 15.2)",
+        "tonalRamp": [
+          "oklch(15% 0.051 15.2)",
+          "oklch(26.4% 0.051 15.2)",
+          "oklch(37.9% 0.051 15.2)",
+          "oklch(49.3% 0.051 15.2)",
+          "oklch(60.7% 0.051 15.2)",
+          "oklch(72.1% 0.051 15.2)",
+          "oklch(83.6% 0.051 15.2)",
+          "oklch(95% 0.051 15.2)"
+        ]
+      },
+      "recording-line-dark": {
+        "role": "secondary",
+        "displayName": "Recording Red Hairline (dark)",
+        "theme": "dark",
+        "cssVar": "--recording-line",
+        "canonical": "#6a2a2f",
+        "oklch": "oklch(37.8% 0.092 17.9)",
+        "tonalRamp": [
+          "oklch(15% 0.092 17.9)",
+          "oklch(26.4% 0.092 17.9)",
+          "oklch(37.9% 0.092 17.9)",
+          "oklch(49.3% 0.092 17.9)",
+          "oklch(60.7% 0.092 17.9)",
+          "oklch(72.1% 0.092 17.9)",
+          "oklch(83.6% 0.092 17.9)",
+          "oklch(95% 0.092 17.9)"
+        ]
+      },
+      "success-dark": {
+        "role": "secondary",
+        "displayName": "Finished Green (dark)",
+        "theme": "dark",
+        "cssVar": "--success",
+        "canonical": "#5fd38a",
+        "oklch": "oklch(78.1% 0.149 153.5)",
+        "tonalRamp": [
+          "oklch(15% 0.149 153.5)",
+          "oklch(26.4% 0.149 153.5)",
+          "oklch(37.9% 0.149 153.5)",
+          "oklch(49.3% 0.149 153.5)",
+          "oklch(60.7% 0.149 153.5)",
+          "oklch(72.1% 0.149 153.5)",
+          "oklch(83.6% 0.149 153.5)",
+          "oklch(95% 0.149 153.5)"
+        ]
+      },
+      "success-soft-dark": {
+        "role": "secondary",
+        "displayName": "Finished Green Wash (dark)",
+        "theme": "dark",
+        "cssVar": "--success-soft",
+        "canonical": "#142b1e",
+        "oklch": "oklch(26.6% 0.038 157.7)",
+        "tonalRamp": [
+          "oklch(15% 0.038 157.7)",
+          "oklch(26.4% 0.038 157.7)",
+          "oklch(37.9% 0.038 157.7)",
+          "oklch(49.3% 0.038 157.7)",
+          "oklch(60.7% 0.038 157.7)",
+          "oklch(72.1% 0.038 157.7)",
+          "oklch(83.6% 0.038 157.7)",
+          "oklch(95% 0.038 157.7)"
+        ]
+      },
+      "success-line-dark": {
+        "role": "secondary",
+        "displayName": "Finished Green Hairline (dark)",
+        "theme": "dark",
+        "cssVar": "--success-line",
+        "canonical": "#24523a",
+        "oklch": "oklch(39.9% 0.066 158.6)",
+        "tonalRamp": [
+          "oklch(15% 0.066 158.6)",
+          "oklch(26.4% 0.066 158.6)",
+          "oklch(37.9% 0.066 158.6)",
+          "oklch(49.3% 0.066 158.6)",
+          "oklch(60.7% 0.066 158.6)",
+          "oklch(72.1% 0.066 158.6)",
+          "oklch(83.6% 0.066 158.6)",
+          "oklch(95% 0.066 158.6)"
+        ]
+      },
+      "warning-dark": {
+        "role": "secondary",
+        "displayName": "Draft Amber (dark)",
+        "theme": "dark",
+        "cssVar": "--warning",
+        "canonical": "#f0b44c",
+        "oklch": "oklch(80.7% 0.137 78.2)",
+        "tonalRamp": [
+          "oklch(15% 0.137 78.2)",
+          "oklch(26.4% 0.137 78.2)",
+          "oklch(37.9% 0.137 78.2)",
+          "oklch(49.3% 0.137 78.2)",
+          "oklch(60.7% 0.137 78.2)",
+          "oklch(72.1% 0.137 78.2)",
+          "oklch(83.6% 0.137 78.2)",
+          "oklch(95% 0.137 78.2)"
+        ]
+      },
+      "warning-soft-dark": {
+        "role": "secondary",
+        "displayName": "Draft Amber Wash (dark)",
+        "theme": "dark",
+        "cssVar": "--warning-soft",
+        "canonical": "#2e2412",
+        "oklch": "oklch(26.7% 0.033 81.2)",
+        "tonalRamp": [
+          "oklch(15% 0.033 81.2)",
+          "oklch(26.4% 0.033 81.2)",
+          "oklch(37.9% 0.033 81.2)",
+          "oklch(49.3% 0.033 81.2)",
+          "oklch(60.7% 0.033 81.2)",
+          "oklch(72.1% 0.033 81.2)",
+          "oklch(83.6% 0.033 81.2)",
+          "oklch(95% 0.033 81.2)"
+        ]
+      },
+      "warning-line-dark": {
+        "role": "secondary",
+        "displayName": "Draft Amber Hairline (dark)",
+        "theme": "dark",
+        "cssVar": "--warning-line",
+        "canonical": "#5a4419",
+        "oklch": "oklch(40.1% 0.066 81.5)",
+        "tonalRamp": [
+          "oklch(15% 0.066 81.5)",
+          "oklch(26.4% 0.066 81.5)",
+          "oklch(37.9% 0.066 81.5)",
+          "oklch(49.3% 0.066 81.5)",
+          "oklch(60.7% 0.066 81.5)",
+          "oklch(72.1% 0.066 81.5)",
+          "oklch(83.6% 0.066 81.5)",
+          "oklch(95% 0.066 81.5)"
+        ]
+      },
+      "info-dark": {
+        "role": "secondary",
+        "displayName": "Key-idea Blue (dark)",
+        "theme": "dark",
+        "cssVar": "--info",
+        "canonical": "#7fa6ff",
+        "oklch": "oklch(73.4% 0.137 265.2)",
+        "tonalRamp": [
+          "oklch(15% 0.137 265.2)",
+          "oklch(26.4% 0.137 265.2)",
+          "oklch(37.9% 0.137 265.2)",
+          "oklch(49.3% 0.137 265.2)",
+          "oklch(60.7% 0.137 265.2)",
+          "oklch(72.1% 0.137 265.2)",
+          "oklch(83.6% 0.137 265.2)",
+          "oklch(95% 0.137 265.2)"
+        ]
+      },
+      "info-soft-dark": {
+        "role": "secondary",
+        "displayName": "Key-idea Blue Wash (dark)",
+        "theme": "dark",
+        "cssVar": "--info-soft",
+        "canonical": "#172240",
+        "oklch": "oklch(25.9% 0.059 267.1)",
+        "tonalRamp": [
+          "oklch(15% 0.059 267.1)",
+          "oklch(26.4% 0.059 267.1)",
+          "oklch(37.9% 0.059 267.1)",
+          "oklch(49.3% 0.059 267.1)",
+          "oklch(60.7% 0.059 267.1)",
+          "oklch(72.1% 0.059 267.1)",
+          "oklch(83.6% 0.059 267.1)",
+          "oklch(95% 0.059 267.1)"
+        ]
+      },
+      "info-line-dark": {
+        "role": "secondary",
+        "displayName": "Key-idea Blue Hairline (dark)",
+        "theme": "dark",
+        "cssVar": "--info-line",
+        "canonical": "#2c3f70",
+        "oklch": "oklch(37.8% 0.087 266.3)",
+        "tonalRamp": [
+          "oklch(15% 0.087 266.3)",
+          "oklch(26.4% 0.087 266.3)",
+          "oklch(37.9% 0.087 266.3)",
+          "oklch(49.3% 0.087 266.3)",
+          "oklch(60.7% 0.087 266.3)",
+          "oklch(72.1% 0.087 266.3)",
+          "oklch(83.6% 0.087 266.3)",
+          "oklch(95% 0.087 266.3)"
+        ]
+      },
+      "scrim-dark": {
+        "role": "neutral",
+        "displayName": "Scrim (dark)",
+        "theme": "dark",
+        "cssVar": "--scrim",
+        "canonical": "rgb(0 0 0 / 0.6)"
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "The recorder's elapsed clock only; tabular numerals."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Page titles and the notes title."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Notes section headings (48px above, 12px below)."
+      },
+      "title-sm": {
+        "displayName": "Title small",
+        "purpose": "Notes sub-headings, empty-state and error headings."
+      },
+      "body-notes": {
+        "displayName": "Body notes",
+        "purpose": "The reading column, max 68ch."
+      },
+      "body-lg": {
+        "displayName": "Body large",
+        "purpose": "Ledes, transcript lines, large buttons, choice and drop-zone titles."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "The app's base size; 500 for buttons, tabs and nav links."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Chips, hints, table headers, meta, breadcrumbs, rail headings."
+      },
+      "caption": {
+        "displayName": "Caption",
+        "purpose": "Ribbon scale and tooltip, figure badges, tab counts."
+      },
+      "mono": {
+        "displayName": "Mono",
+        "purpose": "Code blocks (14px), inline code (0.85em), raw event detail (12px), invalid LaTeX."
+      }
+    },
+    "shadows": [
+      {
+        "name": "float",
+        "cssVar": "--shadow",
+        "value": "0 8px 24px -8px rgb(23 23 40 / 0.18), 0 2px 6px -2px rgb(23 23 40 / 0.08)",
+        "purpose": "Dialog and recording bar only (light)."
+      },
+      {
+        "name": "float-dark",
+        "cssVar": "--shadow",
+        "value": "0 12px 32px -8px rgb(0 0 0 / 0.6), 0 2px 8px -2px rgb(0 0 0 / 0.4)",
+        "purpose": "Dialog and recording bar only (dark)."
+      }
+    ],
+    "focus": {
+      "value": "outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px",
+      "scope": "global :focus-visible; inputs use 0 offset, whole-row links draw the ring on the row (-2px), notes panel 6px"
+    },
+    "motion": [
+      {
+        "name": "ease",
+        "cssVar": "--ease",
+        "value": "cubic-bezier(0.16, 1, 0.3, 1)",
+        "purpose": "All state transitions."
+      },
+      {
+        "name": "fast",
+        "cssVar": "--fast",
+        "value": "160ms",
+        "purpose": "Hover, tab, chip, disclosure and ribbon-pin changes."
+      },
+      {
+        "name": "fade-in",
+        "value": "200ms var(--ease), opacity from 0",
+        "purpose": "New transcript lines; figures replacing placeholders."
+      },
+      {
+        "name": "progress",
+        "value": "width 200ms var(--ease)",
+        "purpose": "Upload progress bar."
+      },
+      {
+        "name": "pulse",
+        "value": "1.6s ease-in-out infinite, opacity 1 → 0.35",
+        "purpose": "Recording dot only."
+      },
+      {
+        "name": "spin",
+        "value": "1.4s linear infinite",
+        "purpose": "Processing chip, running step, figure placeholder."
+      },
+      {
+        "name": "shimmer",
+        "value": "1.4s infinite",
+        "purpose": "Skeleton loading bars."
+      },
+      {
+        "name": "reduced-motion",
+        "value": "prefers-reduced-motion: reduce → animation and transition none",
+        "purpose": "Everything instant; the recording dot is solid."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "rail-collapse",
+        "value": "1120px",
+        "purpose": "max-width: session becomes one column; rail becomes an expandable summary bar above the tabs."
+      },
+      {
+        "name": "compact",
+        "value": "860px",
+        "purpose": "max-width: library drops header and date; recording bar hides capture status; session header stacks."
+      },
+      {
+        "name": "narrow",
+        "value": "560px",
+        "purpose": "max-width: tighter top bar and page padding; top-bar button labels hide."
+      }
+    ],
+    "layout": [
+      {
+        "name": "topbar",
+        "cssVar": "--topbar",
+        "value": "56px"
+      },
+      {
+        "name": "page",
+        "value": "960px",
+        "purpose": "Library and most pages."
+      },
+      {
+        "name": "page-narrow",
+        "value": "600px",
+        "purpose": "Upload and live setup."
+      },
+      {
+        "name": "session",
+        "value": "1200px",
+        "purpose": "Session page; reading column plus 300px rail, 32px gap."
+      },
+      {
+        "name": "reading",
+        "value": "68ch",
+        "purpose": "Notes column."
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The screen's one main action (Export, Try again, Resume, Start recording).",
+      "html": "<button class=\"ds-btn-primary\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M12 4v11M7.5 10.5 12 15l4.5-4.5M5 15v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3\"/></svg>Export Markdown</button>",
+      "css": ".ds-btn-primary{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:32px;padding:0 12px;border-radius:6px;font:500 14px/1 -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;white-space:nowrap;cursor:pointer;transition:background 160ms cubic-bezier(0.16,1,0.3,1),border-color 160ms cubic-bezier(0.16,1,0.3,1),color 160ms cubic-bezier(0.16,1,0.3,1);background:var(--accent, #4b44d6);border:1px solid var(--accent, #4b44d6);color:var(--accent-text, #ffffff);}.ds-btn-primary:hover,.ds-btn-primary:active{background:var(--accent-hover, #3d36c2);border-color:var(--accent-hover, #3d36c2);}.ds-btn-primary:focus-visible{outline:2px solid var(--accent, #4b44d6);outline-offset:2px;}"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Default button: outlined on paper, tonal hover and press.",
+      "html": "<button class=\"ds-btn\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6\"/></svg>Try again</button>",
+      "css": ".ds-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:32px;padding:0 12px;border-radius:6px;font:500 14px/1 -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;white-space:nowrap;cursor:pointer;transition:background 160ms cubic-bezier(0.16,1,0.3,1),border-color 160ms cubic-bezier(0.16,1,0.3,1),color 160ms cubic-bezier(0.16,1,0.3,1);background:var(--surface, #ffffff);border:1px solid var(--border-strong, #c9c9d4);color:var(--text, #17171c);}.ds-btn:hover{background:var(--surface-2, #eeeef3);}.ds-btn:active{background:var(--surface-3, #e4e4ec);}.ds-btn:focus-visible{outline:2px solid var(--accent, #4b44d6);outline-offset:2px;}"
+    },
+    {
+      "name": "Stop Button",
+      "kind": "button",
+      "refersTo": "button-stop",
+      "description": "Solid recording red: the recording bar's Stop and the delete dialog's confirm only.",
+      "html": "<button class=\"ds-btn-stop\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M8 8h8v8H8z\"/></svg>Stop</button>",
+      "css": ".ds-btn-stop{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:32px;padding:0 12px;border-radius:6px;font:500 14px/1 -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;white-space:nowrap;cursor:pointer;transition:background 160ms cubic-bezier(0.16,1,0.3,1),border-color 160ms cubic-bezier(0.16,1,0.3,1),color 160ms cubic-bezier(0.16,1,0.3,1);background:var(--recording, #c92a2a);border:1px solid var(--recording, #c92a2a);color:#fff;}.ds-btn-stop:hover{filter:brightness(1.08);}.ds-btn-stop:focus-visible{outline:2px solid var(--accent, #4b44d6);outline-offset:2px;}"
+    },
+    {
+      "name": "Text Field",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Labelled 36px field with a muted hint; indigo border on focus.",
+      "html": "<div class=\"ds-field\"><label for=\"ds-t\">Title</label><input id=\"ds-t\" class=\"ds-input\" placeholder=\"Lecture 4: Quadratics\"><span class=\"ds-hint\">Optional. You can rename it later.</span></div>",
+      "css": ".ds-field{display:flex;flex-direction:column;gap:6px;font:400 14px/1.5 -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;color:var(--text, #17171c);}.ds-field label{font-weight:500;}.ds-hint{color:var(--text-2, #5b5b68);font-size:13px;}.ds-input{height:36px;padding:0 10px;border-radius:6px;border:1px solid var(--border-strong, #c9c9d4);background:var(--surface, #ffffff);color:var(--text, #17171c);font:inherit;}.ds-input::placeholder{color:var(--text-2, #5b5b68);}.ds-input:focus-visible{outline:2px solid var(--accent, #4b44d6);outline-offset:0;border-color:var(--accent, #4b44d6);}"
+    },
+    {
+      "name": "Status Chips",
+      "kind": "chip",
+      "refersTo": "chip",
+      "description": "Session state in words, with icon and colour as secondary signals.",
+      "html": "<div class=\"ds-chips\"><span class=\"ds-chip ds-chip-processing\"><svg class=\"ds-spin\" width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.75\" stroke-linecap=\"round\" aria-hidden=\"true\"><path d=\"M21 12a9 9 0 1 1-6.2-8.56\"/></svg>Writing notes</span><span class=\"ds-chip ds-chip-finished\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M5 12.5l4.5 4.5L19 7.5\"/></svg>Finished</span><span class=\"ds-chip ds-chip-draft\">Draft</span><span class=\"ds-chip ds-chip-failed\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M12 8v5M12 16.5v.01M10.3 3.9 2.6 17.4A2 2 0 0 0 4.3 20.4h15.4a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z\"/></svg>Failed · Transcribing</span><span class=\"ds-chip ds-chip-recording\"><span class=\"ds-dot\"></span>Recording</span></div>",
+      "css": ".ds-chips{display:flex;flex-wrap:wrap;gap:8px;}.ds-chip{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 9px;border-radius:999px;font:500 13px/1 -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;white-space:nowrap;border:1px solid var(--border, #dedee6);background:var(--surface-2, #eeeef3);color:var(--text-2, #5b5b68);transition:background 160ms,color 160ms;}.ds-chip svg{width:16px;height:16px;}.ds-chip-processing{background:var(--accent-soft, #ecebff);border-color:var(--accent-line, #cfccfa);color:var(--accent, #4b44d6);}.ds-chip-finished{background:var(--success-soft, #e9f6ee);border-color:var(--success-line, #bfe3cc);color:var(--success, #1d7a3e);}.ds-chip-draft{background:var(--warning-soft, #fdf3e1);border-color:var(--warning-line, #efd6a6);color:var(--warning, #8f5a00);}.ds-chip-failed,.ds-chip-recording{background:var(--recording-soft, #fdecec);border-color:var(--recording-line, #f3c4c4);color:var(--recording, #c92a2a);}.ds-dot{width:7px;height:7px;border-radius:50%;background:currentColor;animation:ds-pulse 1.6s ease-in-out infinite;}.ds-spin{animation:ds-rot 1.4s linear infinite;}@keyframes ds-pulse{50%{opacity:.35}}@keyframes ds-rot{to{transform:rotate(360deg)}}@media (prefers-reduced-motion:reduce){.ds-dot,.ds-spin{animation:none}}"
+    },
+    {
+      "name": "Top Bar",
+      "kind": "nav",
+      "refersTo": "topbar",
+      "description": "Second neutral layer with hairline; wordmark, nav, primary actions and theme switch.",
+      "html": "<header class=\"ds-topbar\"><a class=\"ds-wordmark\" href=\"#\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"9\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.5\"/><circle cx=\"12\" cy=\"12\" r=\"3.5\" fill=\"currentColor\"/></svg>Iris</a><a class=\"ds-navlink\" href=\"#\" aria-current=\"page\">Library</a><span class=\"ds-spacer\"></span><button class=\"ds-tb-btn\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M12 15V4M7.5 8.5 12 4l4.5 4.5M5 15v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3\"/></svg>Upload</button><button class=\"ds-tb-btn ds-tb-primary\">Record live</button></header>",
+      "css": ".ds-topbar{display:flex;align-items:center;gap:4px;height:56px;padding:0 20px;background:var(--surface-2, #eeeef3);border-bottom:1px solid var(--border, #dedee6);font:400 14px/1.5 -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;}.ds-wordmark{display:inline-flex;align-items:center;gap:8px;margin-right:16px;font-weight:650;font-size:16px;letter-spacing:-0.01em;color:var(--text, #17171c);text-decoration:none;}.ds-wordmark svg{width:20px;height:20px;color:var(--accent, #4b44d6);}.ds-navlink{display:inline-flex;align-items:center;height:32px;padding:0 10px;border-radius:6px;color:var(--text-2, #5b5b68);text-decoration:none;font-weight:500;}.ds-navlink:hover{color:var(--text, #17171c);background:var(--surface-3, #e4e4ec);}.ds-navlink[aria-current]{color:var(--text, #17171c);}.ds-navlink:focus-visible{outline:2px solid var(--accent, #4b44d6);outline-offset:2px;}.ds-spacer{flex:1;}.ds-tb-btn{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 12px;margin-left:8px;border-radius:6px;font:500 14px/1 -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;cursor:pointer;border:1px solid var(--border-strong, #c9c9d4);background:var(--surface, #ffffff);color:var(--text, #17171c);}.ds-tb-btn:hover{background:var(--surface-2, #eeeef3);}.ds-tb-primary{background:var(--accent, #4b44d6);border-color:var(--accent, #4b44d6);color:var(--accent-text, #ffffff);}.ds-tb-primary:hover{background:var(--accent-hover, #3d36c2);}.ds-tb-btn:focus-visible{outline:2px solid var(--accent, #4b44d6);outline-offset:2px;}"
+    },
+    {
+      "name": "Tabs",
+      "kind": "nav",
+      "refersTo": "tab",
+      "description": "Text tabs over a hairline; the selected tab gets a 2px indigo underline.",
+      "html": "<div class=\"ds-tabs\" role=\"tablist\"><button class=\"ds-tab\" role=\"tab\" aria-selected=\"true\">Notes</button><button class=\"ds-tab\" role=\"tab\" aria-selected=\"false\">Transcript <span class=\"ds-count\">13</span></button><button class=\"ds-tab\" role=\"tab\" aria-selected=\"false\">Figures <span class=\"ds-count\">1</span></button></div>",
+      "css": ".ds-tabs{display:flex;gap:20px;border-bottom:1px solid var(--border, #dedee6);}.ds-tab{position:relative;height:40px;padding:0;border:0;background:none;cursor:pointer;font:500 14px/1 -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;color:var(--text-2, #5b5b68);display:inline-flex;align-items:center;gap:6px;transition:color 160ms;}.ds-tab:hover,.ds-tab[aria-selected=true]{color:var(--text, #17171c);}.ds-tab[aria-selected=true]::after{content:'';position:absolute;left:0;right:0;bottom:-1px;height:2px;border-radius:1px;background:var(--accent, #4b44d6);}.ds-tab:focus-visible{outline:2px solid var(--accent, #4b44d6);outline-offset:2px;}.ds-count{font-size:12px;padding:1px 6px;border-radius:999px;background:var(--surface-3, #e4e4ec);color:var(--text-2, #5b5b68);font-variant-numeric:tabular-nums;}"
+    },
+    {
+      "name": "Worked Example and Callouts",
+      "kind": "card",
+      "refersTo": "card-problem",
+      "description": "Notes cards: indigo Problem box, unboxed steps on an indigo path, green Answer box, then Key idea (blue) and Watch out (amber) callouts led by a bold coloured label.",
+      "html": "<div class=\"ds-notes\"><div class=\"ds-card-problem\"><p><strong>Problem:</strong> Express 3x² + 18x − 1 in the form a(x + b)² + c.</p></div><div class=\"ds-step\"><p><strong>Step 1: Factor out 3 from the first two terms.</strong></p><p>3(x² + 6x) − 1</p></div><div class=\"ds-step\"><p><strong>Step 2: Halve the 6 and square it.</strong></p><p>3[(x + 3)² − 9] − 1</p></div><div class=\"ds-card-answer\"><p><strong>Answer:</strong> 3(x + 3)² − 28</p></div><div class=\"ds-callout ds-key\"><strong>Key idea:</strong> halve the coefficient of x, then square it.</div><div class=\"ds-callout ds-warn\"><strong>Watch out:</strong> multiply the −9 by 3 before adding the constant.</div></div>",
+      "css": ".ds-notes{font:400 17px/1.7 -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;color:var(--text, #17171c);max-width:68ch;}.ds-notes p{margin:0;}.ds-card-problem,.ds-card-answer{margin:16px 0;padding:14px 18px;border-radius:10px;border:1px solid var(--accent-line, #cfccfa);background:var(--accent-soft, #ecebff);}.ds-card-problem strong{color:var(--accent, #4b44d6);}.ds-card-answer{border-color:var(--success-line, #bfe3cc);background:var(--success-soft, #e9f6ee);}.ds-card-answer strong{color:var(--success, #1d7a3e);}.ds-step{position:relative;padding:4px 0 20px 30px;}.ds-step strong{color:var(--accent, #4b44d6);}.ds-step::before{content:'';position:absolute;left:4px;top:13px;width:11px;height:11px;border-radius:50%;border:2px solid var(--accent, #4b44d6);background:var(--bg, #f6f6f9);box-sizing:border-box;z-index:1;}.ds-step::after{content:'';position:absolute;left:9px;top:13px;bottom:-13px;width:1px;background:var(--accent-line, #cfccfa);}.ds-step:has(+ .ds-card-answer)::after{display:none;}.ds-callout{margin:16px 0;padding:12px 16px;border-radius:10px;border:1px solid;font:400 17px/1.7 -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;color:var(--text, #17171c);max-width:68ch;}.ds-key{background:var(--info-soft, #eaf0fd);border-color:var(--info-line, #c4d4f6);}.ds-key strong{color:var(--info, #2457c5);}.ds-warn{background:var(--warning-soft, #fdf3e1);border-color:var(--warning-line, #efd6a6);}.ds-warn strong{color:var(--warning, #8f5a00);}"
+    },
+    {
+      "name": "Figure Plate",
+      "kind": "custom",
+      "refersTo": "figure-plate",
+      "description": "Figures on white in both themes, with caption, source time and provenance badge.",
+      "html": "<figure class=\"ds-figure\"><div class=\"ds-plate\"><svg width=\"240\" height=\"120\" viewBox=\"0 0 240 120\" aria-hidden=\"true\"><path d=\"M10 110 L230 110 M20 10 Q120 200 220 10\" fill=\"none\" stroke=\"#17171c\" stroke-width=\"2\"/></svg></div><figcaption>The parabola with its turning point at (−3, −28)</figcaption><div class=\"ds-figmeta\"><span>Shown at 1:14</span><span class=\"ds-badge ds-badge-unverified\">Original crop · not verified</span></div></figure>",
+      "css": ".ds-figure{margin:0;display:flex;flex-direction:column;align-items:center;gap:8px;font:400 14px/1.5 -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;}.ds-plate{padding:12px;border-radius:8px;border:1px solid var(--border, #dedee6);background:var(--plate, #ffffff);max-height:520px;}.ds-figure figcaption{color:var(--text-2, #5b5b68);text-align:center;max-width:56ch;}.ds-figmeta{display:flex;gap:8px;align-items:center;font-size:13px;color:var(--text-2, #5b5b68);font-variant-numeric:tabular-nums;}.ds-badge{display:inline-flex;align-items:center;font-size:12px;font-weight:500;padding:1px 7px;border-radius:999px;border:1px solid var(--border, #dedee6);}.ds-badge-unverified{color:var(--warning, #8f5a00);background:var(--warning-soft, #fdf3e1);border-color:var(--warning-line, #efd6a6);}"
+    },
+    {
+      "name": "Session Ribbon",
+      "kind": "custom",
+      "refersTo": "ribbon-tip",
+      "description": "Signature: the session's length as a ticked line, each figure pinned at the time it was shown.",
+      "html": "<div class=\"ds-ribbon\"><div class=\"ds-track\" role=\"group\" aria-label=\"Figures by time in the session\"><button class=\"ds-mark ds-done\" style=\"left:22%\" aria-label=\"Diagram at 0:41. Ready.\"></button><button class=\"ds-mark\" style=\"left:55%\" aria-label=\"Graph at 1:42. Being redrawn.\"></button><button class=\"ds-mark ds-unverified\" style=\"left:88%\" aria-label=\"Sketch at 2:44. Original crop, not verified.\"><span class=\"ds-tip\">2:44 · Sketch</span></button></div><div class=\"ds-scale\"><span>0:00</span><span>3 figures, placed where they were shown</span><span>3:06</span></div></div>",
+      "css": ".ds-ribbon{font:400 14px/1.5 -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;padding-top:28px;}.ds-track{position:relative;height:22px;}.ds-track::before{content:'';position:absolute;left:0;right:0;bottom:0;height:6px;background:repeating-linear-gradient(90deg,var(--border-strong, #c9c9d4) 0 1px,transparent 1px 10%);border-bottom:1px solid var(--border-strong, #c9c9d4);}.ds-mark{position:absolute;top:0;width:10px;height:18px;margin-left:-5px;padding:0;border-radius:3px 3px 1px 1px;border:2px solid var(--accent, #4b44d6);background:var(--surface, #ffffff);cursor:pointer;transition:transform 160ms cubic-bezier(0.16,1,0.3,1),background 160ms;}.ds-done{background:var(--accent, #4b44d6);}.ds-unverified{border-color:var(--warning, #8f5a00);background:var(--warning, #8f5a00);}.ds-mark:hover,.ds-mark:focus-visible{transform:translateY(-2px);}.ds-mark:focus-visible{outline:2px solid var(--accent, #4b44d6);outline-offset:2px;}.ds-tip{position:absolute;bottom:calc(100% + 6px);left:50%;transform:translateX(-50%);white-space:nowrap;padding:4px 8px;border-radius:6px;background:var(--text, #17171c);color:var(--bg, #f6f6f9);font-size:12px;pointer-events:none;}.ds-scale{display:flex;justify-content:space-between;color:var(--text-2, #5b5b68);font-size:12px;margin-top:2px;font-variant-numeric:tabular-nums;}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The stage belongs to the notes",
+    "overview": "Iris is a quiet working tool around a reading column. The shell (top bar, library, rail, recorder) is an Operate surface: dense, neutral, set in a 14px system sans, with hairlines doing the work cards and shadows would do elsewhere. The notes are a Read surface: 17px text at 1.7 line height in a 68-character column that never moves while results stream in. Progress is told in plain sentences in a 300px side rail, never as metrics or stage names stacked above the notes.\n\nColour is cool, lightly indigo-tinted neutral in two layers: a white (or near-black) content surface on a slightly darker ground, and a second neutral layer (`surface-2`) for the top bar, rail, table headers and code. One indigo accent carries action, links, focus and the current step. Red, green, amber and blue each mean exactly one kind of state. Light and dark themes differ only in token values; figures stay on white plates in both, because redraws and screenshots are drawn on white.\n\nThe one decorative element is the session ribbon: the session's length as a ticked line, with each figure pinned where it was shown.",
+    "keyCharacteristics": [
+      "System UI sans throughout; no web fonts. KaTeX keeps its own math fonts.",
+      "Two type sizes do most of the work: 14px for the app, 17px for the notes.",
+      "Flat, hairline-bordered surfaces; one shadow, reserved for the dialog and the recording bar.",
+      "One indigo accent; state colours used only for their state, always with words.",
+      "Light, dark and system themes from one token set, switched by `data-theme` on `<html>`.",
+      "Calm motion: 160–200ms state transitions, no page-load choreography, all off under reduced motion."
+    ],
+    "rules": [
+      {
+        "name": "The One Indigo Rule",
+        "body": "Indigo means \"you can act here\" or \"this is where you are\": action, link, focus, the current step, the selected tab. It is never used as decoration or as a background fill for whole regions.",
+        "section": "colors"
+      },
+      {
+        "name": "The One Meaning Rule",
+        "body": "Red is recording, failure and deletion; green is finished; amber is draft and unverified; blue is the Key idea callout. No state colour borrows another's job, and none ever appears without a word that says the same thing.",
+        "section": "colors"
+      },
+      {
+        "name": "The Token-Only Rule",
+        "body": "Themes differ only in custom-property values. Components reference tokens, never literal colours, so a new component is dark-mode ready by construction.",
+        "section": "colors"
+      },
+      {
+        "name": "The White Plate Rule",
+        "body": "Figures sit on `plate` white in both themes. Never invert, tint or dim a figure to suit dark mode; it would misrepresent what was shown.",
+        "section": "colors"
+      },
+      {
+        "name": "The Two Sizes Rule",
+        "body": "The app is set at 14px; the notes at 17px on 1.7. New UI uses the app scale; anything that is the user's content uses the notes scale.",
+        "section": "typography"
+      },
+      {
+        "name": "The Tabular Numbers Rule",
+        "body": "Every timer, timestamp, duration, count and percentage uses tabular numerals (`.num`), so live values never jitter.",
+        "section": "typography"
+      },
+      {
+        "name": "The Sentence Case Rule",
+        "body": "Labels, headings and buttons are sentence case. Weights are 400, 500 and 600 (300 only for the recorder clock).",
+        "section": "typography"
+      },
+      {
+        "name": "The Hairline Rule",
+        "body": "Separate with a 1px `border` line or a tonal step. A new panel, card or row gets a hairline, never a shadow.",
+        "section": "elevation"
+      },
+      {
+        "name": "The Two Radii Rule",
+        "body": "6px if you can press it, 10px if it holds things. Pills are reserved for status.",
+        "section": "shapes"
+      }
+    ],
+    "dos": [
+      "**Do** keep the notes column fixed at 68ch and 17px/1.7; partial results fill in place without moving what is already there.",
+      "**Do** say state in words first: every chip, badge and step carries a label, with colour and icon as secondary signals.",
+      "**Do** use the global focus ring (2px `accent`, 2px offset) on every interactive element, including whole-row links and the drop zone.",
+      "**Do** use `.num` tabular numerals for every clock, timestamp, count and percentage.",
+      "**Do** put figures on the white plate with their caption, source time and provenance badge.",
+      "**Do** add new colours as a light and dark token pair, checked to WCAG AA in both themes."
+    ],
+    "donts": [
+      "**Don't** add shadows to cards, panels or rows; the Float shadow belongs to the dialog and the recording bar only.",
+      "**Don't** put metric tiles, cost cards or pipeline stage names above the notes; progress lives in the rail as plain sentences, with stage names behind Details.",
+      "**Don't** use indigo or a state colour as decoration, or a state colour for a different state.",
+      "**Don't** add web fonts, display faces, ALL-CAPS labels or eyebrow text above headings.",
+      "**Don't** hard-code a colour in a component, or invert or tint figures in dark mode.",
+      "**Don't** add a second decorative element; the session ribbon is the only one."
+    ]
+  }
+}

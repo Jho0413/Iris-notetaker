@@ -202,7 +202,9 @@ export interface paths {
         put?: never;
         /**
          * Post Audio
-         * @description Body: one MediaRecorder chunk (audio/webm). ``seq`` orders chunks.
+         * @description Body: one MediaRecorder chunk (audio/webm). ``seq`` orders chunks, from 0.
+         *
+         *     Posting the same chunk again is a no-op; a different body for a stored ``seq`` is a 409.
          */
         post: operations["post_audio_api_live__session_id__audio_post"];
         delete?: never;
@@ -222,7 +224,9 @@ export interface paths {
         put?: never;
         /**
          * Post Frame
-         * @description Body: one JPEG screen frame. ``t`` is seconds since recording started.
+         * @description Body: one JPEG screen frame. ``t`` is seconds since recording started (the audio's clock).
+         *
+         *     Posting the same frame again is a no-op; a different body for a stored ``t`` is a 409.
          */
         post: operations["post_frame_api_live__session_id__frame_post"];
         delete?: never;
@@ -243,8 +247,37 @@ export interface paths {
         /**
          * End Live
          * @description Stop recording and run the full pipeline over the whole session.
+         *
+         *     The browser flushes its uploads first and says how many audio chunks it recorded. If any are
+         *     missing, this returns 409 with ``detail.missing_audio_chunks`` and the session keeps recording,
+         *     so the browser can resend them (or end with ``allow_gaps``). Captured chunks and frames are
+         *     kept, so a failed run can be retried with ``POST /sessions/{id}/run``.
          */
         post: operations["end_live_api_live__session_id__end_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sessions/{session_id}/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Usage
+         * @description Every model call made for the session, with totals per stage, model and purpose.
+         *
+         *     A session with no model calls yet (or only cache hits) has empty records and zero totals.
+         *     Calls whose cost is unknown are counted in ``unpriced_calls`` and excluded from ``cost_usd``.
+         *     Read from the call log, so it is current while stages are still running.
+         */
+        get: operations["get_usage_api_sessions__session_id__usage_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -320,6 +353,20 @@ export interface components {
             /** Openai Key */
             openai_key: boolean;
         };
+        /** LiveEnd */
+        LiveEnd: {
+            /**
+             * Audio Chunks
+             * @description How many audio chunks the browser recorded (seq 0 to n-1). If set, the session only ends once all of them have been received.
+             */
+            audio_chunks?: number | null;
+            /**
+             * Allow Gaps
+             * @description End even if some audio chunks are missing; they become silence.
+             * @default false
+             */
+            allow_gaps: boolean;
+        };
         /** LiveStart */
         LiveStart: {
             /**
@@ -375,6 +422,61 @@ export interface components {
          */
         SessionType: "meeting" | "lecture" | "demo";
         /**
+         * SessionUsage
+         * @description Every model call made for a session, across all runs, with totals (``usage.json``).
+         *
+         *     Cache hits make no call, so a re-run that reuses cached work adds nothing here.
+         */
+        SessionUsage: {
+            /** Prices Checked */
+            prices_checked: string;
+            /**
+             * Records
+             * @default []
+             */
+            records: components["schemas"]["UsageRecord"][];
+            /**
+             * @default {
+             *       "calls": 0,
+             *       "unpriced_calls": 0,
+             *       "failed_calls": 0,
+             *       "cost_usd": 0,
+             *       "latency_s": 0,
+             *       "input_tokens": 0,
+             *       "cached_input_tokens": 0,
+             *       "input_image_tokens": 0,
+             *       "input_audio_tokens": 0,
+             *       "output_tokens": 0,
+             *       "reasoning_tokens": 0,
+             *       "output_image_tokens": 0,
+             *       "images": 0,
+             *       "audio_seconds": 0
+             *     }
+             */
+            total: components["schemas"]["UsageTotals"];
+            /**
+             * By Stage
+             * @default {}
+             */
+            by_stage: {
+                [key: string]: components["schemas"]["UsageTotals"];
+            };
+            /**
+             * By Model
+             * @default {}
+             */
+            by_model: {
+                [key: string]: components["schemas"]["UsageTotals"];
+            };
+            /**
+             * By Purpose
+             * @default {}
+             */
+            by_purpose: {
+                [key: string]: components["schemas"]["UsageTotals"];
+            };
+        };
+        /**
          * SourceKind
          * @enum {string}
          */
@@ -401,6 +503,150 @@ export interface components {
             text: string;
             /** Speaker */
             speaker?: string | null;
+        };
+        /**
+         * UsageRecord
+         * @description One model call. Token counts are as billed; breakdowns are subsets of their totals.
+         */
+        UsageRecord: {
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+            stage?: components["schemas"]["Stage"] | null;
+            /** Purpose */
+            purpose: string;
+            /** Operation */
+            operation: string;
+            /** Model */
+            model: string;
+            /** Latency S */
+            latency_s: number;
+            /**
+             * Input Tokens
+             * @default 0
+             */
+            input_tokens: number;
+            /**
+             * Cached Input Tokens
+             * @default 0
+             */
+            cached_input_tokens: number;
+            /**
+             * Input Image Tokens
+             * @default 0
+             */
+            input_image_tokens: number;
+            /**
+             * Input Audio Tokens
+             * @default 0
+             */
+            input_audio_tokens: number;
+            /**
+             * Output Tokens
+             * @default 0
+             */
+            output_tokens: number;
+            /**
+             * Reasoning Tokens
+             * @default 0
+             */
+            reasoning_tokens: number;
+            /**
+             * Output Image Tokens
+             * @default 0
+             */
+            output_image_tokens: number;
+            /**
+             * Images
+             * @default 0
+             */
+            images: number;
+            /**
+             * Audio Seconds
+             * @default 0
+             */
+            audio_seconds: number;
+            /** Cost Usd */
+            cost_usd?: number | null;
+            /** Unpriced */
+            unpriced?: string | null;
+            /** Error */
+            error?: string | null;
+        };
+        /** UsageTotals */
+        UsageTotals: {
+            /**
+             * Calls
+             * @default 0
+             */
+            calls: number;
+            /**
+             * Unpriced Calls
+             * @default 0
+             */
+            unpriced_calls: number;
+            /**
+             * Failed Calls
+             * @default 0
+             */
+            failed_calls: number;
+            /**
+             * Cost Usd
+             * @default 0
+             */
+            cost_usd: number;
+            /**
+             * Latency S
+             * @default 0
+             */
+            latency_s: number;
+            /**
+             * Input Tokens
+             * @default 0
+             */
+            input_tokens: number;
+            /**
+             * Cached Input Tokens
+             * @default 0
+             */
+            cached_input_tokens: number;
+            /**
+             * Input Image Tokens
+             * @default 0
+             */
+            input_image_tokens: number;
+            /**
+             * Input Audio Tokens
+             * @default 0
+             */
+            input_audio_tokens: number;
+            /**
+             * Output Tokens
+             * @default 0
+             */
+            output_tokens: number;
+            /**
+             * Reasoning Tokens
+             * @default 0
+             */
+            reasoning_tokens: number;
+            /**
+             * Output Image Tokens
+             * @default 0
+             */
+            output_image_tokens: number;
+            /**
+             * Images
+             * @default 0
+             */
+            images: number;
+            /**
+             * Audio Seconds
+             * @default 0
+             */
+            audio_seconds: number;
         };
         /** ValidationError */
         ValidationError: {
@@ -882,7 +1128,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["LiveEnd"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -891,6 +1141,44 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Session"];
+                };
+            };
+            /** @description Not recording, or audio chunks are still missing */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_usage_api_sessions__session_id__usage_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionUsage"];
                 };
             };
             /** @description Validation Error */
