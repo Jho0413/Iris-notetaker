@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { IrisEvent, Notes, Session } from '../src/api/client.ts'
 import {
-  emptyRun, eventKey, failureHeadline, figureList, formatClock, formatDuration, libraryState,
+  emptyRun, eventKey, failureHeadline, figureList, formatClock, formatDuration, libraryState, provenance,
   reduceEvents, sessionLength, stageDetail, stageFromError, stageSeconds, transcriptSegments,
   uiState,
 } from '../src/session/state.ts'
@@ -86,6 +86,10 @@ test('finished notes and run events merge into one figure list', () => {
   // A redraw in the finished notes passed its check, events or not.
   const redrawn = { ...notes, visuals: [{ ...notes.visuals[0], render_as: 'svg' as const }] }
   assert.equal(figureList(emptyRun(), redrawn)[0].verified, true)
+  assert.equal(provenance(figureList(emptyRun(), redrawn)[0]), 'verified')
+  assert.equal(provenance(figureList(emptyRun(), notes)[0]), 'screenshot')
+  assert.equal(provenance(fig), 'unverified')
+  assert.equal(provenance({ id: 'v9', caption: '', rendered: false }), undefined)
 })
 
 test('a new run clears the previous run, and replays of its start do not', () => {

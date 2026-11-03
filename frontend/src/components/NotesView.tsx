@@ -7,7 +7,13 @@ import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import { sessionFileUrl } from '../api/client'
 import { rehypeNotes } from '../notes/rehypeNotes'
-import { formatClock } from '../session/state'
+import { formatClock, type Provenance } from '../session/state'
+import { ProvenanceBadge } from './FiguresGrid'
+
+export interface FigureMeta {
+  t?: number
+  provenance?: Provenance
+}
 
 export interface OutlineItem {
   id: string
@@ -25,8 +31,8 @@ export function NotesView(props: {
   sessionId: string
   title: string
   markdown: string
-  /** Per image path (relative to the session): where it was shown and whether it is unverified. */
-  figures?: ReadonlyMap<string, { t?: number; unverified: boolean }>
+  /** Per image path (relative to the session): when it was shown and how it was produced. */
+  figures?: ReadonlyMap<string, FigureMeta>
   /** Hide the notes' own title when the page heading already says the same. */
   hideTitle?: boolean
   onOutline?: (items: OutlineItem[]) => void
@@ -49,10 +55,10 @@ export function NotesView(props: {
     onOutline?.(items)
   }, [props.markdown, onOutline])
 
-  // Under each caption: when the figure was shown, and a tag if it is an unverified fallback.
+  // Under each caption: when the figure was shown, and how it was produced.
   // Figures come from rehypeNotes; their src may be relative or already resolved.
   const components = useMemo<Components>(() => {
-    const bySrc = new Map<string, { t?: number; unverified: boolean }>()
+    const bySrc = new Map<string, FigureMeta>()
     for (const [path, meta] of figures ?? []) {
       bySrc.set(path, meta)
       bySrc.set(sessionFileUrl(sessionId, path), meta)
@@ -64,10 +70,10 @@ export function NotesView(props: {
         return (
           <figure className={className}>
             {children}
-            {meta && (meta.t !== undefined || meta.unverified) && (
+            {meta && (meta.t !== undefined || meta.provenance) && (
               <span className="figure-meta">
                 {meta.t !== undefined && <span className="num">Shown at {formatClock(meta.t)}</span>}
-                {meta.unverified && <span className="badge badge-unverified">Original crop · not verified</span>}
+                <ProvenanceBadge kind={meta.provenance} />
               </span>
             )}
           </figure>

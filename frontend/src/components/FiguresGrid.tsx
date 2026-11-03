@@ -1,13 +1,12 @@
 import { sessionFileUrl } from '../api/client'
-import type { FigureState } from '../session/state'
-import { formatClock } from '../session/state'
+import { formatClock, provenance, type FigureState, type Provenance } from '../session/state'
 import { Icon } from './Icon'
 
-function Badge({ figure }: { figure: FigureState }) {
-  if (!figure.rendered) return null
-  if (figure.verified === false) return <span className="badge badge-unverified">Original crop · not verified</span>
-  if (figure.renderAs === 'screenshot') return <span className="badge badge-shot">Screenshot</span>
-  if (figure.verified) return <span className="badge badge-verified">Verified redraw</span>
+/** The badge for a figure's provenance; shared by the Figures tab and the notes. */
+export function ProvenanceBadge({ kind }: { kind: Provenance | undefined }) {
+  if (kind === 'unverified') return <span className="badge badge-unverified">Original crop · not verified</span>
+  if (kind === 'screenshot') return <span className="badge badge-shot">Screenshot</span>
+  if (kind === 'verified') return <span className="badge badge-verified">Verified redraw</span>
   return null
 }
 
@@ -37,7 +36,7 @@ export function FiguresGrid({ sessionId, figures }: { sessionId: string; figures
             <figcaption>
               <span className="cap">{f.caption || 'Untitled figure'}</span>
               {f.t !== undefined && <span className="num">Shown at {formatClock(f.t)}</span>}
-              <Badge figure={f} />
+              <ProvenanceBadge kind={provenance(f)} />
             </figcaption>
           </figure>
         </li>

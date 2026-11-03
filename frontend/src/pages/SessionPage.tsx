@@ -14,7 +14,7 @@ import { fetchDraft, type NotesDraft } from '../session/draft'
 import { act } from '../session/request'
 import { formatWhen, SOURCE_LABEL } from '../session/format'
 import {
-  failureHeadline, figureList, formatClock, sessionLength, STAGE_LABELS,
+  failureHeadline, figureList, formatClock, provenance, sessionLength, STAGE_LABELS,
   transcriptSegments, uiState, type FigureState,
 } from '../session/state'
 import { useSessionStream } from '../session/useSessionStream'
@@ -124,7 +124,7 @@ function SessionView({ id }: { id: string }) {
   const segments = useMemo(() => transcriptSegments(run, transcript), [run, transcript])
   const figures = useMemo(() => figureList(run, notes), [run, notes])
   const figureMeta = useMemo(
-    () => new Map(figures.filter((f) => f.path).map((f) => [f.path!, { t: f.t, unverified: f.verified === false }])),
+    () => new Map(figures.filter((f) => f.path).map((f) => [f.path!, { t: f.t, provenance: provenance(f) }])),
     [figures],
   )
   const transcriptKnown = transcript !== null || run.stages.transcribe.status === 'done'

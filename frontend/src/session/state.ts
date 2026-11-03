@@ -251,6 +251,16 @@ export function figureList(run: RunState, notes: Notes | null): FigureState[] {
   return [...out.values()]
 }
 
+export type Provenance = 'verified' | 'screenshot' | 'unverified'
+
+/** How a figure was produced, as far as is known (docs/frontend.md §5, figures). */
+export function provenance(figure: FigureState): Provenance | undefined {
+  if (!figure.rendered) return undefined
+  if (figure.verified === false) return 'unverified'
+  if (figure.renderAs === 'screenshot') return 'screenshot'
+  return figure.verified ? 'verified' : undefined
+}
+
 /** Session length in seconds, from the transcript (the backend doesn't set `duration_s` yet). */
 export function sessionLength(session: Session, segs: readonly Segment[]): number | undefined {
   if (session.duration_s) return session.duration_s
