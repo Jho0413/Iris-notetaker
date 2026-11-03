@@ -23,7 +23,7 @@ Read `README.md` and `docs/architecture.md` first. This file covers how we work.
   `tmp_path` (synthetic video/audio/frames); don't commit large binaries.
 - **Commits:** one short single-line message, `<type>(<domain>): <comment>`, e.g.
   `fix(render): retry transient API errors per figure`. No body, no `Co-Authored-By`, no AI
-  attribution. CI rejects PR commits that don't match.
+  attribution.
   - `type`: `feat`, `fix`, `docs`, `chore`, `ci`, `refactor`, `test`, `perf`, `build`, `style` or
     `revert`.
   - `domain`: lowercase area changed: a stage (`ingest`, `transcribe`, `detect`, `align`, `select`,
