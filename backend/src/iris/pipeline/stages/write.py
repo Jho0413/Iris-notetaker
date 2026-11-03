@@ -2,13 +2,25 @@
 
 Reads transcript.json and selection.json. Writes notes_draft.json after each completed
 section and emits NOTES_UPDATED. Assemble publishes notes.json only after this stage succeeds.
+
+Sections are planned so that the live draft lane (``iris/live/draft.py``) can write them while
+recording and this stage reuses them at stop:
+
+- *Part boundaries depend only on earlier evidence.* Records are packed in time order and a part
+  closes when the next record would exceed the budget, so appending evidence never moves an
+  earlier boundary (``split_parts``).
+- *A section's cache key depends only on its own inputs*: its records, whether parts come before
+  and after it, the language and the first section's title and type, never the number of parts
+  (``section_payload``, ``write_section``).
 """
 
+import bisect
 import hashlib
 import json
 import math
 import re
 from dataclasses import dataclass
+from pathlib import Path
 
 from markdown_it import MarkdownIt
 from markdown_it.token import Token
@@ -66,8 +78,9 @@ block, then a "Step 1" block with visual_ids of stage 1, then a "Step 2" block w
 so on; an introduction before the steps has no visual_ids. Any other visual goes after the first
 paragraph that introduces what it shows. Only use supplied visual IDs and include each exactly once.
 Captions and descriptions describe images; do not claim they were spoken.
-Long sessions have multiple parts: write notes for this part only, without claiming that it covers
-the entire session. Avoid repeated overall introductions and conclusions. When a title is supplied
+Long sessions are written in consecutive parts; earlier_parts and later_parts say whether parts come
+before and after this one. Write notes for this part only, without claiming that it covers the
+entire session. Avoid repeated overall introductions and conclusions. When a title is supplied
 retain it exactly. Otherwise supply a short, plain-text title (maximum 120 characters). Each block
 must contain substantive text. Keep each part below 12000 characters of markdown. With screen
 content or visuals but no speech, explicitly note the absence of a transcript.
@@ -98,8 +111,13 @@ def _json(value: object) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True)
 
 
-def plan_parts(transcript: Transcript, selection: Selection, budget: int) -> list[WritingPart]:
-    """Pack complete evidence into bounded JSON arrays; split oversized speech without loss."""
+def _array_len(sizes: list[int]) -> int:
+    """``len(_json(records))`` from the records' own JSON lengths (``, `` between items)."""
+    return 2 + sum(sizes) + 2 * max(len(sizes) - 1, 0)
+
+
+def evidence_records(transcript: Transcript, selection: Selection, budget: int) -> list[dict]:
+    """Every piece of evidence as a JSON record, in time order; oversized speech is split."""
     records: list[dict] = []
     for segment in transcript.segments:
         if not (math.isfinite(segment.start) and math.isfinite(segment.end)) or not (
@@ -144,21 +162,70 @@ def plan_parts(transcript: Transcript, selection: Selection, budget: int) -> lis
         if visual.description:
             record["description"] = visual.description
         records.append(record)
-    records.sort(key=lambda r: r["start"])
-    parts: list[WritingPart] = []
+    records.sort(key=lambda r: r["start"])  # stable: equal times keep their kind and list order
+    return records
+
+
+def _moment_spans(selection: Selection) -> list[tuple[float, float]]:
+    """The time ranges of the moments read, merged into sorted disjoint ranges."""
+    spans: list[tuple[float, float]] = []
+    for start, end in sorted((c.start, c.end) for c in selection.contents if c.end > c.start):
+        if spans and start < spans[-1][1]:
+            spans[-1] = (spans[-1][0], max(spans[-1][1], end))
+        else:
+            spans.append((start, end))
+    return spans
+
+
+def _inside_moment(t: float, spans: list[tuple[float, float]], starts: list[float]) -> bool:
+    i = bisect.bisect_left(starts, t) - 1  # the last span starting strictly before t
+    return i >= 0 and t < spans[i][1]
+
+
+def split_parts(
+    transcript: Transcript, selection: Selection, budget: int, before: float = math.inf
+) -> tuple[list[WritingPart], WritingPart | None]:
+    """Pack the evidence that starts before ``before`` into bounded parts, in time order.
+
+    Returns the closed parts and the open last part (``None`` without evidence). A part closes
+    when the next record would take it past the budget: at the last moment boundary (a time no
+    read moment spans) that keeps it at least half full, otherwise right there. That decision only
+    looks at the records up to that point, so evidence added later (or a later ``before``) never
+    moves the boundary of a closed part, and the live draft can write closed parts while
+    recording. Speech, screen content and visuals are never dropped.
+    """
+    spans = _moment_spans(selection)
+    span_starts = [s for s, _ in spans]
+    closed: list[WritingPart] = []
     current: list[dict] = []
-    for record in records:
-        if len(_json([record])) > budget:
+    sizes: list[int] = []
+    clean: list[bool] = []  # cutting just before current[i] splits no moment
+    for record in evidence_records(transcript, selection, budget):
+        if not record["start"] < before:
+            break  # records are in time order
+        size = len(_json(record))
+        if _array_len([size]) > budget:
             raise ValueError("visual metadata exceeds notes context budget")
-        if current and len(_json([*current, record])) > budget:
-            parts.append(WritingPart(current))
-            current = []
+        while current and _array_len([*sizes, size]) > budget:
+            cut = len(current)
+            for i in range(len(current) - 1, 0, -1):
+                if clean[i] and _array_len(sizes[:i]) * 2 >= budget:
+                    cut = i
+                    break
+            closed.append(WritingPart(current[:cut]))
+            current, sizes, clean = current[cut:], sizes[cut:], clean[cut:]
         current.append(record)
-    if current:
-        parts.append(WritingPart(current))
-    if not parts:
+        sizes.append(size)
+        clean.append(not _inside_moment(record["start"], spans, span_starts))
+    return closed, WritingPart(current) if current else None
+
+
+def plan_parts(transcript: Transcript, selection: Selection, budget: int) -> list[WritingPart]:
+    """Pack complete evidence into bounded JSON arrays; split oversized speech without loss."""
+    closed, last = split_parts(transcript, selection, budget)
+    if last is None:
         raise ValueError("no transcript or screen content to write notes from")
-    return parts
+    return [*closed, last]
 
 
 def _check_tokens(tokens: list[Token]) -> None:
@@ -228,50 +295,87 @@ async def generate_section(ctx: StageContext, payload: str) -> WrittenSection:
     return message.parsed
 
 
+def section_payload(
+    part: WritingPart, *, language: str | None, first: WrittenSection | None, later: bool
+) -> str:
+    """The model input for one part. ``first`` is the session's first section (``None`` for the
+    first part); ``later`` says whether parts follow. Nothing here depends on how many parts the
+    session has, so a part written live has the payload, and the cache key, it has at stop."""
+    return _json(
+        {
+            "records": part.records,
+            "earlier_parts": first is not None,
+            "later_parts": later,
+            "language": language,
+            "title": first.title if first else None,
+            "session_type": first.session_type if first else None,
+        }
+    )
+
+
+def section_key(ctx: StageContext, payload: str) -> str:
+    return hashlib.sha256(
+        _json(
+            {
+                "prompt": PROMPT,
+                "model": ctx.settings.notes_model,
+                "schema": WrittenSection.model_json_schema(),
+                "payload": payload,
+            }
+        ).encode()
+    ).hexdigest()
+
+
+def section_cache_path(ctx: StageContext, payload: str) -> Path:
+    return ctx.paths.root / "notes_sections" / f"{section_key(ctx, payload)}.json"
+
+
+async def write_section(
+    ctx: StageContext,
+    part: WritingPart,
+    *,
+    language: str | None,
+    first: WrittenSection | None,
+    later: bool,
+) -> WrittenSection:
+    """The validated section for ``part``, from the cache (``notes_sections/``) or one model
+    call. Used by this stage and by the live draft lane, so both share the cache."""
+    payload = section_payload(part, language=language, first=first, later=later)
+    cache = section_cache_path(ctx, payload)
+    try:
+        section = read_model(cache, WrittenSection)
+        validate_section(section, part, first)
+    except (FileNotFoundError, ValueError):
+        section = await generate_section(ctx, payload)
+        validate_section(section, part, first)
+        cache.parent.mkdir(exist_ok=True)
+        write_model(cache, section)
+    return section
+
+
+def draft_of(sections: list[WrittenSection]) -> NotesDraft:
+    return NotesDraft(
+        session_type=sections[0].session_type,
+        title=sections[0].title,
+        markdown="\n\n".join(section_markdown(s) for s in sections),
+    )
+
+
 async def run(ctx: StageContext) -> None:
     transcript = read_model(ctx.paths.transcript, Transcript)
     selection = read_model(ctx.paths.selection, Selection)
     parts = plan_parts(transcript, selection, ctx.settings.notes_context_chars)
-    cache_dir = ctx.paths.root / "notes_sections"
-    cache_dir.mkdir(exist_ok=True)
     sections: list[WrittenSection] = []
     for index, part in enumerate(parts):
-        first = sections[0] if sections else None
-        payload = _json(
-            {
-                "records": part.records,
-                "part": index + 1,
-                "total_parts": len(parts),
-                "language": transcript.language,
-                "title": first.title if first else None,
-                "session_type": first.session_type if first else None,
-            }
+        section = await write_section(
+            ctx,
+            part,
+            language=transcript.language,
+            first=sections[0] if sections else None,
+            later=index < len(parts) - 1,
         )
-        key = hashlib.sha256(
-            _json(
-                {
-                    "prompt": PROMPT,
-                    "model": ctx.settings.notes_model,
-                    "schema": WrittenSection.model_json_schema(),
-                    "payload": payload,
-                }
-            ).encode()
-        ).hexdigest()
-        cache = cache_dir / f"{key}.json"
-        try:
-            section = read_model(cache, WrittenSection)
-            validate_section(section, part, first)
-        except (FileNotFoundError, ValueError):
-            section = await generate_section(ctx, payload)
-            validate_section(section, part, first)
-            write_model(cache, section)
         sections.append(section)
-        draft = NotesDraft(
-            session_type=sections[0].session_type,
-            title=sections[0].title,
-            markdown="\n\n".join(section_markdown(s) for s in sections),
-        )
-        write_model(ctx.paths.notes_draft, draft)
+        write_model(ctx.paths.notes_draft, draft_of(sections))
         ctx.emit(
             EventType.NOTES_UPDATED,
             {"final": False, "completed_parts": index + 1, "total_parts": len(parts)},
