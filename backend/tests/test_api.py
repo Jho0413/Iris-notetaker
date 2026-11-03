@@ -119,7 +119,7 @@ def test_export_filename_falls_back_to_session_id_for_blank_title(
     )
 
 
-@pytest.mark.parametrize("title", ["\u200b", "\u200d\u2060", "\u202e"])
+@pytest.mark.parametrize("title", ["\u200b", "\u200d\u2060", "\u202e", "\u200b \u200b"])
 def test_export_filename_treats_invisible_title_as_blank(
     client: TestClient, settings: Settings, title: str
 ):

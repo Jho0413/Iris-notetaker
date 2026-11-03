@@ -101,7 +101,7 @@ def _attachment_header(title: str, fallback: str) -> str:
     full UTF-8 name, which browsers prefer. ``fallback`` names the file if nothing is left.
     """
     stem = _clean_filename(title)
-    if not any(unicodedata.category(c) != "Cf" for c in stem):  # blank or invisible only
+    if all(c.isspace() or unicodedata.category(c) == "Cf" for c in stem):  # blank/invisible
         stem = fallback
     # NFKD folds accents off letters, but also turns full-width forms into ASCII "/", "\\"
     # and '"', so the folded name is cleaned again.
