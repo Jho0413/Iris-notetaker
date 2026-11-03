@@ -1,7 +1,8 @@
 // Turns the conventions the notes writer follows into structure the UI can style:
 //   **Problem:** / **Step n: ...** / **Answer:** paragraphs  -> <section> cards holding the
 //                                                              paragraphs and math that follow
-//   > **Key idea:** / > **Watch out:**                       -> callout blockquotes
+//   > **Key idea:** / > **Watch out:**                       -> callout blockquotes (a quote after
+//                                                              an answer ends the answer card)
 //   ![caption](src) *caption*                                 -> <figure> with <figcaption>
 import type { Element, ElementContent, Root, RootContent } from 'hast'
 
@@ -65,6 +66,7 @@ export function rehypeNotes() {
   return (tree: Root) => {
     const out: RootContent[] = []
     let group: Element | null = null
+    let groupKind: Card | null = null
     for (const node of tree.children) {
       const kind = card(node)
       const isHeading = node.type === 'element' && /^h[1-6]$|^hr$/.test(node.tagName)
@@ -75,8 +77,12 @@ export function rehypeNotes() {
           properties: { className: ['card', `card-${kind}`] },
           children: [],
         }
+        groupKind = kind
         out.push(group)
       } else if (isHeading) {
+        group = null
+      } else if (groupKind === 'answer' && node.type === 'element' && node.tagName === 'blockquote') {
+        // Takeaways after the answer are about the whole example, not part of the answer.
         group = null
       }
       let item: RootContent = node

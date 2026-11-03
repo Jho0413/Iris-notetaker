@@ -2,7 +2,7 @@ import type { IrisEvent } from './client'
 
 export const EVENT_TYPES: IrisEvent['type'][] = [
   'status', 'stage_started', 'stage_finished', 'transcript_chunk', 'moment_found',
-  'visual_selected', 'notes_updated', 'error',
+  'visual_selected', 'visual_rendered', 'notes_updated', 'error',
 ]
 
 /** Distinguish server messages from EventSource transport errors and invalid payloads. */

@@ -58,3 +58,24 @@ test('figures and callouts', () => {
   assert.deepEqual(classes(key), ['callout-key'])
   assert.deepEqual(classes(warn), ['callout-warn'])
 })
+
+test('callouts after an answer sit outside the answer card; inside a step they stay', () => {
+  const out = render(
+    [
+      '**Step 1: Halve.**',
+      '> **Watch out:** keep the sign.',
+      '**Answer:** $3(x+3)^2 - 28$',
+      '> **Key idea:** halve, then square.',
+    ].join('\n\n'),
+  )
+  assert.deepEqual(
+    out.map((el) => [el.tagName, classes(el).join(' ')]),
+    [
+      ['section', 'card card-step'],
+      ['section', 'card card-answer'],
+      ['blockquote', 'callout-key'],
+    ],
+  )
+  const step = out[0].children.filter((n): n is Element => n.type === 'element')
+  assert.deepEqual(step.map((el) => el.tagName), ['p', 'blockquote'])
+})
