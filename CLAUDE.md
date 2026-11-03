@@ -21,7 +21,15 @@ Read `README.md` and `docs/architecture.md` first. This file covers how we work.
   hard-coded in stages.
 - **Tests never call real paid APIs.** Use fakes or monkeypatching. Generate media fixtures in
   `tmp_path` (synthetic video/audio/frames); don't commit large binaries.
-- **Commits:** one short single-line message. No body, no `Co-Authored-By`, no AI attribution.
+- **Commits:** one short single-line message, `<type>(<domain>): <comment>`, e.g.
+  `fix(render): retry transient API errors per figure`. No body, no `Co-Authored-By`, no AI
+  attribution. CI rejects PR commits that don't match.
+  - `type`: `feat`, `fix`, `docs`, `chore`, `ci`, `refactor`, `test`, `perf`, `build`, `style` or
+    `revert`.
+  - `domain`: lowercase area changed: a stage (`ingest`, `transcribe`, `detect`, `align`, `select`,
+    `write`, `render`, `assemble`), or `api`, `live`, `store`, `frontend`, `backend`, `docs`, `ci`,
+    `repo` for changes across areas.
+  - `comment`: imperative, starting with a lowercase letter or digit, no trailing full stop.
 - **Branches:** one branch per task (`feat/…`, `fix/…`, `ci/…`, `chore/…`). Never commit to `main`
   directly. Merged PR branches are deleted from GitHub automatically.
 
