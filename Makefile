@@ -1,4 +1,4 @@
-.PHONY: setup dev backend frontend gen-api test lint
+.PHONY: setup dev backend frontend gen-api test lint usage
 
 setup:            ## Install backend and frontend dependencies
 	cd backend && uv sync
@@ -23,3 +23,17 @@ test:             ## Run backend/frontend tests and frontend typecheck
 lint:
 	cd backend && uv run ruff check . && uv run ruff format --check .
 	cd frontend && npm run lint
+
+usage:            ## Model usage and cost for a session: make usage [<session_id>] (default: most recent)
+	cd backend && uv run iris cost $(USAGE_ARGS)
+
+# `make usage <session_id>`: take the word after `usage` as its argument, and make that word a
+# do-nothing target so make doesn't try to build it. Only applies when `usage` is the first goal,
+# so a mistyped target elsewhere still fails as usual. Defined after every rule, so an argument
+# that happens to be a target name (`make usage test`) is ignored, not built.
+ifeq (usage,$(firstword $(MAKECMDGOALS)))
+  USAGE_ARGS := $(wordlist 2,$(words $(MAKECMDGOALS)),$(MAKECMDGOALS))
+  ifneq ($(USAGE_ARGS),)
+    $(eval $(USAGE_ARGS):;@:)
+  endif
+endif

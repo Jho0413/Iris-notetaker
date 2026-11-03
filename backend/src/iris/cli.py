@@ -4,7 +4,8 @@ iris serve                          run the API (http://localhost:8000)
 iris process <file>                 create a session from a recording and run the pipeline
 iris run <session_id> [--from S]    re-run a session's pipeline, optionally from stage S
 iris stage <session_id> <stage>     run one stage on its own (reads/writes session files)
-iris cost <session_id>              model usage and cost per stage, model and purpose
+iris cost [<session_id>]            model usage and cost per stage, model and purpose
+                                    (the most recent session if no id is given)
 """
 
 import argparse
@@ -97,8 +98,19 @@ def format_usage(session_id: str, usage: SessionUsage) -> str:
     return "\n".join(lines)
 
 
-def _cost(session_id: str) -> int:
-    paths = session_paths(get_settings().sessions_dir, session_id)
+def _cost(session_id: str | None) -> int:
+    settings = get_settings()
+    if session_id is None:
+        store = SessionStore(settings.db_path)
+        try:
+            sessions = store.list()  # newest first
+        finally:
+            store.close()
+        if not sessions:
+            print("no sessions yet", file=sys.stderr)
+            return 1
+        session_id = sessions[0].id
+    paths = session_paths(settings.sessions_dir, session_id)
     if not paths.root.is_dir():
         print(f"no session {session_id}", file=sys.stderr)
         return 1
@@ -127,7 +139,7 @@ def main() -> None:
     stage.add_argument("stage", type=Stage, choices=list(Stage))
 
     cost = sub.add_parser("cost")
-    cost.add_argument("session_id")
+    cost.add_argument("session_id", nargs="?", help="defaults to the most recent session")
 
     args = parser.parse_args()
     if args.cmd == "serve":

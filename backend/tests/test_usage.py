@@ -8,6 +8,7 @@ import asyncio
 import base64
 import json
 import logging
+import sqlite3
 import sys
 import threading
 import time
@@ -37,6 +38,7 @@ from iris.models import (
 )
 from iris.pipeline.context import StageContext
 from iris.pipeline.stages import render, select
+from iris.store.db import SessionStore
 from iris.store.layout import SessionPaths, read_model, write_model
 
 SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 9 9"><rect width="9"/></svg>'
@@ -641,6 +643,35 @@ def test_iris_cost_prints_a_table_per_stage(tmp_path, monkeypatch, capsys):
         with pytest.raises(SystemExit) as exit:
             cli.main()
         assert exit.value.code == 1
+    finally:
+        get_settings.cache_clear()
+
+
+def test_iris_cost_defaults_to_the_most_recent_session(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("IRIS_DATA_DIR", str(tmp_path))
+    get_settings.cache_clear()
+    try:
+        monkeypatch.setattr(sys, "argv", ["iris", "cost"])
+        with pytest.raises(SystemExit) as excinfo:
+            cli.main()
+        assert excinfo.value.code == 1
+        assert "no sessions yet" in capsys.readouterr().err
+
+        store = SessionStore(get_settings().db_path)
+        older = store.create("older", SourceKind.UPLOAD)
+        newer = store.create("newer", SourceKind.UPLOAD)
+        store.close()
+        with sqlite3.connect(get_settings().db_path) as conn:  # make the order unambiguous
+            conn.execute(
+                "UPDATE sessions SET created_at = '2020-01-01T00:00:00+00:00' WHERE id = ?",
+                (older.id,),
+            )
+        for session in (older, newer):
+            SessionPaths(tmp_path / "sessions" / session.id).ensure()
+        with pytest.raises(SystemExit) as excinfo:
+            cli.main()
+        assert excinfo.value.code == 0
+        assert capsys.readouterr().out.startswith(f"session {newer.id}: ")
     finally:
         get_settings.cache_clear()
 
