@@ -110,43 +110,8 @@ frontend/src/
   pages/          library, upload, live, session (notes view)
 ```
 
-Detection records each moment's *builds* (content added over time, such as lines of handwritten
-working) and follows canvas scrolling, so a worked example or a sketch drawn on a scrolling page stays
-one moment. Selection sends batches of up to six final frames, with their builds and aligned
-transcript, to `IRIS_VISION_MODEL`, which reads everything on screen: math as LaTeX, text, tables,
-code, and figures with a self-contained brief and a renderer (`svg`, `image` or `screenshot`). A
-summary of already captured content is passed to later batches so nothing is listed twice. Set
-`IRIS_SELECTION_BATCH_SIZE` (1–20) to adjust the batch size. Completed decisions are cached in each session's
-`selection_batches/` directory; unchanged batches are reused after failures and on reruns.
-Transcript context is limited to 24,000 characters per batch, divided across its moments.
-Long context is explicitly marked as excerpts sampled from the start, middle, and end; the full
-transcript remains on disk for note writing. OCR context (not populated yet; RapidOCR is planned
-for alignment) is limited to 1,000 characters per moment.
-Selection outputs and progress events are saved after each batch.
-
-Note writing uses `IRIS_NOTES_MODEL` to produce meeting, lecture or demo notes from what was said
-and what was on screen. Worked examples are written step by step (problem, steps with typeset
-working and the reasoning, answer, key-idea and watch-out callouts), all math is LaTeX (`$...$`,
-`$$...$$`), and each figure is placed once, beside the explanation it illustrates. All transcript
-text is processed. Longer transcripts are
-split into chronological sections, with up to `IRIS_NOTES_CONTEXT_CHARS` serialized evidence
-characters per call (default 24,000; range 2,000–60,000, plus prompt and small metadata). Oversized
-speech segments are split without dropping text or inventing timestamps. Sections retain the first
-section's title and style and are joined in order, without an additional global synthesis pass.
-Validated sections are cached in `notes_sections/`; damaged entries are regenerated. The draft is
-saved and a progress event emitted after each section. Final notes become available after assembly;
-partial draft display in the UI and live processing remain future work.
-
-Rendering runs alongside note writing and rebuilds every figure professionally: `IRIS_DIAGRAM_MODEL`
-draws exact figures (graphs, charts, schematics) as sanitized SVG, and `IRIS_IMAGE_MODEL` draws
-realistic or illustrative figures from the brief. Figures that are already clean, or too detailed to
-redraw reliably (architecture diagrams, detailed maps, dense charts), are kept as sharp screenshots.
-`IRIS_VISION_MODEL` checks each result against the source and the brief; failures are retried with
-the problems as feedback (`IRIS_RENDER_ATTEMPTS` per renderer), then the other renderer is tried.
-Notes never show a redraw that failed its check: if nothing passes, the source crop is used and
-recorded in `renders.json` as unverified. Up to `IRIS_RENDER_CONCURRENCY` figures render at once.
-Model-written SVG is sanitized before it is stored. Exports embed SVG figures as PNG, since Markdown
-viewers reject SVG data URIs.
+How each stage works, its settings and its caches: [`docs/architecture.md`](docs/architecture.md),
+section 2.
 
 Session data lives in `backend/data/` (`iris.db` plus `sessions/<id>/`).
 

@@ -1,9 +1,10 @@
 # Iris architecture
 
-Status: **draft**. Section 1 written; sections 2–6 to come, one at a time.
+Status: **draft**. Section 1 written; section 2 covers the stages built so far; sections 3–6 to come,
+one at a time.
 
 1. [Overview and the life of a session](#1-overview-and-the-life-of-a-session)
-2. Pipeline stages *(next)*
+2. [Pipeline stages](#2-pipeline-stages) *(draft)*
 3. Data model and local storage
 4. API and live updates
 5. Models, cost and latency budget
@@ -154,3 +155,60 @@ is in the session, so adding a source never touches the pipeline.
   whether it fits the budget is part of cost tracking (`docs/roadmap.md`). *(section 5)*
 - Progress uses server-sent events and live input uses HTTP POSTs per chunk. Revisit if live needs
   WebSockets. *(section 4)*
+
+---
+
+## 2. Pipeline stages
+
+*Draft: the stages with notable behaviour. Ingest, transcribe, align and assemble are described in
+their module docstrings for now.*
+
+### Detect
+
+Each moment records its *builds* (content added over time, such as lines of handwritten working) and
+follows canvas scrolling, so a worked example or a sketch drawn on a scrolling page stays one
+moment. Details are in the `detect.py` docstring.
+
+### Select (read the screen)
+
+- Batches of final frames, with their builds and aligned transcript, go to `IRIS_VISION_MODEL`. It
+  reads everything on screen: math as LaTeX, text, tables, code, and figures, each figure with a
+  self-contained brief and a renderer (`svg`, `image` or `screenshot`).
+- Batch size: `IRIS_SELECTION_BATCH_SIZE` (default 6, range 1–20). A summary of content already
+  captured is passed to later batches, so nothing is listed twice.
+- Bounded context: transcript up to 24,000 characters per batch, split across its moments; OCR up
+  to 1,000 characters per moment (OCR isn't wired in yet). Long context is marked as excerpts from
+  the start, middle and end. The full transcript stays on disk for note writing.
+- Completed batches are cached in `selection_batches/` and reused after failures and on re-runs.
+  The output and a progress event are saved after each batch.
+
+### Write
+
+- `IRIS_NOTES_MODEL` writes meeting, lecture or demo notes from what was said and what was on screen.
+- Worked examples are written step by step: problem, steps with typeset working and reasoning,
+  answer, then key-idea and watch-out callouts. All math is LaTeX (`$...$`, `$$...$$`). Each figure
+  is placed once, beside the explanation it illustrates.
+- All transcript text is used. Long transcripts are split into chronological sections of up to
+  `IRIS_NOTES_CONTEXT_CHARS` evidence characters per call (default 24,000, range 2,000–60,000).
+  Oversized speech segments are split without dropping text or inventing timestamps.
+- Sections keep the first section's title and style and are joined in order. There is no final
+  synthesis pass yet.
+- Validated sections are cached in `notes_sections/`; damaged entries are regenerated. The draft is
+  saved, and a progress event emitted, after each section. Final notes are available after
+  assembly. Showing the partial draft in the UI is future work.
+
+### Render
+
+Runs alongside note writing and rebuilds every figure professionally.
+
+- `IRIS_DIAGRAM_MODEL` draws exact figures (graphs, charts, schematics) as SVG; `IRIS_IMAGE_MODEL`
+  draws realistic or illustrative figures from the brief. Figures that are already clean, or too
+  detailed to redraw reliably (architecture diagrams, detailed maps, dense charts), stay as sharp
+  screenshots.
+- `IRIS_VISION_MODEL` checks each result against the source crop and brief. Failures are retried
+  with the problems as feedback (`IRIS_RENDER_ATTEMPTS` per renderer), then the other renderer is
+  tried. If nothing passes, the source crop is used and recorded in `renders.json` as unverified,
+  so the notes never show a redraw that failed its check.
+- Up to `IRIS_RENDER_CONCURRENCY` figures render at once. Model-written SVG is sanitized before it
+  is stored. Completed renders are cached in `render_cache/`.
+- Exports embed SVG figures as PNG, since Markdown viewers reject SVG data URIs.
