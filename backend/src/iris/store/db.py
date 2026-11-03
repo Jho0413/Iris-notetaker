@@ -2,6 +2,7 @@
 this table only tracks what sessions exist and their status."""
 
 import sqlite3
+import threading
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -29,22 +30,31 @@ def _now() -> str:
 
 
 class SessionStore:
-    """Small synchronous wrapper. Single user and tiny queries, so no async driver needed."""
+    """Small synchronous wrapper. Single user and tiny queries, so no async driver needed.
+
+    One connection is shared by FastAPI's threadpool (sync routes) and the event loop (the job
+    runner). A sqlite3 connection must not be used by two threads at once: concurrent queries
+    interleave their cursors and return mixed-up rows or raise ``InterfaceError``. Every use of
+    the connection therefore holds ``_lock``. Queries are tiny, so contention is negligible.
+    """
 
     def __init__(self, db_path: Path):
         db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.RLock()  # re-entrant, so a locked method may call another
         self._conn = sqlite3.connect(db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
-        self._conn.execute("PRAGMA journal_mode=WAL")
-        self._conn.executescript(SCHEMA)
+        with self._lock:
+            self._conn.execute("PRAGMA journal_mode=WAL")
+            self._conn.executescript(SCHEMA)
 
     def close(self) -> None:
-        self._conn.close()
+        with self._lock:
+            self._conn.close()
 
     def create(self, title: str, source: SourceKind) -> Session:
         now = _now()
         sid = uuid.uuid4().hex[:12]
-        with self._conn:
+        with self._lock, self._conn:
             self._conn.execute(
                 "INSERT INTO sessions (id, title, source, status, created_at, updated_at)"
                 " VALUES (?, ?, ?, ?, ?, ?)",
@@ -53,11 +63,15 @@ class SessionStore:
         return self.get(sid)  # type: ignore[return-value]
 
     def get(self, session_id: str) -> Session | None:
-        row = self._conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM sessions WHERE id = ?", (session_id,)
+            ).fetchone()
         return Session(**dict(row)) if row else None
 
     def list(self) -> list[Session]:
-        rows = self._conn.execute("SELECT * FROM sessions ORDER BY created_at DESC").fetchall()
+        with self._lock:
+            rows = self._conn.execute("SELECT * FROM sessions ORDER BY created_at DESC").fetchall()
         return [Session(**dict(r)) for r in rows]
 
     def update(
@@ -82,15 +96,15 @@ class SessionStore:
         if title is not None:
             fields["title"] = title
         cols = ", ".join(f"{k} = ?" for k in fields)
-        with self._conn:
+        with self._lock, self._conn:
             self._conn.execute(
                 f"UPDATE sessions SET {cols} WHERE id = ?", (*fields.values(), session_id)
             )
 
     def clear_error(self, session_id: str) -> None:
-        with self._conn:
+        with self._lock, self._conn:
             self._conn.execute("UPDATE sessions SET error = NULL WHERE id = ?", (session_id,))
 
     def delete(self, session_id: str) -> None:
-        with self._conn:
+        with self._lock, self._conn:
             self._conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
