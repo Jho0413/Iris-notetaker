@@ -369,19 +369,20 @@ def finalize_frames(paths: SessionPaths, fps: float, max_width: int) -> FrameInd
     atomically at the end. Frames are sampled onto the ``k/fps`` grid by timestamp (the browser
     sends about one per second, unevenly). Unreadable frames are skipped. No frames (audio-only
     capture) gives an empty index.
+
+    The live screen lane builds the same frames one at a time with ``GridSampler`` and
+    ``FrameNormaliser``; this batch version decodes frames in parallel but writes the same names
+    and bytes.
     """
     paths.frame_index.unlink(missing_ok=True)
-    paths.frames_dir.mkdir(parents=True, exist_ok=True)
-    for old in paths.frames_dir.glob("*.jpg"):
-        old.unlink()
+    clear_frames(paths)
 
     picked = _sample_on_grid(captured_frames(paths), fps)
     size: tuple[int, int] | None = None  # (width, height), from the first readable frame
     first = 0
     while size is None and first < len(picked):
-        image = cv2.imread(str(picked[first][1]), cv2.IMREAD_COLOR)
+        image = _read_frame(picked[first][1])
         if image is None:
-            log.warning("skipping unreadable live frame %s", picked[first][1].name)
             first += 1
             continue
         height, width = image.shape[:2]
@@ -402,24 +403,81 @@ def finalize_frames(paths: SessionPaths, fps: float, max_width: int) -> FrameInd
     return index
 
 
+def clear_frames(paths: SessionPaths) -> None:
+    """Remove sampled frames left by an earlier run (captured frames are kept)."""
+    paths.frames_dir.mkdir(parents=True, exist_ok=True)
+    for old in paths.frames_dir.glob("*.jpg"):
+        old.unlink()
+
+
+class GridSampler:
+    """Picks the first frame at or after each ``k/fps`` grid point that has frames.
+
+    Offer frames in time order. Each grid cell ``[k/fps, (k+1)/fps)`` keeps its earliest frame.
+    """
+
+    def __init__(self, fps: float):
+        self.fps = fps
+        self._next_k = 0
+
+    def cell(self, t: float) -> int:
+        return math.floor(t * self.fps + _GRID_EPS)
+
+    def take(self, t: float) -> bool:
+        """Whether the frame at ``t`` (later than any offered before) is sampled."""
+        if t * self.fps + _GRID_EPS < self._next_k:
+            return False
+        self._next_k = self.cell(t) + 1
+        return True
+
+
 def _sample_on_grid(frames: list[tuple[float, Path]], fps: float) -> list[tuple[float, Path]]:
     """The first frame at or after each ``k/fps`` grid point that has frames."""
-    picked = []
-    next_k = 0
-    for t, path in frames:
-        if t * fps + _GRID_EPS < next_k:
-            continue
-        next_k = math.floor(t * fps + _GRID_EPS) + 1
-        picked.append((t, path))
-    return picked
+    sampler = GridSampler(fps)
+    return [(t, path) for t, path in frames if sampler.take(t)]
 
 
-def _convert_frame(t: float, src: Path, frames_dir: Path, size: tuple[int, int]) -> FrameRef | None:
-    name = frame_name(t)
+class FrameNormaliser:
+    """Writes sampled frames to ``frames/`` one at a time, as ``finalize_frames`` does.
+
+    The output size is fixed by the first readable frame; later frames are scaled and letterboxed
+    to it. Not thread-safe: call ``add`` from one thread at a time, in time order.
+    """
+
+    def __init__(self, frames_dir: Path, max_width: int):
+        self.frames_dir = frames_dir
+        self.max_width = max_width
+        self.size: tuple[int, int] | None = None  # (width, height)
+
+    def add(self, t: float, src: Path) -> FrameRef | None:
+        """Normalise the frame captured at ``t``; None if it is unreadable."""
+        image = _read_frame(src)
+        if image is None:
+            return None
+        if self.size is None:
+            height, width = image.shape[:2]
+            self.size = output_size(width, height, 0, self.max_width)
+        return _write_frame(t, src, image, self.frames_dir, self.size)
+
+
+def _read_frame(src: Path) -> np.ndarray | None:
     image = cv2.imread(str(src), cv2.IMREAD_COLOR)
     if image is None:
         log.warning("skipping unreadable live frame %s", src.name)
+    return image
+
+
+def _convert_frame(t: float, src: Path, frames_dir: Path, size: tuple[int, int]) -> FrameRef | None:
+    image = _read_frame(src)
+    if image is None:
         return None
+    return _write_frame(t, src, image, frames_dir, size)
+
+
+def _write_frame(
+    t: float, src: Path, image: np.ndarray, frames_dir: Path, size: tuple[int, int]
+) -> FrameRef:
+    name = frame_name(t)
     if (image.shape[1], image.shape[0]) == size:
         shutil.copyfile(src, frames_dir / name)  # already the right size: no re-encode loss
     elif not cv2.imwrite(
