@@ -652,9 +652,9 @@ def test_iris_cost_defaults_to_the_most_recent_session(tmp_path, monkeypatch, ca
     get_settings.cache_clear()
     try:
         monkeypatch.setattr(sys, "argv", ["iris", "cost"])
-        with pytest.raises(SystemExit) as exit:
+        with pytest.raises(SystemExit) as excinfo:
             cli.main()
-        assert exit.value.code == 1
+        assert excinfo.value.code == 1
         assert "no sessions yet" in capsys.readouterr().err
 
         store = SessionStore(get_settings().db_path)
@@ -668,9 +668,9 @@ def test_iris_cost_defaults_to_the_most_recent_session(tmp_path, monkeypatch, ca
             )
         for session in (older, newer):
             SessionPaths(tmp_path / "sessions" / session.id).ensure()
-        with pytest.raises(SystemExit) as exit:
+        with pytest.raises(SystemExit) as excinfo:
             cli.main()
-        assert exit.value.code == 0
+        assert excinfo.value.code == 0
         assert capsys.readouterr().out.startswith(f"session {newer.id}: ")
     finally:
         get_settings.cache_clear()
