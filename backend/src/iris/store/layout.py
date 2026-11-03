@@ -2,7 +2,9 @@
 
 sessions/<id>/
     source.<ext>          uploaded recording (upload source only)
-    live/audio/<n>.webm   live audio chunks (browser live source only)
+    live/audio/<n>.webm   live audio chunks, by sequence number (browser live source only)
+    live/frames/<t_ms>.jpg
+                          live screen frames as captured (browser live source only)
     audio.wav             16 kHz mono
     frames/<t_ms>.jpg     sampled frames
     frames.json           FrameIndex
@@ -47,6 +49,10 @@ class SessionPaths:
     @property
     def live_audio_dir(self) -> Path:
         return self.root / "live" / "audio"
+
+    @property
+    def live_frames_dir(self) -> Path:
+        return self.root / "live" / "frames"
 
     @property
     def audio(self) -> Path:

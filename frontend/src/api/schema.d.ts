@@ -202,7 +202,9 @@ export interface paths {
         put?: never;
         /**
          * Post Audio
-         * @description Body: one MediaRecorder chunk (audio/webm). ``seq`` orders chunks.
+         * @description Body: one MediaRecorder chunk (audio/webm). ``seq`` orders chunks, from 0.
+         *
+         *     Posting the same chunk again is a no-op; a different body for a stored ``seq`` is a 409.
          */
         post: operations["post_audio_api_live__session_id__audio_post"];
         delete?: never;
@@ -222,7 +224,9 @@ export interface paths {
         put?: never;
         /**
          * Post Frame
-         * @description Body: one JPEG screen frame. ``t`` is seconds since recording started.
+         * @description Body: one JPEG screen frame. ``t`` is seconds since recording started (the audio's clock).
+         *
+         *     Posting the same frame again is a no-op; a different body for a stored ``t`` is a 409.
          */
         post: operations["post_frame_api_live__session_id__frame_post"];
         delete?: never;
@@ -243,6 +247,11 @@ export interface paths {
         /**
          * End Live
          * @description Stop recording and run the full pipeline over the whole session.
+         *
+         *     The browser flushes its uploads first and says how many audio chunks it recorded. If any are
+         *     missing, this returns 409 with ``detail.missing_audio_chunks`` and the session keeps recording,
+         *     so the browser can resend them (or end with ``allow_gaps``). Captured chunks and frames are
+         *     kept, so a failed run can be retried with ``POST /sessions/{id}/run``.
          */
         post: operations["end_live_api_live__session_id__end_post"];
         delete?: never;
@@ -319,6 +328,20 @@ export interface components {
             version: string;
             /** Openai Key */
             openai_key: boolean;
+        };
+        /** LiveEnd */
+        LiveEnd: {
+            /**
+             * Audio Chunks
+             * @description How many audio chunks the browser recorded (seq 0 to n-1). If set, the session only ends once all of them have been received.
+             */
+            audio_chunks?: number | null;
+            /**
+             * Allow Gaps
+             * @description End even if some audio chunks are missing; they become silence.
+             * @default false
+             */
+            allow_gaps: boolean;
         };
         /** LiveStart */
         LiveStart: {
@@ -882,7 +905,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["LiveEnd"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -892,6 +919,13 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Session"];
                 };
+            };
+            /** @description Not recording, or audio chunks are still missing */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
