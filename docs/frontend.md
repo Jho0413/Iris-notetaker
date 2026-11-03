@@ -1,6 +1,6 @@
 # Iris frontend
 
-Status: **draft, for approval**. This covers the screens, their states, how progress events reach
+Status: **approved** (3 November 2026), updated to match the build. This covers the screens, their states, how progress events reach
 the UI, and the visual design. The pipeline and API behind it are in
 [`architecture.md`](architecture.md); product facts the design relies on are in
 [`frontend/PRODUCT.md`](../frontend/PRODUCT.md).
@@ -72,9 +72,10 @@ a live recording runs, the top bar is replaced by the recording bar (see Live).
 **Purpose:** find a session and see at a glance which are finished, still working or need
 attention.
 
-- A dense list, newest first. Each row shows the title, source (Upload or Live), a status chip in
-  plain words (Processing · Writing notes, Finished, Failed, …), the length of the recording when
-  known, and the date. A **Cost** column joins once the cost API exists (§7).
+- A dense list, newest first. Each row shows the title with its source (Upload or Live) beneath, a
+  status chip in plain words (Processing · Writing notes, Finished, Failed, …) and the date. A
+  **Length** column joins once the backend records it, and a **Cost** column once the cost API
+  exists (§7).
 - Row actions: open (the whole row is a link), **Export** (finished), **Try again** (failed) and
   **Delete** (any session not processing; asks for confirmation in a dialog).
 - While any session is processing, the list refreshes every few seconds so chips stay current.
@@ -116,19 +117,19 @@ later, so this screen is built around *is it still recording?* and *how do I sto
   **Recording**, the elapsed time in tabular numerals, capture status in words (Screen shared ·
   Microphone on) and **Stop and make notes**. Below it, centred and calm: a large timer, a small
   screen preview, and one line on what happens when you stop. A **Show live transcript** disclosure
-  (closed by default) reveals the transcript and draft as they arrive, once live processing emits
-  events (§4).
-- **Screen sharing ended** (the user stopped sharing from the browser bar): the status turns amber,
-  "Screen sharing ended. Audio is still recording", and offers **Stop and make notes**.
+  (closed by default) reveals the transcript as it arrives, once live processing emits events (§4).
+- **Screen sharing ended** (the user stopped sharing from the browser bar): Iris stops and makes
+  notes, the same as **Stop and make notes**. This follows the capture module's behaviour.
 - **Stopping:** "Finishing the upload…" with the stop button disabled, then the app goes to the
-  session page, which takes over (processing).
+  session page, which takes over (processing). If finishing fails, the page stays in the recording
+  state with the error, and stopping again retries; nothing captured is lost.
 - **Leaving while recording:** the browser warns before closing the tab, and in-app navigation asks
   for confirmation, because leaving ends the recording.
 
 | State | What it shows |
 |---|---|
 | Permission denied or cancelled | Which permission was refused and how to allow it, **Try again**; the empty session that was created is deleted |
-| Capture failed | The browser's error in plain words and **Try again** |
+| Capture failed | The capture module's message (or the browser's error in plain words) and **Try again** |
 | Warning (no OpenAI key) | The same banner as elsewhere, before starting |
 
 Capture itself (`src/capture/`) is owned by live-capture work. This screen only calls
@@ -207,7 +208,7 @@ states below. Each has a text label as well as a colour (§6).
 | **Starting** | `created` | Starting… (neutral) | none |
 | **Processing** | `processing`, no notes yet | Processing · current step (accent) | none |
 | **Draft** | `processing`, and at least one notes section is written | Draft · 2 of 4 sections (amber) | none |
-| **Stalled** | `processing`, but the event stream is open and no event arrives within 5 s, so the run isn't active (the backend restarted) | Stopped unexpectedly (neutral) | Resume (`POST /run?from_stage=<current_stage>`) |
+| **Stalled** | `processing`, but a connection attempt to the event stream delivers no event within 5 s, so the run isn't active (the backend restarted) | Stopped unexpectedly (neutral) | Resume (`POST /run?from_stage=<current_stage>`) |
 | **Finished** | `done` | Finished (green) | Export |
 | **Failed** | `failed` | Failed · step (red) | Try again (`POST /run?from_stage=<failed stage>`) |
 
@@ -219,16 +220,24 @@ Notes on these states:
 - **Retry and resume reuse caches**, so repeating a step costs little. Both buttons say so in their
   description ("Resumes from Writing notes; finished steps are reused").
 - **Stalled** works because the backend replays a running session's event history on connect
-  (`events.py`). An open stream that replays nothing means the run isn't in this backend process.
+  (`events.py`). A connection that replays nothing means the run isn't in this backend process.
+  Silence is timed from each connection attempt, not from the stream's `open`: through the Vite dev
+  proxy the headers only arrive with the first byte.
 - A run started by **Try again** or **Resume** begins with a `status: processing` event. The UI
   clears its previous run state at that point, so old stage results don't mix with new ones.
 
 ## 4. Progress events and partial results
 
-The session page subscribes to `GET /api/sessions/{id}/events` (server-sent events). Events are
-reduced into one **session view state** by a pure, tested function (`src/session/`). It is
-**idempotent**: the stream replays history on every reconnect, so every event is keyed (stage name,
-chunk index, figure id) and a replayed event changes nothing.
+The session page subscribes to `GET /api/sessions/{id}/events` (server-sent events) through
+`useSessionStream` (`src/session/`). Events are reduced into one **session view state** by a pure,
+tested function (`src/session/state.ts`).
+
+- **Idempotent:** the stream replays history on every reconnect. Replays are dropped by key in the
+  hook, and every event is keyed in the reducer as well (stage name, chunk index, figure id), so a
+  replayed event changes nothing.
+- **Reconnects:** the browser retries dropped connections. When it gives up (a failed response,
+  such as while the backend restarts), the hook reconnects itself after 1, 2, 5, then every 10
+  seconds.
 
 | Event | Data used | UI effect |
 |---|---|---|
@@ -322,14 +331,16 @@ pairs are checked to WCAG AA (4.5:1 for text, 3:1 for icons and focus rings) in 
   and below and scrolls sideways when it's wider than the column. Invalid LaTeX renders in place as
   the source in `--recording` colour, so the page never breaks.
 - **Step cards:**
-  - **Problem:** `--accent-soft` background and the label "Problem" in the accent colour.
-  - **Step n:** `--surface` with a 3 px accent rule on the left. The step title is the card's first
-    line (600 weight), and the working and its figure sit inside the card.
-  - **Answer:** `--success-soft` with a `--success` label.
-  - Consecutive steps stack with 8 px gaps, so a worked example reads as one unit.
-- **Callouts:** **Key idea** uses `--info-soft` with an `--info` left rule; **Watch out** uses
-  `--warning-soft` with a `--warning` left rule. The label is bold, the body plain. No icons; the
-  label carries the meaning.
+  - **Problem:** `--accent-soft` background, a 1 px `--accent-line` border, and the label "Problem"
+    in the accent colour.
+  - **Step n:** no box. Consecutive steps are joined by a 1 px accent path with a ring at each
+    step, so a worked example reads as one sequence. The step title (in the accent colour) leads,
+    and the working and its figure sit inside the step.
+  - **Answer:** `--success-soft` with a 1 px `--success-line` border and a `--success` label.
+    Callouts after the answer close the card, because they're about the whole example.
+- **Callouts:** **Key idea** uses `--info-soft` with a 1 px `--info-line` border and an `--info`
+  label; **Watch out** uses `--warning-soft`, `--warning-line` and a `--warning` label. The label is
+  bold, the body plain. No icons; the label carries the meaning.
 - **Figures:**
   - Centred on a **plate**: a white rounded rectangle with a hairline border, 12 px padding and max
     height 520 px. The plate stays white in dark mode because redraws and screenshots are drawn on
@@ -344,16 +355,16 @@ pairs are checked to WCAG AA (4.5:1 for text, 3:1 for icons and focus rings) in 
 One element ties the UI to what Iris does: **the session ribbon**, a thin horizontal bar under the
 session header that represents the session's length.
 
-- **Transcription:** while transcribing, the ribbon fills from the left as chunks arrive.
 - **Figures:** each one is a small square marker at its source time (`frame.t`). It is hollow while
   being redrawn and filled once done, amber if it's an unverified original crop. Hovering or focusing
-  a marker shows its caption; activating it scrolls the notes to that figure.
+  a marker shows its time and caption; activating it scrolls the notes to that figure, or opens the
+  Figures tab at it while the notes aren't ready.
 - **Finished notes:** the ribbon shows at a glance where in the session each visual came from: what
   was shown, and when.
 - **Accessibility:** markers are buttons in a labelled group ("Figures by time in the session").
 
 The ribbon's length is the transcript's last end time, so it appears once transcription has
-started. It is the only decorative element in the app.
+finished and there is at least one figure. It is the only decorative element in the app.
 
 ### Motion
 
@@ -385,7 +396,8 @@ All of the above uses the existing API and event types, except:
 | Need | Status | Until then |
 |---|---|---|
 | `visual_rendered` in the client's event list (`src/api/eventMessage.ts`) | Frontend fix in this work: it is in the schema but was missing from the list, so rendered figures were dropped | n/a |
-| Draft notes text: `GET /api/sessions/{id}/notes/draft` (returns `NotesDraft`, with markers resolved where renders exist) | Requested from the coordinator (live work needs a running draft too) | The Notes tab shows draft progress ("2 of 4 sections written") without the text |
+| Draft notes text: `GET /api/sessions/{id}/notes/draft` (returns `NotesDraft`) | Planned by live-processing work (phase 2) | The Notes tab shows draft progress ("2 of 4 sections done") without the text. `fetchDraft` in `src/session/draft.ts` is ready; set `DRAFT_ENDPOINT_ENABLED` once the endpoint exists |
+| Ending a crashed live session with gaps (`endLiveSession` with `allow_gaps`) | In the live-capture PR | **Finish and make notes** calls `POST /api/live/{id}/end` without a body; switch to `endLiveSession` once that PR is merged |
 | Per-session cost and time per stage | Cost-tracking work in progress | The rail's **Cost** slot and the library's **Cost** column are designed but not built; stage times come from events |
 | Verified status for finished sessions without events (`renders.json` via the API) | Not requested yet | Badges show only when known from this run's events |
-| `session.duration_s` set at ingest | Not set by the backend today | The length comes from the transcript's last segment |
+| `session.duration_s` set at ingest | Not set by the backend today | The session page takes the length from the transcript's last segment; the library has no Length column |
