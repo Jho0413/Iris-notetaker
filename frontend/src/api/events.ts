@@ -1,16 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { IrisEvent } from './client'
-
-const EVENT_TYPES: IrisEvent['type'][] = [
-  'status',
-  'stage_started',
-  'stage_finished',
-  'transcript_chunk',
-  'moment_found',
-  'visual_selected',
-  'notes_updated',
-  'error',
-]
+import { decodeSessionEvent, EVENT_TYPES } from './eventMessage'
 
 /**
  * Subscribe to a session's progress events (Server-Sent Events). The backend replays recent
@@ -22,11 +12,16 @@ export function useSessionEvents(sessionId: string | undefined): IrisEvent[] {
   useEffect(() => {
     if (!sessionId) return
     const source = new EventSource(`/api/sessions/${sessionId}/events`)
-    const onEvent = (e: MessageEvent) =>
+    const onEvent = (event: Event) => {
+      // Transport errors also use the name "error", but carry no application payload.
+      // Parse before updating state so malformed messages cannot crash a React render.
+      const message = decodeSessionEvent(event, sessionId)
+      if (!message) return
       setState((prev) => ({
         id: sessionId,
-        events: prev.id === sessionId ? [...prev.events, JSON.parse(e.data)] : [JSON.parse(e.data)],
+        events: prev.id === sessionId ? [...prev.events, message] : [message],
       }))
+    }
     EVENT_TYPES.forEach((t) => source.addEventListener(t, onEvent))
     return () => source.close()
   }, [sessionId])

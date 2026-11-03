@@ -60,7 +60,7 @@ APPROVE | CHANGES REQUESTED — <one sentence>
 ```
 
 BLOCKER: wrong results, data loss, crashes on realistic input, security issues, or principle
-violations (generated visuals, system dependencies, real API calls in tests).
+violations (unverified redraws presented as verified, system dependencies, real API calls in tests).
 SHOULD-FIX: unhandled edge cases likely in real use, missing tests for important behaviour,
 significant maintainability problems.
 NIT: minor quality issues.

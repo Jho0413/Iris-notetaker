@@ -13,7 +13,9 @@ dependencies = [
     "av>=12.0",
     "opencv-python-headless>=4.10",
     "numpy>=1.26",
-    "scenedetect>=0.6.4",
+    "markdown-it-py>=3",
+    "mdformat>=0.7",
+    "resvg-py>=0.5.0",
 ]
 
 [project.optional-dependencies]
@@ -33,6 +35,11 @@ dev = [
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.uv]
+# Only the headless OpenCV build may supply cv2. The full build (pulled in by e.g. rapidocr)
+# overwrites the same files and needs system libGL/glib on Linux, breaking "no system deps".
+override-dependencies = ["opencv-python; sys_platform == 'never'"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/iris"]

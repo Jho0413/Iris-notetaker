@@ -6,11 +6,22 @@ sessions/<id>/
     audio.wav             16 kHz mono
     frames/<t_ms>.jpg     sampled frames
     frames.json           FrameIndex
+    transcript_chunks/<i>_<start_ms>_<end_ms>.json
+                          per-chunk transcription cache (so re-runs don't re-pay)
     transcript.json       Transcript
     moments.json          Moments
     alignment.json        Alignment
+    selection_batches/<hash>.json
+                          cached vision decisions, keyed by model, prompt and inputs
     selection.json        Selection
-    visuals/<id>.jpg      kept frames / crops
+    visuals/<id>.source.jpg
+                          source crop of each kept figure (for rendering and verification)
+    visuals/<id>.<ext>    rendered visual (svg, png or jpg)
+    render_cache/<hash>.json
+                          completed renders, keyed by models, prompts and inputs
+    renders.json          Renders
+    notes_sections/<hash>.json
+                          validated writing sections, keyed by model, prompt and inputs
     notes_draft.json      NotesDraft
     notes.json            Notes
     notes.md              final markdown (for export)
@@ -50,6 +61,10 @@ class SessionPaths:
         return self.root / "frames.json"
 
     @property
+    def transcript_chunks_dir(self) -> Path:
+        return self.root / "transcript_chunks"
+
+    @property
     def transcript(self) -> Path:
         return self.root / "transcript.json"
 
@@ -68,6 +83,10 @@ class SessionPaths:
     @property
     def visuals_dir(self) -> Path:
         return self.root / "visuals"
+
+    @property
+    def renders(self) -> Path:
+        return self.root / "renders.json"
 
     @property
     def notes_draft(self) -> Path:

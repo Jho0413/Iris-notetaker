@@ -1,12 +1,13 @@
 """Assemble: resolve ``[visual:<id>]`` markers into images and store the final notes.
 
-Reads:  notes_draft.json, selection.json
+Reads:  notes_draft.json, selection.json, renders.json (when present)
 Writes: notes.json (Notes), notes.md
 """
 
 import re
 
-from iris.models import EventType, Notes, NotesDraft, Selection, Visual
+from iris.markdown import escape_text
+from iris.models import EventType, Notes, NotesDraft, Renders, Selection, Visual
 from iris.pipeline.context import StageContext
 from iris.store.layout import read_model, write_model
 
@@ -14,28 +15,55 @@ MARKER = re.compile(r"\[visual:([A-Za-z0-9_\-]+)\]")
 
 
 def resolve_markers(markdown: str, visuals: list[Visual]) -> str:
-    """Replace each marker with a markdown image. Unknown ids are dropped, never invented."""
+    """Replace each marker with a markdown image.
+
+    Unknown ids are dropped, never invented. Each visual appears once: repeated markers for an
+    already placed visual are dropped.
+    """
     by_id = {v.id: v for v in visuals}
+    placed: set[str] = set()
 
     def repl(match: re.Match[str]) -> str:
         v = by_id.get(match.group(1))
-        if v is None:
+        if v is None or v.id in placed:
             return ""
-        return f"![{v.caption}]({v.path})\n*{v.caption}*"
+        placed.add(v.id)
+        caption = escape_text(" ".join(v.caption.splitlines()))
+        return f"![{caption}]({v.path})\n*{caption}*"
 
     return MARKER.sub(repl, markdown)
+
+
+def drop_title_heading(markdown: str, title: str) -> str:
+    """The title is shown above the notes; a first heading repeating it is redundant."""
+    first, _, rest = markdown.lstrip().partition("\n")
+    if (
+        re.fullmatch(r"#{1,6}\s+(.*?)\s*#*\s*", first)
+        and first.lstrip("# ").strip(" #").casefold() == title.strip().casefold()
+    ):
+        return rest.lstrip("\n")
+    return markdown
 
 
 async def run(ctx: StageContext) -> None:
     draft = read_model(ctx.paths.notes_draft, NotesDraft)
     selection = read_model(ctx.paths.selection, Selection)
-    markdown = resolve_markers(draft.markdown, selection.visuals)
+    visuals = selection.visuals
+    if ctx.paths.renders.exists():
+        rendered = {r.id: r for r in read_model(ctx.paths.renders, Renders).visuals}
+        visuals = [
+            v.model_copy(update={"path": r.path, "render_as": r.render_as})
+            if (r := rendered.get(v.id))
+            else v
+            for v in visuals
+        ]
+    markdown = resolve_markers(drop_title_heading(draft.markdown, draft.title), visuals)
     notes = Notes(
         session_id=ctx.session_id,
         session_type=draft.session_type,
         title=draft.title,
         markdown=markdown,
-        visuals=selection.visuals,
+        visuals=visuals,
     )
     write_model(ctx.paths.notes, notes)
     ctx.paths.notes_md.write_text(markdown)

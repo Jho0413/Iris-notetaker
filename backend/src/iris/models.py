@@ -6,6 +6,7 @@ can be run and tested on their own (architecture principle 5).
 
 from datetime import datetime
 from enum import StrEnum
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -33,6 +34,7 @@ class Stage(StrEnum):
     ALIGN = "align"
     SELECT = "select"
     WRITE = "write"
+    RENDER = "render"
     ASSEMBLE = "assemble"
 
 
@@ -98,6 +100,14 @@ class Box(BaseModel):
     h: int
 
 
+class Build(BaseModel):
+    """One settled addition within a moment: a line written, a stroke drawn, a bullet shown."""
+
+    t: float  # when the addition settled
+    frame: FrameRef  # the screen just after the addition
+    region: Box | None = None  # what was added (None: most of the screen, or the first state)
+
+
 class Moment(BaseModel):
     """A stretch of time where the screen settled on one thing."""
 
@@ -106,6 +116,7 @@ class Moment(BaseModel):
     end: float
     frame: FrameRef  # representative "settled" frame
     changed_region: Box | None = None
+    builds: list[Build] = Field(default_factory=list)  # the moment's content, in the order added
 
 
 class Moments(BaseModel):
@@ -128,20 +139,67 @@ class Alignment(BaseModel):
 # --- Select output -----------------------------------------------------------------------------
 
 
+ElementKind = Literal["math", "text", "table", "code", "figure"]
+RenderAs = Literal["svg", "image", "screenshot"]
+
+
+class BoardElement(BaseModel):
+    """One piece of on-screen content, read by the vision model.
+
+    ``content`` is LaTeX for math, Markdown for text and tables, source for code, and for figures a
+    complete description of what is drawn (every label, value and relationship).
+    """
+
+    kind: ElementKind
+    content: str
+    t: float | None = None  # when it was written or shown, if known
+    visual_id: str | None = None  # figures only: the visual rebuilt from it
+
+
+class MomentContent(BaseModel):
+    moment_id: str
+    start: float
+    end: float
+    elements: list[BoardElement]
+
+
 class Visual(BaseModel):
-    """A kept visual: a real frame, or a crop of one. Never generated (principle 1)."""
+    """A figure from the session, rebuilt as a professional visual (principle 1).
+
+    Select crops the source region (``source_path``); render produces ``path``.
+    """
 
     id: str
     moment_id: str
     frame: FrameRef
     crop: Box | None = None
     caption: str
-    path: str  # rendered image, relative to the session folder (``visuals/<id>.jpg``)
+    path: str  # final visual, relative to the session folder
+    description: str = ""  # what the figure shows; the brief for rendering and verification
+    render_as: RenderAs = "screenshot"
+    source_path: str | None = None  # the source crop (kept on disk, never shown in notes)
 
 
 class Selection(BaseModel):
     visuals: list[Visual]
     rejected_moment_ids: list[str] = Field(default_factory=list)
+    contents: list[MomentContent] = Field(default_factory=list)
+
+
+# --- Render output -----------------------------------------------------------------------------
+
+
+class RenderedVisual(BaseModel):
+    id: str
+    path: str  # final visual, relative to the session folder
+    render_as: RenderAs  # the renderer that produced it (may differ from the requested one)
+    verified: bool  # passed the check against the source; False only for screenshot fallbacks
+    attempts: int
+    problems: list[str] = Field(default_factory=list)  # from the last failed check, if any
+
+
+class Renders(BaseModel):
+    visuals: list[RenderedVisual]
 
 
 # --- Write / assemble output -------------------------------------------------------------------
@@ -173,6 +231,7 @@ class EventType(StrEnum):
     TRANSCRIPT_CHUNK = "transcript_chunk"
     MOMENT_FOUND = "moment_found"
     VISUAL_SELECTED = "visual_selected"
+    VISUAL_RENDERED = "visual_rendered"
     NOTES_UPDATED = "notes_updated"
     ERROR = "error"
 

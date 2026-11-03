@@ -16,9 +16,9 @@ dev:              ## Run backend and frontend together
 gen-api:          ## Regenerate the UI's typed API client (backend must be running)
 	cd frontend && npm run gen:api
 
-test:             ## Run backend tests and frontend typecheck
+test:             ## Run backend/frontend tests and frontend typecheck
 	cd backend && uv run pytest
-	cd frontend && npm run typecheck
+	cd frontend && npm test && npm run typecheck
 
 lint:
 	cd backend && uv run ruff check . && uv run ruff format --check .

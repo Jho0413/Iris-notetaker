@@ -295,7 +295,7 @@ export interface components {
          * EventType
          * @enum {string}
          */
-        EventType: "status" | "stage_started" | "stage_finished" | "transcript_chunk" | "moment_found" | "visual_selected" | "notes_updated" | "error";
+        EventType: "status" | "stage_started" | "stage_finished" | "transcript_chunk" | "moment_found" | "visual_selected" | "visual_rendered" | "notes_updated" | "error";
         /**
          * FrameRef
          * @description One sampled frame on disk (``frames/<t_ms>.jpg``).
@@ -383,7 +383,7 @@ export interface components {
          * Stage
          * @enum {string}
          */
-        Stage: "ingest" | "transcribe" | "detect" | "align" | "select" | "write" | "assemble";
+        Stage: "ingest" | "transcribe" | "detect" | "align" | "select" | "write" | "render" | "assemble";
         /** Transcript */
         Transcript: {
             /** Language */
@@ -417,7 +417,9 @@ export interface components {
         };
         /**
          * Visual
-         * @description A kept visual: a real frame, or a crop of one. Never generated (principle 1).
+         * @description A figure from the session, rebuilt as a professional visual (principle 1).
+         *
+         *     Select crops the source region (``source_path``); render produces ``path``.
          */
         Visual: {
             /** Id */
@@ -430,6 +432,19 @@ export interface components {
             caption: string;
             /** Path */
             path: string;
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /**
+             * Render As
+             * @default screenshot
+             * @enum {string}
+             */
+            render_as: "svg" | "image" | "screenshot";
+            /** Source Path */
+            source_path?: string | null;
         };
     };
     responses: never;
