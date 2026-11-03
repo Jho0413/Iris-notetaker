@@ -7,8 +7,9 @@ Read `README.md` and `docs/architecture.md` first. This file covers how we work.
 - **Stage contract.** A pipeline stage is `async def run(ctx: StageContext) -> None`. It reads files from
   the session folder and writes exactly its own output (named in `store/layout.py`, typed in
   `models.py`) with `write_model`. No stage reaches into another stage's internals.
-- **Faithful visuals.** Every image in the notes is a real frame or a crop of one. Never generate,
-  redraw or annotate images.
+- **Accurate visuals.** What was shown is rebuilt as a professional visual (see `docs/architecture.md`).
+  Every redraw is verified against the source frames and transcript before use; unverified fallbacks
+  are recorded as such. Source frames stay on disk, never in the notes.
 - **No system dependencies.** Media goes through PyAV (it bundles FFmpeg). No `ffmpeg` CLI, no
   `subprocess` for media, nothing a user must `brew install`.
 - **CPU-bound work** (decoding, OpenCV) runs in `asyncio.to_thread`.
