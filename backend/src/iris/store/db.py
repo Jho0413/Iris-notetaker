@@ -40,7 +40,7 @@ class SessionStore:
 
     def __init__(self, db_path: Path):
         db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._lock = threading.RLock()  # re-entrant: create() calls get()
+        self._lock = threading.RLock()  # re-entrant, so a locked method may call another
         self._conn = sqlite3.connect(db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         with self._lock:

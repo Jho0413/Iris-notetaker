@@ -18,7 +18,7 @@ def test_concurrent_reads_and_writes_return_correct_rows(tmp_path):
             start.wait()
             for _ in range(300):
                 listed = store.list()
-                assert {s.id for s in listed} == set(ids)
+                assert set(ids) <= {s.id for s in listed}  # plus temporary sessions
                 got = store.get(ids[0])
                 assert got is not None and got.id == ids[0] and got.title == "session 0"
         except BaseException as exc:  # noqa: BLE001 - collected and asserted below
@@ -32,13 +32,26 @@ def test_concurrent_reads_and_writes_return_correct_rows(tmp_path):
         except BaseException as exc:  # noqa: BLE001 - collected and asserted below
             errors.append(exc)
 
-    threads = [threading.Thread(target=reader) for _ in range(6)]
+    def churner() -> None:
+        try:
+            start.wait()
+            for i in range(100):
+                temp = store.create(f"temp {i}", SourceKind.BROWSER_LIVE)
+                assert temp is not None and temp.title == f"temp {i}"
+                store.delete(temp.id)
+        except BaseException as exc:  # noqa: BLE001 - collected and asserted below
+            errors.append(exc)
+
+    threads = [threading.Thread(target=reader) for _ in range(5)]
     threads += [threading.Thread(target=writer) for _ in range(2)]
+    threads += [threading.Thread(target=churner)]
     for t in threads:
         t.start()
     for t in threads:
         t.join()
 
     assert errors == []
-    assert all(s.status == SessionStatus.PROCESSING for s in store.list())
+    remaining = store.list()
+    assert {s.id for s in remaining} == set(ids)  # every temporary session was deleted
+    assert all(s.status == SessionStatus.PROCESSING for s in remaining)
     store.close()
