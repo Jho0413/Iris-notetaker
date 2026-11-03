@@ -119,4 +119,4 @@ Session data lives in `backend/data/` (`iris.db` plus `sessions/<id>/`).
 
 - [`docs/roadmap.md`](docs/roadmap.md): milestones, remaining work and completion criteria
 - [`docs/architecture.md`](docs/architecture.md): architecture and pipeline design
-- `docs/frontend.md`: screens and UI design (to come)
+- [`docs/frontend.md`](docs/frontend.md): screens, states, progress events and visual design of the UI
