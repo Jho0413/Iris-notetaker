@@ -113,25 +113,26 @@ export function LivePage() {
   }
 
   /**
-   * Stop capture and hand over to processing. Stopping tears capture down before it tells the
-   * backend to finish, so a failure leaves the recording stopped but unfinished: the page then
-   * offers to retry only the finish request (`finish`). What was captured is already saved.
+   * Stop capture and hand over to processing. Stopping tears capture down, uploads what is still
+   * queued, then tells the backend to finish. A failure leaves the recording stopped but
+   * unfinished: the page then offers to retry (`finish`), which resends what is still queued and
+   * the finish request through the same capture. Resolves to the finished session's id, or null.
    */
-  async function stop(): Promise<boolean> {
+  async function stop(): Promise<string | null> {
     const live = capture.current
-    if (!live || stopping.current) return false
+    if (!live || stopping.current) return null
     stopping.current = true
     setError(null)
     setPhase('stopping')
     try {
       await live.stop()
       capture.current = null
-      return true
+      return live.sessionId
     } catch (err) {
       // Kept, so finishing again retries the uploads still queued as well as the end request.
       setPhase('unfinished')
       setError(err instanceof Error && err.message ? err.message : String(err))
-      return false
+      return null
     } finally {
       stopping.current = false
     }
@@ -161,7 +162,9 @@ export function LivePage() {
   }
 
   async function stopAndOpen() {
-    if (await stop()) navigate(`/sessions/${sessionId}`)
+    // The id comes from the capture: `sessionId` state can lag if capture ends right after starting.
+    const id = await stop()
+    if (id) navigate(`/sessions/${id}`)
   }
   const stopRef = useRef(stopAndOpen)
   useEffect(() => {
