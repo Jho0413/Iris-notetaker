@@ -14,6 +14,7 @@ const FRAME_MAX_WIDTH = 1920 // the backend scales further (IRIS_FRAME_MAX_WIDTH
 const JPEG_QUALITY = 0.8
 const DRAIN_TIMEOUT_MS = 30_000
 const UPLOAD_TIMEOUT_MS = 30_000 // a hung request becomes a retry instead of blocking the queue
+const RECORDER_STOP_TIMEOUT_MS = 2000 // a recorder that never reports 'stop' doesn't block ending
 
 export type EndReason = 'screen-share-ended' | 'microphone-ended' | 'recorder-error'
 
@@ -72,6 +73,8 @@ export class LiveCapture {
   private readonly env: CaptureEnv
   private readonly queue: UploadQueue
   private recorder?: MediaRecorder
+  /** Settles on the recorder's 'stop' event, which follows its last chunk. */
+  private recorderStopped?: Promise<unknown>
   private streams: MediaStream[] = []
   private mixer?: { close(): void }
   private stopFrames?: () => void
@@ -79,6 +82,7 @@ export class LiveCapture {
   private seq = 0
   private recording = false
   private finished = false
+  private startFailed = false
   private opening?: Promise<MediaStream>
   private cancelled = false
   private cancelOpening?: (err: CaptureError) => void
@@ -114,16 +118,20 @@ export class LiveCapture {
   async start(): Promise<MediaStream> {
     const cancelled = new Promise<never>((_, reject) => (this.cancelOpening = reject))
     this.opening = Promise.race([this.open(), cancelled])
+    // Closing the tab during a prompt runs no cleanup: discard the empty session on the way out.
+    this.env.page.addEventListener('pagehide', this.discardSession)
     try {
       return await this.opening
     } catch (err) {
+      this.startFailed = true
       // A recorder that failed while starting can still deliver a chunk: nothing to upload.
       if (this.recorder) this.recorder.ondataavailable = null
       this.release()
-      void this.env.fetch(`/api/sessions/${this.sessionId}`, { method: 'DELETE' }).catch(() => {})
+      this.discardSession()
       if (err instanceof CaptureError) throw err
       throw new CaptureError(`Could not start recording: ${err}`, { cause: err })
     } finally {
+      this.env.page.removeEventListener('pagehide', this.discardSession)
       this.opening = undefined
       this.cancelOpening = undefined
     }
@@ -133,7 +141,8 @@ export class LiveCapture {
    * Stop capture, upload everything still pending, then tell the backend to process the
    * session. Throws if uploads or the end request fail; nothing captured is discarded, so
    * calling `stop()` again retries. Called while `start()` is still asking for permissions, it
-   * cancels the start instead (nothing was recorded, so the session is discarded).
+   * cancels the start instead (nothing was recorded, so the session is discarded). After a
+   * failed start there is nothing to finish, so it resolves without contacting the backend.
    */
   stop(): Promise<void> {
     this.stopping ??= this.finish().catch((err: unknown) => {
@@ -175,6 +184,7 @@ export class LiveCapture {
 
     const recorder = new Recorder(this.audioToRecord(display, mic), { mimeType })
     this.recorder = recorder
+    this.recorderStopped = new Promise((resolve) => recorder.addEventListener('stop', resolve, { once: true }))
     recorder.ondataavailable = (e) => {
       if (e.data.size) this.queue.add('audio', `audio?seq=${this.seq++}`, e.data)
     }
@@ -185,10 +195,6 @@ export class LiveCapture {
     this.throwIfCancelled()
     // The audio's time 0: WebM timestamps start at the first recorded sample.
     this.startedAt = performance.now()
-    this.recording = true
-
-    this.env.page.addEventListener('beforeunload', this.onBeforeUnload)
-    this.env.page.addEventListener('pagehide', this.onPageHide)
     const track = display.getVideoTracks()[0]
     if (track) {
       this.stopFrames = this.env.captureFrames(track, (jpeg, at) => {
@@ -196,6 +202,10 @@ export class LiveCapture {
         this.queue.add('frame', `frame?t=${((at - this.startedAt) / 1000).toFixed(3)}`, jpeg)
       })
     }
+    // Nothing below can fail, so a start that threw never looks like a recording.
+    this.env.page.addEventListener('beforeunload', this.onBeforeUnload)
+    this.env.page.addEventListener('pagehide', this.onPageHide)
+    this.recording = true
     return display
   }
 
@@ -241,14 +251,16 @@ export class LiveCapture {
       await this.opening.catch(() => {})
       return
     }
+    if (this.startFailed) return
     if (this.recording) {
       this.recording = false
       this.stopFrames?.()
       const recorder = this.recorder
-      if (recorder && recorder.state !== 'inactive') {
-        const stopped = new Promise((resolve) => recorder.addEventListener('stop', resolve, { once: true }))
-        recorder.stop() // emits the last chunk, then 'stop'
-        await stopped
+      if (recorder) {
+        // A recorder that failed is already inactive but still delivers its last chunk, then
+        // 'stop'. Either way, wait for that chunk so the chunk count sent to the backend is final.
+        if (recorder.state !== 'inactive') recorder.stop()
+        await settledWithin(this.recorderStopped, RECORDER_STOP_TIMEOUT_MS)
       }
       this.release()
     }
@@ -288,6 +300,11 @@ export class LiveCapture {
     this.mixer = undefined
   }
 
+  private discardSession = () => {
+    const url = `/api/sessions/${this.sessionId}`
+    void this.env.fetch(url, { method: 'DELETE', keepalive: true }).catch(() => {})
+  }
+
   private onBeforeUnload = (e: Event) => {
     if (this.finished) return
     e.preventDefault()
@@ -300,6 +317,17 @@ export class LiveCapture {
     if (this.finished) return
     const body = new Blob([JSON.stringify({ allow_gaps: true })], { type: 'application/json' })
     this.env.sendBeacon(`/api/live/${this.sessionId}/end`, body)
+  }
+}
+
+/** Waits for `p`, but no longer than `ms`. */
+async function settledWithin(p: Promise<unknown> | undefined, ms: number): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise((resolve) => (timer = setTimeout(resolve, ms)))
+  try {
+    await Promise.race([p, timeout])
+  } finally {
+    clearTimeout(timer)
   }
 }
 

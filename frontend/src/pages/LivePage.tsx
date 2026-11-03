@@ -12,15 +12,39 @@ export function LivePage() {
   const [error, setError] = useState<string | null>(null)
   const capture = useRef<LiveCapture | null>(null)
   const preview = useRef<HTMLVideoElement>(null)
+  const starting = useRef(false)
+  const unmounted = useRef(false)
 
-  useEffect(() => () => void capture.current?.stop().catch(() => {}), [])
+  useEffect(() => {
+    unmounted.current = false
+    return () => {
+      unmounted.current = true
+      void capture.current?.stop().catch(() => {})
+    }
+  }, [])
 
   async function start() {
+    // A second click while the prompts are open would start a second, unreachable capture.
+    if (starting.current) return
+    starting.current = true
+    try {
+      await startCapture()
+    } finally {
+      starting.current = false
+    }
+  }
+
+  async function startCapture() {
     setError(null)
     const { data, error } = await api.POST('/api/live', {
       body: { title: title || 'Live session' },
     })
     if (error || !data) return setError('Could not start a session')
+    if (unmounted.current) {
+      // Left the page while the session was being created: discard it, don't ask for the screen.
+      void api.DELETE('/api/sessions/{session_id}', { params: { path: { session_id: data.id } } })
+      return
+    }
     try {
       // Sharing stopped from the browser's own controls (or the mic went away): finish.
       capture.current = new LiveCapture(data.id, { onEnded: () => void stop() })

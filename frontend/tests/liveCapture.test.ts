@@ -402,3 +402,104 @@ test('the recorder refusing the stream releases the screen, mic and audio mixer'
   await tick()
   assert.deepEqual(t.calls.map((c) => `${c.method} ${c.url}`), ['DELETE /api/sessions/s1'])
 })
+
+test('stop while the recorder is starting drops its late chunk and discards the session once', async () => {
+  let fireStart = () => {}
+  class SlowRecorder extends FakeRecorder {
+    start() {
+      this.state = 'recording'
+      fireStart = () => this.dispatchEvent(new Event('start'))
+    }
+  }
+  const t = setup({ MediaRecorder: SlowRecorder })
+  const live = capture(t.env)
+  const starting = live.start()
+  await tick() // the recorder exists but hasn't reported 'start'
+  assert.equal(FakeRecorder.created.length, 1)
+  await within(live.stop())
+  fireStart()
+  await assert.rejects(within(starting), /cancelled/)
+  await tick()
+  assert.ok(t.display.stopped && t.mic.stopped)
+  assert.equal(t.posted('/audio').length, 0)
+  assert.deepEqual(t.calls.map((c) => `${c.method} ${c.url}`), ['DELETE /api/sessions/s1'])
+})
+
+test('stop while the screen picker is open: a screen granted later is stopped, the mic never asked', async () => {
+  let grantScreen: (s: unknown) => void = () => {}
+  let micAsked = false
+  const t = setup({
+    mediaDevices: {
+      getDisplayMedia: () => new Promise((resolve) => (grantScreen = resolve)),
+      getUserMedia: async () => {
+        micAsked = true
+        return stream(t.mic)
+      },
+    },
+  })
+  const live = capture(t.env)
+  const starting = live.start()
+  await tick()
+  await within(live.stop())
+  await assert.rejects(within(starting), /cancelled/)
+  grantScreen(stream(t.display))
+  await tick()
+  assert.equal(t.display.stopped, true)
+  assert.equal(micAsked, false)
+  assert.deepEqual(t.calls.map((c) => `${c.method} ${c.url}`), ['DELETE /api/sessions/s1'])
+})
+
+test('closing the tab during a prompt discards the empty session', async () => {
+  const t = setup({
+    mediaDevices: {
+      getDisplayMedia: async () => stream(t.display),
+      getUserMedia: () => new Promise(() => {}),
+    },
+  })
+  void capture(t.env).start()
+  await tick()
+  t.env.page.dispatchEvent(new Event('pagehide'))
+  await tick()
+  assert.deepEqual(t.calls.map((c) => `${c.method} ${c.url}`), ['DELETE /api/sessions/s1'])
+  assert.equal(t.beacons.length, 0) // nothing to end: it never recorded
+})
+
+test('frame capture failing to start leaves nothing half-started', async () => {
+  const t = setup({
+    captureFrames: () => {
+      throw new Error('no canvas')
+    },
+  })
+  const live = capture(t.env)
+  await assert.rejects(live.start(), /Could not start recording/)
+  assert.ok(t.display.stopped && t.mic.stopped)
+  const unload = new Event('beforeunload', { cancelable: true })
+  t.env.page.dispatchEvent(unload)
+  t.env.page.dispatchEvent(new Event('pagehide'))
+  assert.equal(unload.defaultPrevented, false)
+  assert.equal(t.beacons.length, 0)
+  // Nothing to finish: stop after a failed start doesn't end the deleted session.
+  await live.stop()
+  await tick()
+  assert.deepEqual(t.calls.map((c) => `${c.method} ${c.url}`), ['DELETE /api/sessions/s1'])
+})
+
+test('the recorder failing mid-recording ends only after its last chunk', async () => {
+  const t = setup()
+  const live = capture(t.env)
+  await live.start()
+  const recorder = FakeRecorder.created[0]
+  recorder.emit('a')
+  // As browsers do: inactive when 'error' fires, then the last chunk, then 'stop'.
+  recorder.state = 'inactive'
+  recorder.onerror?.()
+  setTimeout(() => {
+    recorder.emit('last')
+    recorder.dispatchEvent(new Event('stop'))
+  }, 10)
+  await new Promise((r) => setTimeout(r, 50))
+  const order = t.calls.filter((c) => c.method === 'POST').map((c) => c.url.replace('/api/live/s1/', ''))
+  assert.deepEqual(order, ['audio?seq=0', 'audio?seq=1', 'end'])
+  assert.deepEqual(JSON.parse(t.posted('/end')[0].body as string), { audio_chunks: 2, allow_gaps: false })
+  assert.equal(live.pendingUploads, 0)
+})

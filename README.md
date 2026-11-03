@@ -105,14 +105,14 @@ What happens when capture is interrupted:
 
 - **Permission denied or picker cancelled:** Iris shows what to allow and discards the empty session.
   Anything already granted (such as the screen share when the mic is then denied) is stopped.
-- **Sharing stopped, or you leave the Live page, before recording starts** (for example while the
-  mic prompt is still open): the start fails, everything granted is stopped and the empty session is
-  discarded.
+- **Sharing stopped, or you leave the Live page or close the tab, before recording starts** (for
+  example while the mic prompt is still open): the start fails, everything granted is stopped and
+  the empty session is discarded.
 - **"Stop sharing" in the browser's own bar, or the mic is disconnected:** the recording finishes and
   is processed.
 - **Backend unreachable:** uploads are retried. Stop waits up to 30 seconds, then shows an error.
   Press Stop again to retry; nothing captured is discarded.
-- **Closing the tab:** the browser asks for confirmation. If you leave, the session is processed with
+- **Closing the tab while recording:** the browser asks for confirmation. If you leave, the session is processed with
   what arrived. If the browser crashes instead, the session stays `recording`; finish it with
   `curl -X POST http://127.0.0.1:8000/api/live/<session_id>/end`.
 
