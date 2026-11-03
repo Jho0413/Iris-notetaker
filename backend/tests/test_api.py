@@ -82,6 +82,8 @@ def make_session_with_notes(client: TestClient, settings: Settings, title: str) 
         ('Say "hi"', "Say _hi_.md"),
         ("a/b\\c", "a_b_c.md"),
         ("line\nbreak\tend", "line break end.md"),
+        ("Q1／Q2 review", "Q1_Q2 review.md"),  # full-width slash folds to "/" under NFKD
+        ("a＼b ＂c＂", "a_b _c_.md"),
     ],
 )
 def test_export_filename_keeps_title(
@@ -115,3 +117,25 @@ def test_export_filename_falls_back_to_session_id_for_blank_title(
     assert r.headers["content-disposition"] == (
         f"attachment; filename=\"{sid}.md\"; filename*=UTF-8''{sid}.md"
     )
+
+
+@pytest.mark.parametrize("title", ["\u200b", "\u200d\u2060", "\u202e"])
+def test_export_filename_treats_invisible_title_as_blank(
+    client: TestClient, settings: Settings, title: str
+):
+    sid = make_session_with_notes(client, settings, title)
+    r = client.get(f"/api/sessions/{sid}/export")
+    assert r.status_code == 200
+    assert r.headers["content-disposition"] == (
+        f"attachment; filename=\"{sid}.md\"; filename*=UTF-8''{sid}.md"
+    )
+
+
+def test_export_filename_drops_bidi_controls_but_keeps_emoji_sequences(
+    client: TestClient, settings: Settings
+):
+    sid = make_session_with_notes(client, settings, "\u202egpj.exe 👨\u200d👩\u200d👧")
+    header = client.get(f"/api/sessions/{sid}/export").headers["content-disposition"]
+    encoded = header.split("filename*=UTF-8''")[1]
+    assert unquote(encoded) == "gpj.exe 👨\u200d👩\u200d👧.md"
+    assert 'filename="gpj.exe.md"' in header

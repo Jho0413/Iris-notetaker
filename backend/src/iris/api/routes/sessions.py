@@ -100,18 +100,36 @@ def _attachment_header(title: str, fallback: str) -> str:
     folded, quotes, backslashes and other unsafe characters replaced) and ``filename*`` the
     full UTF-8 name, which browsers prefer. ``fallback`` names the file if nothing is left.
     """
-    # Control characters (newlines, tabs) and path separators never belong in a filename.
-    stem = "".join(
-        "_" if c in "/\\" else " " if unicodedata.category(c) == "Cc" else c for c in title
-    )
-    stem = " ".join(stem.split()) or fallback
-    ascii_stem = unicodedata.normalize("NFKD", stem).encode("ascii", "ignore").decode()
-    ascii_stem = " ".join(ascii_stem.replace('"', "_").split())
+    stem = _clean_filename(title)
+    if not any(unicodedata.category(c) != "Cf" for c in stem):  # blank or invisible only
+        stem = fallback
+    # NFKD folds accents off letters, but also turns full-width forms into ASCII "/", "\\"
+    # and '"', so the folded name is cleaned again.
+    folded = unicodedata.normalize("NFKD", stem).encode("ascii", "ignore").decode()
+    ascii_stem = _clean_filename(folded).replace('"', "_")
     if not any(c.isalnum() for c in ascii_stem):
         ascii_stem = fallback
     return (
         f"attachment; filename=\"{ascii_stem}.md\"; filename*=UTF-8''{quote(stem + '.md', safe='')}"
     )
+
+
+_BIDI_CONTROLS = frozenset(
+    "\u061c\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069"
+)
+
+
+def _clean_filename(name: str) -> str:
+    """Replace path separators, drop bidi controls, turn control characters into spaces."""
+    out = []
+    for c in name:
+        if c in "/\\":
+            out.append("_")
+        elif unicodedata.category(c) == "Cc":
+            out.append(" ")
+        elif c not in _BIDI_CONTROLS:
+            out.append(c)
+    return " ".join("".join(out).split())
 
 
 @router.get("/{session_id}/files/{subdir}/{name}")
