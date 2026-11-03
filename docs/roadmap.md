@@ -1,6 +1,6 @@
 # Iris roadmap
 
-Updated: 1 November 2026.
+Updated: 3 November 2026.
 
 The first milestone is a complete live MVP: someone can record a session, watch useful notes with
 professional visuals appear, and leave with a finished, downloadable document in a well-designed UI.
@@ -9,44 +9,93 @@ fixed release dates; revisit their scope after the MVP is in use.
 
 ## Current state
 
-- The upload pipeline is implemented: ingest, transcribe, detect, align, select, write and assemble.
-- Selection and writing cache completed model responses and recover from invalid cache entries.
-- Notes support meeting, lecture and demo styles, with selected frames or crops placed in the text.
-- Markdown export embeds local images and handles punctuation in captions.
-- Long transcripts are processed in sections and joined chronologically; there is no final
-  whole-session synthesis pass yet.
-- Basic library, upload, live capture and session screens exist. Live ingestion, incremental
-  processing, partial-draft display and the intended UI design remain unfinished.
-- Automated tests exercise the upload-to-export flow with mocked model calls. Real-recording
-  accuracy, visual selection quality, latency and cost still need validation.
+- The upload pipeline is implemented: ingest, transcribe, detect, align, select, write, render and
+  assemble.
+- Detection records what is added within a moment (builds) and follows vertical canvas scrolling,
+  so a worked example or a drawing built up in stages stays one moment with ordered steps.
+- Selection reads screens into math (LaTeX), text, tables, code and figures. Notes follow the
+  discussion: worked examples, processes and sequences are written step by step, with each stage's
+  figure inside its step.
+- Figures are rebuilt professionally (generated illustrations, SVG diagrams, or screenshots for
+  clean or highly detailed figures) and checked against the source before use.
+- The session view renders math with KaTeX, step/answer cards, callouts and captioned figures.
+  Markdown export keeps LaTeX intact and embeds figures.
+- Validated so far on two short tablet recordings (a worked algebra example and a sketched physics
+  explanation), with prompts free of sample-specific examples. Slides, meetings, demos, code,
+  camera-filmed whiteboards, long sessions and the screenshot path are untested.
+- Model cost is not tracked. About $2.50 was spent in one day of development runs; the figure
+  checks, screen reading, notes and SVG calls on `gpt-5.5` are suspected to be the main driver,
+  alongside image generation. This needs measuring.
+- Long transcripts are processed in sections and joined; there is no final synthesis pass yet.
+- Live ingestion and incremental processing are not implemented; ending a live session fails.
+- Library, upload, live and session screens are basic; the intended UI design is not done.
 
 ## Milestone 1 — Complete live MVP
 
 **Outcome:** a useful local app for one person, supporting both uploaded recordings and live browser
 capture. Live functionality and a well-designed UI are part of this milestone.
 
+### Step-by-step notes and professional visuals (done)
+
+- [x] Detect incremental changes (newly written content and its region) within a moment, not only
+      whole-screen changes; follow vertical scrolling.
+- [x] Group changes with the transcript into steps: what was written plus the spoken reasoning.
+- [x] Write step-by-step notes for worked examples, processes and sequences (problem or
+      introduction, steps with their figures, answer or result, key-idea and watch-out callouts).
+- [x] Rebuild every figure professionally, choosing a renderer per figure: generated illustration,
+      SVG diagram, or screenshot for clean or highly detailed figures; math is typeset LaTeX.
+- [x] Verify each redraw against the source and brief; retry with feedback, then fall back.
+- [x] Render the notes in the UI (KaTeX, step cards, callouts, figures) and export them.
+
+### Cost tracking and controls (next)
+
+- [ ] Record every model call: stage, model, input/cached/output/reasoning tokens, image tokens,
+      audio seconds and latency.
+- [ ] Keep model prices in a configuration table checked against OpenAI's pricing page, and write
+      per-stage and per-model totals to each session (`usage.json`, API and `iris cost`).
+- [ ] Confirm the main cost drivers, starting with `gpt-5.5` (screen reading, notes, figure checks,
+      SVG) and image generation.
+- [ ] Add controls: model per stage (try cheaper models where quality holds, e.g. for figure checks),
+      reasoning effort, image quality, a cap on generated figures per hour (screenshots beyond it)
+      and render attempts.
+- [ ] Measure cost and latency per hour of session for each recording type against the README's
+      goals ($0.50–2 per hour; notes within a few minutes for a 1-hour upload).
+
 ### Validate the upload experience
 
-- [ ] Run real recordings through the complete pipeline with real model calls.
-- [ ] Cover a meeting, lecture and demo, including a representative 30–90 minute session.
-- [ ] Review transcript accuracy, visual relevance, crop readability, note accuracy and placement.
-- [ ] Check repeated images discussed in different contexts, later corrections, audio-only input,
+- [ ] Build a small, varied set of real recordings: slides, a meeting with screen sharing, a
+      software demo, code, a camera-filmed whiteboard, an architecture-diagram walkthrough and a
+      representative 30–90 minute session. Re-run it after prompt or model changes.
+- [ ] Review transcript accuracy, figure relevance and quality, note accuracy and placement.
+- [ ] Check repeated content discussed in different contexts, later corrections, audio-only input,
       long static screens and rapidly changing demonstrations.
-- [ ] Measure stage latency and model cost; address issues against the README's performance and
-      cost goals. Record measurements rather than treating those goals as already achieved.
+- [ ] Decide the fallback when no redraw passes its check (more attempts, the best redraw marked
+      unverified, or the source crop), and retry transient API failures per figure.
 - [ ] Open exported notes in the intended Markdown viewer and verify the embedded visuals.
 
-### Step-by-step notes and professional visuals
+### Design and complete the UI
 
-- [ ] Detect incremental changes (newly written content and its region) within a moment, not only
-      whole-screen changes.
-- [ ] Group changes with the transcript into steps: what was written plus the spoken reasoning.
-- [ ] Write structured notes (problem, steps, figures, answer, pitfalls) for worked examples, keeping
-      the current format for slides and meetings.
-- [ ] Rebuild every visual professionally, choosing a renderer per visual: LaTeX, plots, diagrams
-      (Mermaid/SVG), tables, image generation or a cleaned screenshot.
-- [ ] Verify each redraw against the source frames and transcript; regenerate on disagreement.
-- [ ] Render the structured notes in the UI (KaTeX, step cards, figures) and export them.
+- [ ] Document the screen flows and visual design in `docs/frontend.md`.
+- [ ] Design and implement the library, upload, live session and finished-notes screens with
+      consistent typography, spacing, navigation and readable visual placement.
+- [ ] Make recording state, capture status and the stop action clear throughout a live session.
+- [ ] Display transcript and draft updates without disruptive scrolling or layout shifts.
+- [ ] Distinguish recording, processing, draft, finished and failed states.
+- [ ] Show partial results as they arrive: transcript, rendered figures and draft notes.
+- [ ] Show each session's model cost and time per stage.
+- [ ] Provide useful empty/loading/error states and clear retry and export actions.
+- [ ] Check keyboard access, focus, contrast and layouts at common laptop widths.
+- [ ] Test the whole workflow in the browser, including permission denial and interrupted requests.
+
+### Produce coherent finished notes
+
+- [ ] Add a final synthesis pass for long and live sessions that consolidates repeated points and
+      reconciles later corrections while preserving distinct explanations and useful visuals.
+- [ ] Keep a worked example or process that spans writing sections in one piece, and deduplicate
+      figures across the whole session, not only recent moments.
+- [ ] Keep one visual style across a session's generated figures.
+- [ ] Preserve evidence behind decisions, action items and uncertainty; avoid invented conclusions.
+- [ ] Validate visual references after synthesis and retain recovery/caching behavior.
 
 ### Complete live capture and ingestion
 
@@ -65,25 +114,6 @@ capture. Live functionality and a well-designed UI are part of this milestone.
 - [ ] Bound concurrent work and update frequency so processing keeps up without excessive costs.
 - [ ] Finalize the last audio and visual moment when recording stops and produce finished notes.
 - [ ] Recover from transient model/API failures using saved inputs and completed work.
-
-### Produce coherent finished notes
-
-- [ ] Add a final synthesis pass for long and live sessions that consolidates repeated points and
-      reconciles later corrections while preserving distinct explanations and useful visuals.
-- [ ] Preserve evidence behind decisions, action items and uncertainty; avoid invented conclusions.
-- [ ] Validate visual references after synthesis and retain recovery/caching behavior.
-
-### Design and complete the UI
-
-- [ ] Document the screen flows and visual design in `docs/frontend.md`.
-- [ ] Design and implement the library, upload, live session and finished-notes screens with
-      consistent typography, spacing, navigation and readable visual placement.
-- [ ] Make recording state, capture status and the stop action clear throughout a live session.
-- [ ] Display transcript and draft updates without disruptive scrolling or layout shifts.
-- [ ] Distinguish recording, processing, draft, finished and failed states.
-- [ ] Provide useful empty/loading/error states and clear retry and export actions.
-- [ ] Check keyboard access, focus, contrast and layouts at common laptop widths.
-- [ ] Test the whole workflow in the browser, including permission denial and interrupted requests.
 
 ### Document and verify the MVP
 
@@ -155,9 +185,10 @@ hosting, access-control and data-handling requirements.
 
 ## Immediate sequence within milestone 1
 
-1. Validate a real upload and establish the initial quality, latency and cost baseline.
-2. Build step-by-step notes and professional visuals; this sets the notes format the UI depends on.
-3. Define the UI flows and visual design alongside the remaining live workflow.
-4. Complete live ingestion and incremental processing.
-5. Add final synthesis and connect the live transcript/draft to the designed UI.
-6. Run end-to-end real-session checks, fix the gaps and document the MVP's supported behavior.
+1. Merge the pipeline work (`feat/pipeline`) into `main`.
+2. Add cost tracking and controls; confirm where the cost goes and bring sessions within budget.
+   Collect the varied recordings alongside, so costs are measured on realistic sessions.
+3. Improve the frontend: write `docs/frontend.md`, then build the designed screens with partial
+   results, clear states and per-session cost.
+4. Live sessions: final synthesis pass, live ingestion, then processing while recording.
+5. Run end-to-end real-session checks, fix the gaps and document the MVP's supported behavior.
