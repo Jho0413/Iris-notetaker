@@ -1,4 +1,5 @@
 # Iris
+[![CI](https://github.com/Jho0413/Iris-notetaker/actions/workflows/ci.yml/badge.svg)](https://github.com/Jho0413/Iris-notetaker/actions/workflows/ci.yml)
 
 **Notes that see what was shown.**
 
