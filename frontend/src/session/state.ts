@@ -119,15 +119,19 @@ export function applyEvent(state: RunState, event: IrisEvent): RunState {
   const data = (event.data ?? {}) as Record<string, unknown>
   // Parsed, not compared as strings: the backend omits zero microseconds from timestamps.
   const at = Date.parse(event.at)
-  if (state.runStart !== undefined && at < state.runStart) return state
+  const timed = Number.isFinite(at)
+  if (timed && state.runStart !== undefined && at < state.runStart) return state
   switch (event.type) {
     case 'status': {
       const status = str(data.status)
       if (!status || !STATUSES.includes(status)) return state
       // A new run starts with `processing`. It can follow a run that never finished (the backend
       // restarted mid-run), so compare timestamps rather than the previous status.
-      if (status === 'processing' && (state.runStart === undefined || at > state.runStart)) {
-        return { ...emptyRun(), status: 'processing', runStart: at }
+      const newRun = timed
+        ? state.runStart === undefined || at > state.runStart
+        : state.status !== 'processing' // unparseable time: fall back to the status change
+      if (status === 'processing' && newRun) {
+        return { ...emptyRun(), status: 'processing', runStart: timed ? at : state.runStart }
       }
       return { ...state, status: status as SessionStatus }
     }
@@ -253,12 +257,15 @@ export function figureList(run: RunState, notes: Notes | null): FigureState[] {
 
 export type Provenance = 'verified' | 'screenshot' | 'unverified'
 
-/** How a figure was produced, as far as is known (docs/frontend.md §5, figures). */
+/**
+ * How a figure was produced, when it is known (docs/frontend.md §5, figures). A screenshot in the
+ * finished notes may be a requested one or a fallback crop that failed its check; without this
+ * run's events the two can't be told apart, so neither label is claimed.
+ */
 export function provenance(figure: FigureState): Provenance | undefined {
-  if (!figure.rendered) return undefined
-  if (figure.verified === false) return 'unverified'
-  if (figure.renderAs === 'screenshot') return 'screenshot'
-  return figure.verified ? 'verified' : undefined
+  if (!figure.rendered || figure.verified === undefined) return undefined
+  if (!figure.verified) return 'unverified'
+  return figure.renderAs === 'screenshot' ? 'screenshot' : 'verified'
 }
 
 /** Session length in seconds, from the transcript (the backend doesn't set `duration_s` yet). */

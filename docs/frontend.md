@@ -354,9 +354,11 @@ pairs are checked to WCAG AA (4.5:1 for text, 3:1 for icons and focus rings) in 
     height 520 px. The plate stays white in dark mode because redraws and screenshots are drawn on
     white, and inverting them would falsify them.
   - The caption sits below in `--text-2` at 14 px, followed by when the figure was shown ("Shown
-    at 1:14") and, for an unverified original crop, an "Original crop · not verified" tag.
-  - Badges in the Figures tab: **Verified redraw** (a redraw only reaches the notes after passing
-    its check), **Screenshot**, or **Original crop · not verified** when this run's events say so.
+    at 1:14") and its provenance badge, the same as in the Figures tab.
+  - Provenance badges: **Verified redraw** (a redraw only reaches the notes after passing its
+    check, so this is known from the notes alone), **Screenshot** or **Original crop · not
+    verified**. A screenshot in the finished notes may be either of the last two, so those badges
+    show only when this run's events say which; otherwise there is no badge.
 - **Tables and code:** tables use hairline rows with a `--surface-2` header, and scroll sideways
   when wide. Code blocks sit on `--surface-2` in the system monospace font at 14 px.
 

@@ -87,7 +87,11 @@ test('finished notes and run events merge into one figure list', () => {
   const redrawn = { ...notes, visuals: [{ ...notes.visuals[0], render_as: 'svg' as const }] }
   assert.equal(figureList(emptyRun(), redrawn)[0].verified, true)
   assert.equal(provenance(figureList(emptyRun(), redrawn)[0]), 'verified')
-  assert.equal(provenance(figureList(emptyRun(), notes)[0]), 'screenshot')
+  // A screenshot in the notes may be a fallback crop: no label without this run's events.
+  assert.equal(provenance(figureList(emptyRun(), notes)[0]), undefined)
+  const shot = reduceEvents([ev('visual_rendered', { id: 'v1', path: 'visuals/v1.jpg',
+    render_as: 'screenshot', verified: true })])
+  assert.equal(provenance(figureList(shot, notes)[0]), 'screenshot')
   assert.equal(provenance(fig), 'unverified')
   assert.equal(provenance({ id: 'v9', caption: '', rendered: false }), undefined)
 })
@@ -159,6 +163,14 @@ test('library rows use the stored session only', () => {
   assert.equal(libraryState({ ...failed, error: 'boom' }).fromStage, 'ingest')
   assert.equal(libraryState({ ...session, current_stage: 'render' }).label,
     'Processing · Redrawing figures')
+})
+
+test('an unparseable timestamp never blocks later runs', () => {
+  const bad = { ...ev('status', { status: 'processing' }), at: 'not a time' }
+  const run = reduceEvents([bad, ev('status', { status: 'failed' }), ev('status', { status: 'processing' }),
+    ev('stage_started', { stage: 'write' })])
+  assert.equal(run.status, 'processing')
+  assert.equal(run.stages.write.status, 'running')
 })
 
 test('malformed event data is ignored', () => {
