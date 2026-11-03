@@ -64,7 +64,9 @@ MODEL_PRICES: dict[str, ModelPrice] = {
     "gpt-image-1-mini": ModelPrice(
         input=2.00, cached_input=0.20, image_input=2.50, image_output=8.00
     ),
-    # Transcription. Whisper is $0.006 per minute, billed per second (rounded up).
+    # Transcription. Whisper is $0.006 per minute, billed per second (rounded up). The gpt-4o
+    # transcribe models' model pages list audio input at these rates; the pricing page lists the
+    # same figure as plain "Input", applied here to text input (the prompt) too.
     "whisper-1": ModelPrice(audio_per_second=0.0001),
     "gpt-4o-transcribe": ModelPrice(input=2.50, audio_input=2.50, output=10.00),
     "gpt-4o-transcribe-diarize": ModelPrice(input=2.50, audio_input=2.50, output=10.00),

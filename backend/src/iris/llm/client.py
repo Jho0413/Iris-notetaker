@@ -3,7 +3,8 @@
 
 ``get_openai`` returns the SDK client behind a thin proxy: the model-call methods in ``METERED``
 report every call (usage, latency, failures) to ``iris.llm.usage``; everything else passes
-through unchanged, so stages use it exactly like ``AsyncOpenAI``.
+through unchanged, so stages use it exactly like ``AsyncOpenAI``. ``with_options()`` returns a
+metered client too; ``with_raw_response`` / ``with_streaming_response`` are not metered (unused).
 """
 
 import functools
@@ -46,6 +47,8 @@ class _Metered:
     def __getattr__(self, name: str) -> Any:
         attr = getattr(self._target, name)
         path = (*self._path, name)
+        if path == ("with_options",):  # a re-configured client is metered too
+            return lambda *args, **kwargs: _Metered(attr(*args, **kwargs))
         if path in METERED:
             return _metered(attr, ".".join(path))
         if path in _PREFIXES:

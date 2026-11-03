@@ -225,10 +225,11 @@ def _cache_key(ctx: StageContext, visual: Visual, source: bytes) -> str:
         "models": [s.diagram_model, s.image_model, s.vision_model, s.image_quality],
         "effort": s.reasoning_effort,
         "attempts": s.render_attempts,
-        # Only when set, so caches written before per-call efforts existed stay valid.
+        # Only when they differ from the default, so existing caches stay valid.
         **(
-            {"efforts": [_effort(ctx, "diagram"), _effort(ctx, "check")]}
-            if s.diagram_reasoning_effort or s.check_reasoning_effort
+            {"efforts": efforts}
+            if (efforts := [_effort(ctx, "diagram"), _effort(ctx, "check")])
+            != [s.reasoning_effort] * 2
             else {}
         ),
         "visual": visual.model_dump(mode="json", exclude={"id", "path", "source_path"}),

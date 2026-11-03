@@ -287,7 +287,7 @@ class UsageTotals(BaseModel):
 
 
 class SessionUsage(BaseModel):
-    """``usage.json``: every model call made for a session, across all runs, with totals.
+    """Every model call made for a session, across all runs, with totals (``usage.json``).
 
     Cache hits make no call, so a re-run that reuses cached work adds nothing here.
     """

@@ -1,4 +1,4 @@
-"""Model-call accounting: usage.json, prices, the API route and ``iris cost``.
+"""Model-call accounting: the call log, usage.json, prices, the API route and ``iris cost``.
 
 The OpenAI client is faked under ``iris.llm.client._client``, so calls go through the real
 ``get_openai`` proxy that records them.
@@ -177,6 +177,9 @@ def test_pipeline_records_every_call_and_cached_rerun_costs_nothing(tmp_path, fa
         body = client.get(f"/api/sessions/{sid}/usage").json()
         result = SessionUsage.model_validate(body)
         assert len(result.records) == len(fake.calls) > 0
+        # usage.json was refreshed after the last stage that made calls.
+        summary = settings.sessions_dir / sid / "usage.json"
+        assert read_model(summary, SessionUsage) == result
 
         # Every call is attributed to its stage and purpose, and priced from the table.
         expected = {
@@ -221,6 +224,7 @@ def test_pipeline_records_every_call_and_cached_rerun_costs_nothing(tmp_path, fa
         assert len(fake.calls) == calls_before
         again = SessionUsage.model_validate(client.get(f"/api/sessions/{sid}/usage").json())
         assert again.records == result.records
+        assert read_model(summary, SessionUsage) == result
         assert again.total.cost_usd == pytest.approx(total)
 
 
@@ -251,7 +255,7 @@ async def test_usage_recording_failure_never_fails_the_stage(ctx, fake, monkeypa
         await render.run(ctx)
     [rendered] = read_model(ctx.paths.renders, Renders).visuals
     assert rendered.verified and rendered.render_as == "image"
-    assert not ctx.paths.usage.exists()
+    assert not ctx.paths.usage.exists() and not ctx.paths.usage_log.exists()
     assert "could not record usage" in caplog.text
 
 
@@ -295,6 +299,14 @@ async def test_calls_outside_a_stage_are_not_recorded(ctx, fake):
     assert not ctx.paths.usage.exists()
 
 
+async def test_with_options_client_is_metered(ctx, fake):
+    fake.with_options = lambda **_kwargs: fake
+    with usage.recording(ctx, Stage.WRITE):
+        client = get_openai(ctx.settings).with_options(max_retries=5)
+        await client.chat.completions.parse(model="gpt-5.5", messages=[])
+    assert read_model(ctx.paths.usage, SessionUsage).total.calls == 1
+
+
 async def test_other_client_attributes_pass_through(ctx, monkeypatch):
     fake = SimpleNamespace(api_key="k", chat=SimpleNamespace(other="x"))
     monkeypatch.setattr(llm_client, "_client", lambda _key: fake)
@@ -328,7 +340,7 @@ async def test_concurrent_stages_and_threads_keep_every_record(ctx, fake, tmp_pa
     )
     threads = [
         threading.Thread(
-            target=lambda: [usage.append_record(ctx.paths.usage, record) for _ in range(10)]
+            target=lambda: [usage.append_record(ctx.paths.usage_log, record) for _ in range(10)]
         )
         for _ in range(4)
     ]
@@ -337,7 +349,7 @@ async def test_concurrent_stages_and_threads_keep_every_record(ctx, fake, tmp_pa
     for t in threads:
         t.join()
 
-    result = read_model(ctx.paths.usage, SessionUsage)
+    result = usage.read_usage(ctx.paths.usage_log)
     assert result.by_stage["write"].calls == 20
     assert result.by_stage["render"].calls == 15
     assert result.by_stage["none"].calls == 40
@@ -345,14 +357,40 @@ async def test_concurrent_stages_and_threads_keep_every_record(ctx, fake, tmp_pa
     assert read_model(other.paths.usage, SessionUsage).total.calls == 5
 
 
-def test_damaged_usage_file_is_kept_aside_and_restarted(ctx):
-    ctx.paths.usage.write_text("{not json")
+def test_damaged_log_lines_are_skipped(ctx, caplog):
     record = UsageRecord(
         at=datetime.now(UTC), purpose="x", operation="op", model="gpt-5.5", latency_s=0
     )
-    usage.append_record(ctx.paths.usage, record)
-    assert read_model(ctx.paths.usage, SessionUsage).records == [record]
-    assert (ctx.paths.root / "usage.json.corrupt").read_text() == "{not json"
+    usage.append_record(ctx.paths.usage_log, record)
+    with ctx.paths.usage_log.open("a") as f:
+        f.write('{"at": "2026-11-03T00:00:00Z", "purp')  # cut off by a crash
+    with caplog.at_level(logging.WARNING, "iris.llm.usage"):
+        assert usage.read_usage(ctx.paths.usage_log).records == [record]
+    assert "skipping unreadable line 2" in caplog.text
+    usage.append_record(ctx.paths.usage_log, record)  # appends after the damaged line
+    assert usage.read_usage(ctx.paths.usage_log).total.calls == 2
+
+
+def test_appending_does_not_reread_the_log(ctx, monkeypatch):
+    record = UsageRecord(
+        at=datetime.now(UTC), purpose="x", operation="op", model="gpt-5.5", latency_s=0
+    )
+    for _ in range(3):
+        usage.append_record(ctx.paths.usage_log, record)
+
+    def no_read(*_args, **_kwargs):
+        raise AssertionError("append re-read the log")
+
+    monkeypatch.setattr(type(ctx.paths.usage_log), "read_text", no_read)
+    usage.append_record(ctx.paths.usage_log, record)
+    monkeypatch.undo()
+    assert len(ctx.paths.usage_log.read_text().splitlines()) == 4
+
+
+async def test_stage_with_only_cache_hits_leaves_usage_untouched(ctx, fake):
+    with usage.recording(ctx, Stage.WRITE):
+        pass
+    assert not ctx.paths.usage.exists() and not ctx.paths.usage_log.exists()
 
 
 # --- Reading usage from SDK responses -------------------------------------------------------------
@@ -524,6 +562,8 @@ def test_render_cache_key_changes_only_when_an_effort_override_is_set(ctx):
     base = render._cache_key(ctx, v, b"src")
     ctx.settings = ctx.settings.model_copy(update={"select_reasoning_effort": "low"})
     assert render._cache_key(ctx, v, b"src") == base
+    ctx.settings = ctx.settings.model_copy(update={"check_reasoning_effort": "medium"})
+    assert render._cache_key(ctx, v, b"src") == base  # same as the default: same key
     ctx.settings = ctx.settings.model_copy(update={"check_reasoning_effort": "low"})
     assert render._cache_key(ctx, v, b"src") != base
 
@@ -538,9 +578,11 @@ def test_usage_route(client: TestClient, settings):
     assert empty["records"] == [] and empty["total"]["calls"] == 0
     assert empty["prices_checked"] == PRICES_CHECKED
 
-    path = SessionPaths(settings.sessions_dir / sid).usage
-    path.write_text("{damaged")
-    assert client.get(f"/api/sessions/{sid}/usage").status_code == 500
+    log = SessionPaths(settings.sessions_dir / sid).usage_log
+    for record in fixture_usage().records:
+        usage.append_record(log, record)
+    body = SessionUsage.model_validate(client.get(f"/api/sessions/{sid}/usage").json())
+    assert body == fixture_usage()
 
 
 def fixture_usage() -> SessionUsage:
@@ -572,7 +614,8 @@ def test_iris_cost_prints_a_table_per_stage(tmp_path, monkeypatch, capsys):
     get_settings.cache_clear()
     try:
         paths = SessionPaths(tmp_path / "sessions" / "abc").ensure()
-        write_model(paths.usage, fixture_usage())
+        for record in fixture_usage().records:
+            usage.append_record(paths.usage_log, record)
         monkeypatch.setattr(sys, "argv", ["iris", "cost", "abc"])
         with pytest.raises(SystemExit) as exit:
             cli.main()

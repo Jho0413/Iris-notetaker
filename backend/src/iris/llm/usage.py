@@ -1,4 +1,4 @@
-"""Model-call accounting: every OpenAI call made in a stage is recorded in ``usage.json``.
+"""Model-call accounting: every OpenAI call made in a stage is recorded for its session.
 
 How the pieces fit:
 
@@ -13,9 +13,16 @@ How the pieces fit:
 
 Cached work makes no call, so a re-run that hits its caches adds no records and no cost.
 
-Writes are serialized by a lock and replace the file atomically, so concurrent stages in this
-process never lose a record. Two processes writing the same session at once (``iris stage`` while
-the server runs it) could still race; the runner never does that itself.
+Files (``store/layout.py``):
+
+- ``usage_calls.jsonl``: one ``UsageRecord`` per line, appended as each call finishes. This is the
+  source of truth: appending is constant-time however long the session, and a crash loses at most
+  the line being written (unreadable lines are skipped with a warning when read).
+- ``usage.json``: ``SessionUsage`` (records plus totals per stage, model and purpose), rewritten
+  from the log when a stage that made calls ends. The API and ``iris cost`` read the log, so they
+  are current while a stage is still running.
+
+Appends are serialized by a lock, so concurrent stages in this process never interleave lines.
 """
 
 import io
@@ -35,7 +42,7 @@ from typing import TYPE_CHECKING, Any
 
 from iris.config import PRICES_CHECKED, ModelPrice
 from iris.models import SessionUsage, Stage, UsageRecord, UsageTotals
-from iris.store.layout import read_model, write_model
+from iris.store.layout import write_model
 
 if TYPE_CHECKING:
     from iris.pipeline.context import StageContext
@@ -61,11 +68,13 @@ TOKEN_FIELDS = (
 MAX_ERROR_CHARS = 500
 
 
-@dataclass(frozen=True)
+@dataclass
 class _Scope:
-    path: Path
+    log: Path
+    summary: Path
     stage: Stage | None
     prices: Mapping[str, ModelPrice]
+    recorded: int = 0
 
 
 _scope: ContextVar[_Scope | None] = ContextVar("iris_usage_scope", default=None)
@@ -75,12 +84,18 @@ _lock = threading.Lock()
 
 @contextmanager
 def recording(ctx: "StageContext", stage: Stage | None) -> Iterator[None]:
-    """Record model calls made inside this block to the session's ``usage.json``."""
-    token = _scope.set(_Scope(ctx.paths.usage, stage, ctx.settings.model_prices))
+    """Record model calls made inside this block for the session; refresh ``usage.json`` after."""
+    scope = _Scope(ctx.paths.usage_log, ctx.paths.usage, stage, ctx.settings.model_prices)
+    token = _scope.set(scope)
     try:
         yield
     finally:
         _scope.reset(token)
+        if scope.recorded:  # a stage that only hit its caches leaves the files untouched
+            try:
+                write_summary(scope.log, scope.summary)
+            except Exception:
+                log.warning("could not write %s", scope.summary, exc_info=True)
 
 
 @contextmanager
@@ -261,7 +276,8 @@ def record_call(
             error=None if error is None else f"{type(error).__name__}: {error}"[:MAX_ERROR_CHARS],
             **m,
         )
-        append_record(scope.path, record)
+        append_record(scope.log, record)
+        scope.recorded += 1
     except Exception:
         log.warning("could not record usage of %s", operation, exc_info=True)
 
@@ -279,18 +295,39 @@ def timed(operation: str, request: Mapping[str, Any]) -> Iterator[dict[str, Any]
     record_call(operation, request, out.get("response"), time.perf_counter() - start)
 
 
-def append_record(path: Path, record: UsageRecord) -> None:
+def append_record(log_path: Path, record: UsageRecord) -> None:
+    """Append one record to the call log. Constant-time: the log is never re-read here."""
+    line = (record.model_dump_json() + "\n").encode()
+    with _lock, log_path.open("a+b") as f:
+        # After a crash cut off the last line, start a new one rather than extend the damage.
+        # Writes in append mode always go to the end, wherever the read position is.
+        size = f.seek(0, io.SEEK_END)
+        if size:
+            f.seek(size - 1)
+            if f.read(1) != b"\n":
+                line = b"\n" + line
+        f.write(line)
+
+
+def read_records(log_path: Path) -> list[UsageRecord]:
+    """Records in the call log; unreadable lines (e.g. cut off by a crash) are skipped."""
+    if not log_path.exists():
+        return []
+    records = []
     with _lock:
-        records: list[UsageRecord] = []
-        if path.exists():
-            try:
-                records = read_model(path, SessionUsage).records
-            except ValueError:
-                damaged = path.with_name(path.name + ".corrupt")
-                log.warning("unreadable %s moved to %s; starting a new one", path, damaged.name)
-                path.replace(damaged)
-        records.append(record)
-        write_model(path, summarize(records))
+        lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    for n, line in enumerate(lines, 1):
+        if not line.strip():
+            continue
+        try:
+            records.append(UsageRecord.model_validate_json(line))
+        except ValueError:
+            log.warning("skipping unreadable line %d of %s", n, log_path)
+    return records
+
+
+def write_summary(log_path: Path, summary_path: Path) -> None:
+    write_model(summary_path, read_usage(log_path))
 
 
 def summarize(records: list[UsageRecord]) -> SessionUsage:
@@ -331,8 +368,6 @@ def _add(totals: UsageTotals, r: UsageRecord) -> None:
         setattr(totals, name, getattr(totals, name) + getattr(r, name))
 
 
-def read_usage(path: Path) -> SessionUsage:
-    """A session's usage, with totals recomputed from its records. Raises ValueError if damaged."""
-    if not path.exists():
-        return summarize([])
-    return summarize(read_model(path, SessionUsage).records)
+def read_usage(log_path: Path) -> SessionUsage:
+    """A session's usage so far, from its call log."""
+    return summarize(read_records(log_path))

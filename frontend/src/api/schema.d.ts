@@ -264,6 +264,7 @@ export interface paths {
          *
          *     A session with no model calls yet (or only cache hits) has empty records and zero totals.
          *     Calls whose cost is unknown are counted in ``unpriced_calls`` and excluded from ``cost_usd``.
+         *     Read from the call log, so it is current while stages are still running.
          */
         get: operations["get_usage_api_sessions__session_id__usage_get"];
         put?: never;
@@ -399,7 +400,7 @@ export interface components {
         SessionType: "meeting" | "lecture" | "demo";
         /**
          * SessionUsage
-         * @description ``usage.json``: every model call made for a session, across all runs, with totals.
+         * @description Every model call made for a session, across all runs, with totals (``usage.json``).
          *
          *     Cache hits make no call, so a re-run that reuses cached work adds nothing here.
          */

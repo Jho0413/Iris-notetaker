@@ -102,12 +102,7 @@ def _cost(session_id: str) -> int:
     if not paths.root.is_dir():
         print(f"no session {session_id}", file=sys.stderr)
         return 1
-    try:
-        usage = read_usage(paths.usage)
-    except ValueError as exc:
-        print(f"{paths.usage} is unreadable: {exc}", file=sys.stderr)
-        return 1
-    print(format_usage(session_id, usage))
+    print(format_usage(session_id, read_usage(paths.usage_log)))
     return 0
 
 
