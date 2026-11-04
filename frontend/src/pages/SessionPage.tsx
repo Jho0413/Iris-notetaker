@@ -11,6 +11,7 @@ import { StatusChip } from '../components/StatusChip'
 import { StepList } from '../components/StepList'
 import { TabPanel, Tabs } from '../components/Tabs'
 import { TranscriptList } from '../components/TranscriptList'
+import { stepCosts, usageCost, usageRefreshKey } from '../session/cost'
 import { act } from '../session/request'
 import { formatWhen, SOURCE_LABEL } from '../session/format'
 import {
@@ -20,6 +21,7 @@ import {
 } from '../session/state'
 import type { SessionStream } from '../session/useSessionStream'
 import { useSessionStream } from '../session/useSessionStream'
+import { useSessionUsage } from '../session/useSessionUsage'
 import { useTitle } from '../session/useTitle'
 
 type TabId = 'notes' | 'transcript' | 'figures'
@@ -118,6 +120,12 @@ function SessionView({ id }: { id: string }) {
       live = false
     }
   }, [id, done, reload])
+
+  // Cost: fetched when a step or the session finishes, not on every event.
+  const status = run.status ?? session?.status
+  const usage = useSessionUsage(id, usageRefreshKey(run, status))
+  const cost = usage && status ? usageCost(usage, status) : null
+  const costs = useMemo(() => (usage ? stepCosts(usage) : []), [usage])
 
   const ui = session
     ? uiState(session, run, { stalled: stream.quiet && (run.status ?? session.status) === 'processing' })
@@ -414,6 +422,8 @@ function SessionView({ id }: { id: string }) {
           stream={stream.status}
           error={session.error ?? run.error}
           showProgress={finished && stream.eventCount > 0}
+          cost={cost}
+          stepCosts={costs}
         />
       </div>
 

@@ -429,7 +429,8 @@ and 600 (300 only for the recorder clock).
   ribbon 20px below, then a two-column grid: reading column `minmax(0, 1fr)` plus a 300px sticky
   rail, 32px apart. The notes column is capped at 68ch inside its track. Until the notes are
   finished the reading column holds the progress view instead, and there is no ribbon.
-- **Library:** one bordered list; columns `title 1fr · status 260px · created 150px · actions 150px`,
+- **Library:** one bordered list; columns
+  `title 1fr · status 260px · created 130px · cost 88px (right-aligned) · actions 150px`,
   rows at least 56px tall, each whole row a link.
 - **Spacing rhythm:** a 4px base. Common steps are 4, 6, 8, 12, 16, 20, 24, 32, 48 and 64. 6px
   separates a label from its control and icon from text; 8px separates sibling buttons; 16–20px
@@ -437,7 +438,7 @@ and 600 (300 only for the recorder clock).
 - **Breakpoints:**
   - ≤1120px: the session becomes one column and the rail collapses into a summary bar above the
     tabs, expandable in place.
-  - ≤860px: the library drops its header and date column, status moves under the title; the
+  - ≤860px: the library drops its header, date and cost columns, status moves under the title; the
     recording bar hides capture status; the session header stacks.
   - ≤560px: tighter top bar and page padding; top-bar button labels hide to icons.
 
@@ -521,7 +522,9 @@ Compact, quiet, and obvious about the one thing to do.
 ### Progress Rail
 A 300px sticky panel on `surface-2`: a "Progress" step list (finished steps green check, running
 step indigo spinner and `text` at 500, failed step red), the "On this page" outline, and a
-collapsed Details disclosure holding stage names, timings and raw errors in mono. Under 1120px it
+a "Cost" line (13px `text-2` label at 600, the value right-aligned in `text` at 500 with tabular
+numerals; laid out even while empty), and a collapsed Details disclosure holding each step's plain
+label with its cost and timing, and raw errors in mono. Under 1120px it
 becomes a one-line summary bar that expands in place.
 
 ### Progress View
@@ -589,7 +592,7 @@ animation and transition is off and the dot is solid.
 - **Don't** add shadows to cards, panels or rows; the Float shadow belongs to the dialog and the
   recording bar only.
 - **Don't** put metric tiles, cost cards or pipeline stage names above the notes; progress lives in
-  the rail as plain sentences, with stage names behind Details.
+  the rail as plain sentences, with per-step costs and times behind Details.
 - **Don't** use indigo or a state colour as decoration, or a state colour for a different state.
 - **Don't** add web fonts, display faces, ALL-CAPS labels or eyebrow text above headings.
 - **Don't** hard-code a colour in a component, or invert or tint figures in dark mode.
