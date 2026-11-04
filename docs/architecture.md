@@ -150,7 +150,7 @@ lanes as asyncio tasks. Lanes communicate only through the **live timeline**
 | `transcribed_to` (T_a) | the transcript is complete up to here | audio lane |
 | `closed_to` (T_m) | every moment that ends by here is closed | screen lane |
 | `selected_to` (T_s) | every closed moment that ends by here has been read | select lane |
-| `horizon` | `min(T_a, T_s)`: evidence before it is final | (derived) |
+| `horizon` | `min(T_a, T_s)`: evidence before it is final (select publishes in time order: nothing it reads later starts before T_s) | (derived) |
 
 Lanes wait on watermarks (an `asyncio.Condition`), never poll. A lane that has finished (after
 stop) or failed counts as "through" any time, so nothing downstream waits forever.
@@ -160,7 +160,7 @@ stop) or failed counts as "through" any time, so nothing downstream waits foreve
 | **Audio** | `live/audio/*.webm` | Decodes the contiguous run of chunks into one PCM stream (`live/audio.pcm`). Cuts windows at the quietest point 10–30 s after the last cut (never at a chunk edge) and transcribes them, at most `IRIS_LIVE_TRANSCRIBE_CONCURRENCY` at once, each prompted with the previous window's text. Commits windows in order | transcript segments, T_a, `TRANSCRIPT_CHUNK` |
 | **Screen** | `live/frames/*.jpg` | Holds frames back `IRIS_LIVE_FRAME_HOLDBACK_S` (session time) to order them, samples them onto the `frame_fps` grid and normalises them with ingest's own helpers (size fixed by the first readable frame), writing `frames/` with ingest's names and bytes, and feeds `MomentDetector` the frames read back from `frames/`, as detect reads them | closed moments, T_m, `MOMENT_FOUND` |
 | **Select** | closed moments + transcript | Gates each moment until T_a ≥ its end + `IRIS_LIVE_SPEECH_PAD_S`, aligns it, and reads it with the select stage's batch step and one call in flight (moments that pass the gate meanwhile go together in the next batch, up to `selection_batch_size`; visual ids continue across batches). Renders each figure in the background (`IRIS_LIVE_RENDER_CONCURRENCY`); a failed render is left to the render stage; the draft shows the source crop until it passes | contents, visuals, T_s, `VISUAL_SELECTED`, `VISUAL_RENDERED` |
-| **Draft** | timeline | Packs evidence before the horizon into sections like write does. A section is *frozen* once the horizon passes a moment boundary beyond its budget, and written once (cached in `notes_sections/`); the open *tail* is rewritten at most every `IRIS_LIVE_DRAFT_REFRESH_S` | `notes_draft.json`, `NOTES_UPDATED` |
+| **Draft** | timeline | Packs the evidence published so far into sections like write does. A section that closes before the horizon is *frozen*: written once, with the cache key write computes for it at stop (`notes_sections/`). The *tail* after it, speech beyond the horizon included (so a long open moment doesn't stall the draft), is rewritten at most every `IRIS_LIVE_DRAFT_REFRESH_S`, and only where it changed. A payload whose call fails twice is given up until it changes; the write stage retries it at stop | `notes_draft.json`, `NOTES_UPDATED` |
 
 **Joining what was split.** Inputs arrive in pieces, so each lane has a rule for putting them back
 together:
@@ -260,7 +260,9 @@ their module docstrings for now.*
 
 Order (`pipeline.PLAN`): ingest → transcribe ∥ detect → align → select → write ∥ render → assemble →
 synthesize. Each stage appears once, so re-running from a stage (`plan_from`), the session's
-`current_stage` and the UI's progress list need no special cases.
+`current_stage` and the UI's progress list need no special cases. A run that includes select
+deletes `notes_draft.json` first: visual ids may change, so a draft written against the old
+selection (live, or by an earlier run) is never served meanwhile. A run from write keeps it.
 
 ### Detect
 
