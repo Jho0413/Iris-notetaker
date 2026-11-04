@@ -82,6 +82,7 @@ uv run iris process path/to/recording.mp4   # new session, full pipeline
 uv run iris run <session_id> --from select  # re-run from a stage
 uv run iris stage <session_id> detect       # run one stage on its own
 uv run iris cost [<session_id>]             # model calls and cost per stage, model and purpose
+uv run iris show <session_id>               # status, and for a failed run what it failed on
 ```
 
 Every model call is recorded in the session's `usage.json` (also `GET /api/sessions/{id}/usage`):
@@ -153,6 +154,25 @@ IRIS_DATA_DIR=/tmp/iris-scratch uv run iris serve --port 8001   # in one termina
 uv run iris replay-live recording.mov --url http://127.0.0.1:8001 [--speed 2]
 ```
 
+### Troubleshooting
+
+When a run fails, the UI shows only a short message of our own ("Iris couldn't finish making the
+notes. Try again; finished steps are kept.", or what to fix about the recording) and the step it
+stopped at; it never shows the error itself. To see what went wrong:
+
+- **`uv run iris show <session_id>`** (in `backend/`) prints the session's title, source, status,
+  the stage it stopped at, the failure kind, the message the user saw, and the raw error with its
+  time. The session id is in the page's URL (`/sessions/<id>`).
+- **The backend log** (the terminal running `make dev` or `iris serve`) has the full traceback,
+  every retry of a temporary API error, and each figure that fell back to its source crop.
+- **`uv run iris cost <session_id>`** counts failed model calls; each one's error is in the
+  session's `usage.json`.
+
+Temporary API errors (timeouts, rate limits, server errors) are retried per unit of work after the
+SDK's own retries, waiting `IRIS_API_RETRY_DELAYS_S` (default `[15, 60, 120]` seconds). A missing
+or rejected `OPENAI_API_KEY`, exhausted credit or a missing model fails the run at once; fix it and
+**Try again**. Architecture section 1, "Errors and retries", has the whole policy.
+
 ### Layout
 
 ```
@@ -168,7 +188,8 @@ backend/src/iris/
                   (live work promoted at stop); replay.py (`iris replay-live`, a dev tool)
   jobs/runner.py  runs a session's PLAN as an asyncio task, publishes progress
   store/          SQLite session index + on-disk session folder layout (layout.py lists every file)
-  llm/            OpenAI client; usage.py records every model call and its cost (usage.json)
+  llm/            OpenAI client; usage.py records every model call and its cost (usage.json);
+                  errors.py classifies errors and retries temporary ones
   config.py       Settings (IRIS_* environment variables, see backend/.env.example)
   cli.py          the `iris` command
   events.py       progress event bus

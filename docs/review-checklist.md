@@ -79,14 +79,24 @@ every change; the reviewer says which sections it checked.
   renderer) is bounded by `IRIS_RENDER_ATTEMPTS`, and concurrency by `IRIS_RENDER_CONCURRENCY`.
 - Model-written SVG goes through `sanitize_svg` before it is stored or rasterized: no scripts,
   `foreignObject`, external references, doctypes or entities; a `viewBox` is required.
-- Refusals and invalid SVG count as failed attempts and are retried with feedback. (Retrying
-  transient API errors per figure is still open in `docs/roadmap.md`; today one stops the stage.)
+- Refusals and invalid SVG count as failed attempts and are retried with feedback. An API error
+  gives the source crop at once (unverified, not cached, reason in `problems`); a blocking error
+  fails the stage and cancels the figures still rendering.
 - Stale rendered visuals from earlier runs are removed; source crops are kept.
 
 **Assemble / export**
 - Notes link to rendered visuals, never to `*.source.jpg` directly.
 - Markdown export embeds every figure (SVG as PNG), keeps LaTeX intact, and image paths can't
   escape the session folder.
+
+**Errors (all stages)**
+- Model calls go through the error policy (architecture section 1, "Errors and retries"): a unit
+  retries only `TEMPORARY` errors (`retry_temporary`), never `BLOCKING` ones, and concurrent
+  units stop at once on a blocking error (`gather_units`, a `TaskGroup`).
+- Nothing the backend failed on reaches the API or the UI: no exception text, provider or model
+  names, status codes, model output or developer instructions. A known input problem raises
+  `UserFacingError` with a message from `FailureMessage`; everything else gets the generic one.
+  Event data carries no `problems` or raw text.
 
 **API / live**
 - Unknown session id → 404; actions in the wrong state → 409.

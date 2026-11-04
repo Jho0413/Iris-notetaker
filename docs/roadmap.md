@@ -79,8 +79,13 @@ capture. Live functionality and a well-designed UI are part of this milestone.
 - [ ] Review transcript accuracy, figure relevance and quality, note accuracy and placement.
 - [ ] Check repeated content discussed in different contexts, later corrections, audio-only input,
       long static screens and rapidly changing demonstrations.
-- [ ] Decide the fallback when no redraw passes its check (more attempts, the best redraw marked
-      unverified, or the source crop), and retry transient API failures per figure.
+- [x] Decide the fallback when no redraw passes its check (more attempts, the best redraw marked
+      unverified, or the source crop), and retry transient API failures per figure. Decided: the
+      source crop, marked unverified, with no extra attempts beyond `IRIS_RENDER_ATTEMPTS` per
+      renderer. An API error while redrawing is not retried per figure: the figure uses its
+      source crop at once (unverified, not cached, so a later run tries again), and the run
+      carries on. The UI labels it "Original image", with no reason (architecture section 1,
+      "Errors and retries").
 - [ ] Open exported notes in the intended Markdown viewer and verify the embedded visuals.
 
 ### Design and complete the UI
@@ -134,9 +139,14 @@ capture. Live functionality and a well-designed UI are part of this milestone.
 - [x] Finalize the last audio and visual moment when recording stops and produce finished notes.
       The live transcript, moments, alignment and selection are promoted at stop; the run
       continues from write (or from detect if only the transcript is usable).
-- [ ] Recover from transient model/API failures using saved inputs and completed work. Live
-      windows are retried and every lane's work is cached for a restart, but a transient API error
-      in the render stage still fails the run (resumable with `POST /run?from_stage=render`).
+- [x] Recover from transient model/API failures using saved inputs and completed work. Errors
+      are classified (temporary, blocking, rejected, bad output, internal). Each unit (a
+      transcription chunk or live window, a selection batch, a notes section, a synthesis call)
+      is retried after a temporary error (`IRIS_API_RETRY_DELAYS_S`, after the SDK's own
+      retries); a figure falls back to its source crop; a blocking error (key, credit, model)
+      fails the run at once and cancels the work in progress. Finished units are cached, so
+      Try again resumes from the failed step. The user sees only our own messages; the raw
+      error is in the log and `iris show` (architecture section 1, "Errors and retries").
 
 #### First real live measurements (4 November 2026)
 
