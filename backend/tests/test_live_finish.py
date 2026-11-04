@@ -38,7 +38,7 @@ from iris.models import (
     UsageRecord,
     Visual,
 )
-from iris.pipeline import PLAN
+from iris.pipeline import PLAN, STAGES
 from iris.pipeline.context import StageContext
 from iris.pipeline.stages import render, select, synthesize
 from iris.store.layout import read_model, session_paths
@@ -230,10 +230,30 @@ def windows(root: Path) -> int:
 LIVE_EVENTS = {"transcript_chunk", "moment_found", "visual_selected", "notes_updated"}
 
 
+def draft_seen_at(monkeypatch, at: Stage) -> list[bool]:
+    """Whether notes_draft.json existed when ``at`` started (promoted or run)."""
+    seen: list[bool] = []
+    real_promote, real_stage = promote.promote, STAGES[at]
+
+    async def promoting(ctx, tl, stage):
+        if stage == at:
+            seen.append(ctx.paths.notes_draft.exists())
+        await real_promote(ctx, tl, stage)
+
+    async def running(ctx):
+        seen.append(ctx.paths.notes_draft.exists())
+        await real_stage(ctx)
+
+    monkeypatch.setattr(promote, "promote", promoting)
+    monkeypatch.setitem(STAGES, at, running)
+    return seen
+
+
 def test_a_live_session_is_finished_at_stop_with_only_the_tail_left(
-    app_client: TestClient, recording, capsys
+    app_client: TestClient, recording, capsys, monkeypatch
 ):
     client = app_client
+    draft_at_promotion = draft_seen_at(monkeypatch, Stage.TRANSCRIBE)
     sid = start(client)
     processor = client.app.state.runner.live.get(sid)  # type: ignore[attr-defined]
     timeline: LiveTimeline = processor.timeline
@@ -256,6 +276,8 @@ def test_a_live_session_is_finished_at_stop_with_only_the_tail_left(
     session = wait_for_done(client, sid)
     assert session["status"] == "done", session.get("error")
     assert (root / "notes.json").exists()
+    # Promoted, select doesn't run again: the live draft stays on screen until write replaces it.
+    assert draft_at_promotion == [True]
     notes = client.get(f"/api/sessions/{sid}/notes").json()
     assert len(notes["visuals"]) == 4 and "visuals/v000004" in notes["markdown"]
 
@@ -340,16 +362,18 @@ def test_an_audio_failure_runs_the_full_plan(app_client: TestClient, recording, 
 
 
 def test_a_skipped_frame_promotes_the_transcript_and_runs_from_detect(
-    app_client: TestClient, recording
+    app_client: TestClient, recording, monkeypatch
 ):
     client = app_client
+    draft_at_detect = draft_seen_at(monkeypatch, Stage.DETECT)
     sid = start(client)
     processor = client.app.state.runner.live.get(sid)  # type: ignore[attr-defined]
     timeline: LiveTimeline = processor.timeline
     root = client.app.state.settings.sessions_dir / sid  # type: ignore[attr-defined]
     # The frame at 7 s arrives after the screen lane has moved on; ingest samples it.
     record_session(client, sid, recording[:8], hold_frame=7.0)
-    wait_until_caught_up(client, sid, {"transcript_chunk", "moment_found"})
+    wait_until_caught_up(client, sid, {"transcript_chunk", "moment_found", "notes_updated"})
+    assert (root / "notes_draft.json").exists()
     n = len(events(client, sid))
     windows_before = windows(root)
     before = len(calls(client, sid))
@@ -364,6 +388,8 @@ def test_a_skipped_frame_promotes_the_transcript_and_runs_from_detect(
     promoted = [s for kind, s, p in stages if p and kind == "stage_finished"]
     ran = [s for kind, s, p in stages if not p and kind == "stage_finished"]
     assert promoted == ["transcribe"]
+    # Select runs again, so visual ids may change: the live draft is gone before it starts.
+    assert draft_at_detect == [False]
     assert ran[:4] == ["ingest", "detect", "align", "select"]
     assert read_model(root / "transcript.json", Transcript) == timeline.transcript()
     # Transcription is paid once: after stop, only the window cut at stop.
