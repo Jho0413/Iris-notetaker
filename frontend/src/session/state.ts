@@ -18,8 +18,7 @@ export const GENERIC_FAILURE: FailureMessage =
   "Iris couldn't finish making the notes. Try again; finished steps are kept."
 
 /**
- * The only failure messages shown: the backend's fixed list (docs/frontend.md §3, failed). Typed
- * from the API schema, so the build fails if the lists drift apart. Any other text is replaced
+ * The only failure messages shown: the backend's fixed list. Typed from the API schema, so the build fails if the lists drift apart. Any other text is replaced
  * by `GENERIC_FAILURE`, so nothing the backend failed on can reach the page.
  */
 const FAILURE_MESSAGES: Record<FailureMessage, true> = {
@@ -57,7 +56,7 @@ export const STAGE_ORDER: readonly Stage[] = [
   'ingest', 'transcribe', 'detect', 'align', 'select', 'write', 'render', 'assemble', 'synthesize',
 ]
 
-/** Plain-language step names (docs/frontend.md §1), used everywhere in the UI, Details included. */
+/** Plain-language step names, used everywhere in the UI, Details included. */
 export const STAGE_LABELS: Record<Stage, string> = {
   ingest: 'Preparing the recording',
   transcribe: 'Transcribing',
@@ -321,7 +320,7 @@ export function figureList(run: RunState, notes: Notes | null): FigureState[] {
 export type Provenance = 'verified' | 'screenshot' | 'unverified'
 
 /**
- * How a figure was produced, when it is known (docs/frontend.md §5, figures). `unverified` is the
+ * How a figure was produced, when it is known. `unverified` is the
  * original image, shown because no redraw could be used (labelled neutrally, with no reason). In
  * notes from before figures recorded this, a screenshot may be either, so neither is claimed.
  */
@@ -358,7 +357,7 @@ export interface UiState {
   stage?: Stage
 }
 
-/** Combine the stored status with what the page knows (docs/frontend.md §3). */
+/** Combine the stored status with what the page knows. */
 export function uiState(
   session: Session,
   run: RunState,
@@ -455,8 +454,8 @@ export interface ProgressView {
 }
 
 /**
- * What the session page shows in place of the notes until they're finished (docs/frontend.md
- * §2, Session). Null once finished: then the notes are shown.
+ * What the session page shows in place of the notes until they're finished. Null once finished:
+ * then the notes are shown.
  */
 export function progressView(kind: UiStateKind): ProgressView | null {
   switch (kind) {
@@ -585,7 +584,7 @@ function failedStage(session: Session, run: RunState): Stage | undefined {
 }
 
 /**
- * What a failed session shows (docs/frontend.md §3, failed): only our own message, from the fixed
+ * What a failed session shows: only our own message, from the fixed
  * list, and what to do about it. `general`: try again. `input`: the recording itself is the
  * problem, so upload or record another one. The step name is fine to show; nothing else is.
  */

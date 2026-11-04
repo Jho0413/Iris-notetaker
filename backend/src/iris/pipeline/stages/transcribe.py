@@ -5,7 +5,7 @@ Writes: transcript_chunks/<i>_<start_ms>_<end_ms>.json (one per chunk, as each f
         transcript.json (Transcript)
 Emits:  TRANSCRIPT_CHUNK per finished chunk, so the UI can show text as it arrives.
 
-Steps (architecture section 1, step 3):
+Steps (docs/architecture/pipeline.md, upload step 3):
   1. ``plan_chunks`` splits the audio into chunks, cutting at the quietest point near each target
      boundary so words are not cut in half. Chunk length depends on the model
      (``chunk_lengths_for``): ~5 min for whisper-1, which returns segment timestamps, and ~15 s

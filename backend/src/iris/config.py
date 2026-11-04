@@ -98,12 +98,12 @@ class Settings(BaseSettings):
 
     # Iris's own retries of one unit of work (a transcription chunk, a selection batch, a notes
     # section, a synthesis call, a live window or batch) after a temporary API error, on top of
-    # the SDK's short retries: the delay before each further attempt (architecture section 1,
-    # "Errors and retries"). Figures are not retried: they fall back to the source crop.
+    # the SDK's short retries: the delay before each further attempt
+    # (docs/architecture/errors.md). Figures are not retried: they fall back to the source crop.
     api_retry_delays_s: list[float] = Field(default_factory=lambda: [15.0, 60.0, 120.0])
 
     # Ingest
-    frame_fps: float = 1.0  # open question: 1 or 2 fps (architecture section 2)
+    frame_fps: float = 1.0  # open question: 1 or 2 fps (docs/architecture/overview.md)
     frame_max_width: int = 1280
     audio_sample_rate: int = 16_000
 
@@ -114,13 +114,13 @@ class Settings(BaseSettings):
     notes_context_chars: int = Field(default=24_000, ge=2_000, le=60_000)
 
     # Final synthesis: one planning call over the whole notes, then rewrites of only the sections
-    # its edits touch (architecture section 2, "Synthesize").
+    # its edits touch (docs/architecture/pipeline.md, "Synthesize").
     synthesis: bool = True  # off: the assembled notes are final
     synthesis_model: str = "gpt-5.5"
     synthesis_plan_reasoning_effort: Effort = "low"  # the planning call runs on every long session
     synthesis_reasoning_effort: Effort | None = None  # section rewrites; unset: notes effort
 
-    # Live processing while recording (architecture section 1, "Life of a session: live").
+    # Live processing while recording (docs/architecture/live.md).
     live_processing: bool = True  # off: a live session is processed after stop, like an upload
     live_audio_gap_wait_s: float = Field(default=35.0, gt=0)  # wait for a missing chunk, then skip
     live_window_min_s: float = Field(default=5.0, gt=0)  # transcription windows are cut at the

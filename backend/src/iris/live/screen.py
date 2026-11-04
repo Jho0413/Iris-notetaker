@@ -7,7 +7,7 @@ Writes: frames/<t_ms>.jpg (the same names and bytes ingest writes), live/frames.
 Publishes: closed moments (and so ``closed_to``); emits MOMENT_FOUND per moment, with the data
         the detect stage emits.
 
-How it works (architecture section 1, "Life of a session: live"):
+How it works (docs/architecture/live.md):
   1. Frames are held back so they are fed in time order: the frame at ``t`` is fed once a frame
      at ``t + live_frame_holdback_s`` or later has been captured (the session clock, not the wall
      clock), or at stop. A frame captured earlier than one already fed is too late. If ingest

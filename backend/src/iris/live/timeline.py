@@ -1,8 +1,7 @@
 """The live timeline: what each lane of a live session has finished, and up to when.
 
 Lanes never call each other. Each publishes its results here and advances its watermark; lanes
-downstream wait on the watermarks they depend on (architecture section 1, "Life of a session:
-live"):
+downstream wait on the watermarks they depend on (docs/architecture/live.md):
 
 - ``transcribed_to`` (T_a): the transcript is complete up to here. Audio lane.
 - ``closed_to`` (T_m): every moment that ends by here is closed. Screen lane.

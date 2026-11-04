@@ -4,9 +4,10 @@ Reads:  frames.json (FrameIndex), frames/*.jpg
 Writes: moments.json (Moments)
 Emits:  MOMENT_FOUND per moment.
 
-Local work only, no model calls (architecture principle 3). Pure OpenCV + numpy: the work is a
-"has it settled, and is it different from what we had" state machine, which PySceneDetect's cut
-detectors do not model (they flag cuts, not settled states, builds or changed regions).
+Local work only, no model calls (docs/architecture/overview.md, principle 3). Pure OpenCV +
+numpy: the work is a "has it settled, and is it different from what we had" state machine, which
+PySceneDetect's cut detectors do not model (they flag cuts, not settled states, builds or changed
+regions).
 
 How it works (``MomentDetector``, incremental so live sessions can feed it frame by frame):
 

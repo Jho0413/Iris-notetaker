@@ -5,7 +5,7 @@ every change; the reviewer says which sections it checked.
 
 ## 1. Correctness
 
-- Does the code do what the task and `docs/architecture.md` say, including the stage contract
+- Does the code do what the task and `docs/architecture/` say, including the stage contract
   (reads its inputs, writes only its own outputs and caches as named in `store/layout.py`)?
 - Off-by-one and unit errors: seconds vs milliseconds, frame index vs timestamp, inclusive vs
   exclusive ranges, pixel coordinates vs downscaled coordinates.
@@ -90,7 +90,7 @@ every change; the reviewer says which sections it checked.
   escape the session folder.
 
 **Errors (all stages)**
-- Model calls go through the error policy (architecture section 1, "Errors and retries"): a unit
+- Model calls go through the error policy (`docs/architecture/errors.md`): a unit
   retries only `TEMPORARY` errors (`retry_temporary`), never `BLOCKING` ones, and concurrent
   units stop at once on a blocking error (`gather_units`, a `TaskGroup`).
 - Nothing the backend failed on reaches the API or the UI: no exception text, provider or model
@@ -122,7 +122,7 @@ every change; the reviewer says which sections it checked.
 
 - Matches the conventions in `CLAUDE.md`.
 - Names and docstrings explain *why* where it isn't obvious; no dead code or stale TODOs for work
-  this change completed. Module docstrings (Reads/Writes) and the README match the behaviour.
+  this change completed. Module docstrings (Reads/Writes) and the docs match the behaviour.
 - Tunable numbers are named constants or `Settings` fields with documented defaults, not magic
   numbers. New `Settings` fields are listed in `backend/.env.example`.
 - Cost: new model calls are bounded, cached so re-runs don't re-pay, and use a model from

@@ -12,7 +12,7 @@
       "userChoice": "light | dark | system, stored in localStorage \"iris-theme\"; resolved before first paint by an inline script in index.html and kept current by src/components/theme.ts",
       "tokenSuffix": "Frontmatter keys ending in -dark are the :root[data-theme=dark] values of the same custom property; plate has no dark value (it stays white).",
       "source": "src/index.css",
-      "rationale": "../docs/frontend.md#5-visual-design"
+      "rationale": "DESIGN.md"
     },
     "colorMeta": {
       "bg": {

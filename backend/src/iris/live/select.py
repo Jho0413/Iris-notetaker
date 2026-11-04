@@ -6,7 +6,7 @@ Writes: selection_batches/ (shared cache), visuals/<id>.source.jpg, rendered vis
 Publishes: contents, visuals, rejected moment ids and ``selected_to``; emits VISUAL_SELECTED and
         VISUAL_RENDERED with the data the select and render stages emit.
 
-How it works (architecture section 1, "Life of a session: live"):
+How it works (docs/architecture/live.md):
   1. A closed moment is gated until ``timeline.transcribed_through(moment.end +
      live_speech_pad_s)``, so speech that outlasts the screen is part of it, then aligned
      (``align.align``) with the transcript so far. Moments close in time order and the gate is

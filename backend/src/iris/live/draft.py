@@ -5,7 +5,7 @@ Writes: notes_sections/ (the write stage's cache) only. No draft is shown while 
 Emits:  NOTES_UPDATED ({"final": false, "completed_parts", "live": true}), for the Live page's
         progress line: the sections written so far.
 
-Architecture section 1, "Life of a session: live":
+docs/architecture/live.md:
 
   1. The evidence published before ``timeline.horizon`` is packed into parts exactly as the write
      stage packs a whole session (``write.split_parts``): a part closes when the next record

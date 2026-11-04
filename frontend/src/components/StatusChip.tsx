@@ -1,7 +1,7 @@
 import type { UiState } from '../session/state'
 import { Icon } from './Icon'
 
-/** Session status in words, with colour and glyph as secondary signals (docs/frontend.md §3). */
+/** Session status in words, with colour and glyph as secondary signals. */
 export function StatusChip({ state }: { state: UiState }) {
   const kind = state.kind === 'recording-orphan' || state.kind === 'stalled' ? 'neutral' : state.kind
   return (

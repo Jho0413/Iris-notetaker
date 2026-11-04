@@ -1,7 +1,7 @@
 // Browser live capture: mic (plus tab/system audio if shared) and a screen share.
 // Audio goes up as MediaRecorder chunks every few seconds; screen frames as JPEGs at a low fixed
 // rate, timed on the audio's clock. Change detection happens in the backend, not here
-// (architecture section 1, live). Uploads are retried until they land (uploadQueue.ts), and
+// (docs/architecture/live.md). Uploads are retried until they land (uploadQueue.ts), and
 // ending the session waits for all of them, so a dropped request doesn't lose content.
 
 import { CaptureError, describeCaptureError, pickAudioMimeType } from './captureErrors.ts'

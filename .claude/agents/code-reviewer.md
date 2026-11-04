@@ -17,7 +17,7 @@ commands there. Otherwise check out nothing; use `git diff main...<branch>` and
 ## Process
 
 1. **Understand the intent.** Read `CLAUDE.md`, `docs/review-checklist.md`, the relevant parts of
-   `docs/architecture.md`, and `git log main..<branch>`. Read `backend/src/iris/models.py` for the
+   `docs/architecture/` (overview, pipeline, live, errors), and `git log main..<branch>`. Read `backend/src/iris/models.py` for the
    data contracts.
 2. **Read the full diff**, then read the surrounding code each change depends on. Don't review
    lines in isolation.
