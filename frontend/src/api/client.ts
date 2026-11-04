@@ -22,6 +22,7 @@ export const STAGES: Stage[] = [
   'write',
   'render',
   'assemble',
+  'synthesize',
 ]
 
 /** URL for a file inside a session folder, e.g. "visuals/v1.jpg". */

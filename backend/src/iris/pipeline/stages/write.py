@@ -362,11 +362,14 @@ async def write_section(
     return section
 
 
-def draft_of(sections: list[WrittenSection]) -> NotesDraft:
+def draft_of(sections: list[WrittenSection], parts: int | None = None) -> NotesDraft:
+    """The notes so far; ``parts`` is the number of parts the notes are planned in, when known
+    (not for the live draft, whose evidence is still growing)."""
     return NotesDraft(
         session_type=sections[0].session_type,
         title=sections[0].title,
         markdown="\n\n".join(section_markdown(s) for s in sections),
+        parts=parts,
     )
 
 
@@ -384,7 +387,7 @@ async def run(ctx: StageContext) -> None:
             later=index < len(parts) - 1,
         )
         sections.append(section)
-        write_model(ctx.paths.notes_draft, draft_of(sections))
+        write_model(ctx.paths.notes_draft, draft_of(sections, parts=len(parts)))
         ctx.emit(
             EventType.NOTES_UPDATED,
             {"final": False, "completed_parts": index + 1, "total_parts": len(parts)},

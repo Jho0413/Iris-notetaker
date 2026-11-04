@@ -107,6 +107,13 @@ class Settings(BaseSettings):
     # Serialized evidence characters per notes call (plus prompt and small metadata).
     notes_context_chars: int = Field(default=24_000, ge=2_000, le=60_000)
 
+    # Final synthesis: one planning call over the whole notes, then rewrites of only the sections
+    # its edits touch (architecture section 2, "Synthesize").
+    synthesis: bool = True  # off: the assembled notes are final
+    synthesis_model: str = "gpt-5.5"
+    synthesis_plan_reasoning_effort: Effort = "low"  # the planning call runs on every long session
+    synthesis_reasoning_effort: Effort | None = None  # section rewrites; unset: notes effort
+
     # Live processing while recording (architecture section 1, "Life of a session: live").
     live_processing: bool = True  # off: a live session is processed after stop, like an upload
     live_audio_gap_wait_s: float = Field(default=35.0, gt=0)  # wait for a missing chunk, then skip
