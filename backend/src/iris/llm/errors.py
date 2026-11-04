@@ -91,11 +91,6 @@ def classify(exc: BaseException) -> ErrorKind:
     return ErrorKind.INTERNAL
 
 
-def is_api_error(kind: ErrorKind) -> bool:
-    """An error from calling the API, as opposed to unusable output from it."""
-    return kind is not ErrorKind.BAD_OUTPUT
-
-
 def describe(exc: BaseException) -> str:
     """One line for logs and records: the kind, type and message (developers only)."""
     return f"{classify(exc)}: {type(exc).__name__}: {exc}"
