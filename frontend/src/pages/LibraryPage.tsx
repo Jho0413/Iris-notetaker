@@ -3,13 +3,13 @@ import { Link } from 'react-router-dom'
 import { api, type Session } from '../api/client'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { CostText } from '../components/CostText'
-import { HealthBanner } from '../components/HealthBanner'
 import { Icon } from '../components/Icon'
 import { StatusChip } from '../components/StatusChip'
 import { sessionCost } from '../session/cost'
 import { formatWhen, SOURCE_LABEL } from '../session/format'
+import { UNREACHABLE } from '../session/messages'
 import { act } from '../session/request'
-import { libraryState } from '../session/state'
+import { emptyRun, failureView, libraryState } from '../session/state'
 import { useTitle } from '../session/useTitle'
 
 /** While anything is processing, refresh this often so status chips stay current. */
@@ -60,7 +60,7 @@ export function LibraryPage() {
       }),
     )
     if (!result.ok) {
-      setActionError(result.status === 0 ? "Couldn't reach the backend. Is it running?" : `Couldn't restart "${s.title}". It may already be processing.`)
+      setActionError(result.status === 0 ? UNREACHABLE : `Couldn't restart "${s.title}". It may already be processing.`)
     }
     refresh()
   }
@@ -73,7 +73,7 @@ export function LibraryPage() {
     )
     setBusy(false)
     if (!result.ok) {
-      setActionError(result.status === 0 ? "Couldn't reach the backend. Is it running?" : `Couldn't delete "${pendingDelete.title}". It may be processing.`)
+      setActionError(result.status === 0 ? UNREACHABLE : `Couldn't delete "${pendingDelete.title}". It may be processing.`)
     }
     setPendingDelete(null)
     refresh()
@@ -87,7 +87,6 @@ export function LibraryPage() {
           <p className="lede">Notes that see what was shown.</p>
         </div>
       </div>
-      <HealthBanner />
       {actionError && (
         <div className="banner banner-error" role="alert">
           <Icon name="alert" />
@@ -116,10 +115,7 @@ export function LibraryPage() {
 
       {load.kind === 'error' && (
         <div className="error-panel" role="alert">
-          <h2>Can't reach the Iris backend</h2>
-          <p>
-            Start it with <code>make dev</code> (the API runs on port 8000), then try again.
-          </p>
+          <h2>{UNREACHABLE}</h2>
           <button type="button" className="btn" onClick={refresh}>
             <Icon name="retry" /> Retry
           </button>
@@ -189,7 +185,8 @@ export function LibraryPage() {
                       <Icon name="download" /> Export
                     </a>
                   )}
-                  {state.kind === 'failed' && (
+                  {/* A problem with the recording itself isn't fixed by trying again. */}
+                  {state.kind === 'failed' && failureView(s, emptyRun()).kind === 'general' && (
                     <button type="button" className="btn btn-sm" onClick={() => void retry(s)}>
                       <Icon name="retry" /> Try again
                     </button>

@@ -16,14 +16,16 @@ Architecture section 1, "Life of a session: live":
      for the same part at stop. Stop then reuses it without a call, so the time from stop to
      notes depends on what was still open, not on how long the session was. Nothing past the
      horizon is written live: the open parts are the write stage's at stop.
-  3. A payload is tried at most ``MAX_ATTEMPTS`` times, ``RETRY_DELAY_S`` apart; after that the
-     lane gives up on it until it changes (the write stage retries it at stop). A part that can't
+  3. A payload is tried at most ``MAX_ATTEMPTS`` times, ``RETRY_DELAY_S`` apart (each try
+     retries temporary API errors itself, in ``write.write_section``); after that, or at once on
+     a blocking error, the lane gives up on it until it changes (the write stage retries it at
+     stop). A part that can't
      be written blocks nothing, except that while the first part waits for its retry the later
      parts wait too (their payloads carry its title). Once it is given up, they are written
      without it, as continuations.
   4. ``timeline.upstream_failed``: no more calls (nothing made can be promoted); wait for stop.
   5. On ``timeline.ending``: return. A call in flight is finished, since the write stage would
-     make that very call. No call starts after stop.
+     make that very call. No call starts after stop, not even a retry of a temporary error.
 
 After a backend restart a fresh lane re-plans from the timeline and its frozen parts hit the
 cache.
@@ -37,6 +39,7 @@ import math
 from iris.live.lane import LiveLane
 from iris.live.timeline import Lane, LiveTimeline
 from iris.llm import usage
+from iris.llm.errors import ErrorKind, classify
 from iris.models import EventType, Selection, Stage, Transcript
 from iris.pipeline.context import StageContext
 from iris.pipeline.stages import write
@@ -58,6 +61,7 @@ def plan(
 
 class DraftLane(LiveLane):
     lane = Lane.DRAFT
+    retries_end_at_stop = True  # no call starts after stop, not even a retry
 
     def __init__(self, ctx: StageContext, timeline: LiveTimeline):
         super().__init__(ctx, timeline)
@@ -169,8 +173,11 @@ class DraftLane(LiveLane):
                     later=True,
                     earlier=index > 0,
                 )
-        except Exception:
-            failures = self._failures[payload] = self._failures.get(payload, 0) + 1
+        except Exception as exc:
+            failures = self._failures.get(payload, 0) + 1
+            if classify(exc) is ErrorKind.BLOCKING:
+                failures = MAX_ATTEMPTS  # never retried: give the payload up for this recording
+            self._failures[payload] = failures
             retry_at = self._retry_at[payload] = asyncio.get_running_loop().time() + RETRY_DELAY_S
             if failures < MAX_ATTEMPTS:
                 self._due_at(retry_at)

@@ -31,11 +31,14 @@ steps:
    product is shown). A one-hour upload takes a few minutes, and the page can be left meanwhile.
 3. **Read and export.** The finished notes have typeset math, worked examples set out step by step,
    callouts, and the redrawn figures in the right places. **Export** downloads one Markdown file with
-   the figures embedded. Every figure says whether it is a verified redraw or the original crop.
+   the figures embedded. Every figure says whether it is a verified redraw, a screenshot or the
+   original image.
 
-If anything fails, the session says what went wrong and offers **Try again**. This resumes from the
-step that failed and reuses the work already done (and paid for)
-([architecture principle 4](architecture.md#principles)).
+If anything fails, the session says so in Iris's own words and offers **Try again**. This resumes
+from the step that failed and reuses the work already done (and paid for)
+([architecture principle 4](architecture.md#principles)). If the recording itself is the problem
+(no sound, an unreadable file), it says so and offers to upload or record another one instead.
+The UI never shows what the backend failed on (section 3, "Failure messages").
 
 The pipeline's internal stage names (ingest, transcribe, detect, align, select, write, render,
 assemble, synthesize) never appear in the UI; they stay in the CLI (`iris cost`, `make usage`).
@@ -91,8 +94,7 @@ attention.
 |---|---|
 | Loading | Five skeleton rows the height of real rows, so nothing jumps when data arrives |
 | Empty | A short explanation of what Iris does and two large choices: **Upload a recording** and **Record live** |
-| Error (backend unreachable) | "Can't reach the Iris backend", the command to start it (`make dev`) and **Retry** |
-| Warning (no OpenAI key) | A banner: processing needs `OPENAI_API_KEY` in `backend/.env`; existing notes still open |
+| Error (backend unreachable) | "Iris isn't responding. Try again in a moment." and **Retry** |
 
 **Cost** (library column and the session rail). The model cost of a session so far, across all of
 its runs (a re-run adds only the calls it makes; cached work is free).
@@ -126,8 +128,7 @@ its runs (a re-run adds only the calls it makes; cached work is free).
 | Idle | Drop zone and a disabled **Make notes** |
 | File chosen | File name, size and type; **Make notes** enabled |
 | Uploading | Progress bar with percent and **Cancel**; inputs disabled |
-| Error | What failed (interrupted, rejected by the backend with its message, backend unreachable) and **Try again**, keeping the chosen file |
-| Warning (no OpenAI key) | The same banner as the library, above the form |
+| Error | What failed in our words ("The upload was interrupted. Iris isn't responding; try again in a moment." or "Iris couldn't accept this recording. Try again in a moment.") and **Try again**, keeping the chosen file |
 
 ### Live (`/live`)
 
@@ -163,8 +164,8 @@ later, so this screen is built around *is it still recording?* and *how do I sto
 | State | What it shows |
 |---|---|
 | Permission denied or cancelled | Which permission was refused and how to allow it, **Try again**; the empty session that was created is deleted |
-| Capture failed | The capture module's message (or the browser's error in plain words) and **Try again** |
-| Warning (no OpenAI key) | The same banner as elsewhere, before starting |
+| Capture failed | The capture module's message (or the browser's error in plain words; an unexpected error is "Recording couldn't start. Try again.") and **Try again** |
+| Finishing failed | **Recording stopped**, with our message ("Iris isn't responding, so the session couldn't be finished. Try again in a moment.") and **Try again** |
 
 Capture itself (`src/capture/`) is owned by live-capture work. This screen only calls
 `LiveCapture.start()` and `stop()`, shows the returned screen stream as the preview, and passes an
@@ -230,21 +231,23 @@ finished.
   steps are in the main column), **On this page** (the notes' section headings), **Cost** ("Cost
   $0.89"; its line is laid out even while empty, so nothing moves when the first cost arrives) and
   **Details** (closed by default: each step with its cost and duration, e.g. "Redrawing figures
-  $0.74 · 3 min 41 s", either alone when only one is known; why a cost is marked ≥; the raw error;
-  event stream status). Costs cover all runs; durations are the latest run's, from events.
+  $0.74 · 3 min 41 s", either alone when only one is known; why a cost is marked ≥; event stream
+  status; never an error message). Costs cover all runs; durations are the latest run's, from events.
 - **Below 1120px** the rail moves above the main column as a one-line summary, with **Details**
   expanding it.
 
 **Transcript tab.** Segments with start times (`12:04`), in time order, from `GET /transcript`.
 
-**Figures tab.** A grid of every figure selected, each with a badge: **Verified redraw**, **Screenshot** or **Original crop · not verified**. Selecting a figure
+**Figures tab.** A grid of every figure selected, each with a badge: **Verified redraw**,
+**Screenshot** or **Original image** (no redraw could be used, so the source crop is shown; the
+badge is neutral and gives no reason). The notes' figure captions use the same badges. Selecting a figure
 opens it full size in a new tab.
 
 | State | What it shows |
 |---|---|
 | Loading | Header and rail skeletons, a reading-column skeleton; once finished, a notes skeleton until they load |
 | Not found | "This session doesn't exist" and a link back to the library |
-| Backend unreachable | Inline error with **Retry**; anything already loaded stays visible |
+| Backend unreachable | "Iris isn't responding. Try again in a moment." with **Retry**; anything already loaded stays visible |
 | Event stream reconnecting | "Reconnecting…" in the rail's Details; the page keeps what it has |
 | Not finished | The progress view (above) |
 | Finished, notes unreadable | Notes tab: "The notes couldn't be loaded. Reload the page to try again" |
@@ -266,13 +269,14 @@ states below. Each has a text label as well as a colour (§6).
 | **Polishing** | `processing`, and this run's notes are assembled (`notes_updated` with `final: true`) or the synthesize step is running | Polishing notes (accent) | none: the notes are shown once done |
 | **Stalled** | `processing`, but a connection attempt to the event stream delivers no event within 5 s, so the run isn't active (the backend restarted) | Stopped unexpectedly (neutral) | Resume (`POST /run?from_stage=<current_stage>`) |
 | **Finished** | `done` | Finished (green) | Export |
-| **Failed** | `failed` | Failed · step (red) | Try again (`POST /run?from_stage=<failed stage>`) |
+| **Failed** | `failed` | Failed · step (red) | `general`: Try again (`POST /run?from_stage=<failed stage>`). `input`: **Upload another recording** or **Record again** (by source) |
 
 Notes on these states:
 
-- **Failed** shows the error in plain words above the progress view ("Writing notes failed"), with
-  the raw message in Details. Notes from an earlier run are not shown: only a finished session's
-  notes are.
+- **Failed** shows a banner above the progress view with a headline and the session's
+  `failure_message`. Notes from an earlier run are not shown: only a finished session's notes are.
+  See "Failure messages" below.
+- **Library rows** offer **Try again** only for `general` failures.
 - **Library rows** know only the stored session: a processing row's chip names the stored step
   ("Redrawing figures", or "Polishing notes" while synthesizing), without counts.
 - **Retry and resume reuse caches**, so repeating a step costs little. Both buttons say so in their
@@ -283,6 +287,27 @@ Notes on these states:
   proxy the headers only arrive with the first byte.
 - A run started by **Try again** or **Resume** begins with a `status: processing` event. The UI
   clears its previous run state at that point, so old stage results don't mix with new ones.
+
+### Failure messages
+
+The user assumes Iris is set up for them, so a failure never reads as a setup problem and never
+shows what the backend failed on: no exception text, provider or model names, status codes, model
+output or developer instructions. The session carries only `failure_message` (one of a fixed list,
+written by us) and `failure_kind`; the raw error stays in the backend log and `iris show
+<session_id>`. The UI keeps the same list (`FAILURE_MESSAGES` in `session/state.ts`, typed from the
+API schema so the two can't drift) and shows the generic message for anything not on it, from the
+session or an `error` event alike.
+
+| Kind | Headline | Message | Action |
+|---|---|---|---|
+| `general` | "Stopped at *step*" ("Stopped at Redrawing figures"), or "Iris couldn't finish the notes" with no known step | "Iris couldn't finish making the notes. Try again; finished steps are kept." | **Try again** (resumes from the step) |
+| `input` | "Iris couldn't use this recording" | One of: "Iris couldn't read this file. Upload an audio or video recording." · "This recording has no sound. Upload a recording with speech." · "No audio was recorded. Check that the microphone works, then record again." · "The recorded audio couldn't be read. Record the session again." · "Iris found no speech or screen content in this recording to make notes from." | **Upload another recording** (upload) or **Record again** (live) |
+
+A message not on the list is shown as the generic one, with kind `general`. Other messages the
+pages write themselves are in Iris's words too: a request that never arrives is "Iris isn't
+responding. Try again in a moment." (`session/messages.ts`); browser permission messages say what
+to allow. A missing or rejected API key, exhausted credit or a missing model is a `general`
+failure like any other.
 
 ## 4. Progress events
 
@@ -313,7 +338,7 @@ tested function (`src/session/state.ts`).
 | `visual_selected` | `id`, `caption`, `frame.t`, `render_as` | Render total updated; while recording, "2 figures read" |
 | `visual_rendered` | `id`, `path`, `render_as`, `verified` | Rendered count; the finished page's badge from `verified` and `render_as` |
 | `notes_updated` | `final`, `completed_parts`, `total_parts`, `live` | Counts only, never notes: `final: false` → the Writing notes step's "2 of 4"; `live: true` (the live draft lane, while recording; no `total_parts`) → "1 section written" on the Live page; `final: true` → Polishing until done |
-| `error` | `message` | Failed banner text (the session's `error` is the source of truth) |
+| `error` | `message`, `kind`, `stage` | The failure banner: `message` (only if it is on the fixed list, else the generic message), `kind` (`input` or `general`) and the step it stopped at, marked failed (others running are marked stopped) |
 | unknown type or malformed | none | Ignored (`decodeSessionEvent`) |
 
 A live session's run at stop reports the stages whose work was kept from recording (transcribe,
@@ -324,8 +349,9 @@ look as for any run (architecture section 1, "Life of a session: live").
 
 **When there are no events.** Event history lives in backend memory and is lost on restart. A
 finished session opened later gets everything over REST instead: `GET /notes`, `GET /transcript`,
-and figure times from `notes.visuals[].frame.t`. Only stage times and verified badges are missing.
-Details then says "Step times are only available for runs since the backend started".
+and figure times and badges from `notes.visuals[]` (`frame.t`, `render_as`, `verified`). Only
+stage times are missing.
+Details then says "Step times are only available for runs since Iris started".
 
 **No disruptive updates.**
 
@@ -432,7 +458,7 @@ session header that represents the session's length.
 - **Scale:** a baseline with a tick every tenth of the session, the start and end times, and a
   label ("3 figures, placed where they were shown").
 - **Figures:** each one is a small pin at its source time (`frame.t`). It is hollow while
-  being redrawn and filled once done, amber if it's an unverified original crop. Hovering or focusing
+  being redrawn and filled once done (an original image too: it is not flagged). Hovering or focusing
   a marker shows its time and caption; activating it scrolls the notes to that figure, or opens the
   Figures tab at it.
 - **Finished notes:** the ribbon shows at a glance where in the session each visual came from: what
@@ -474,5 +500,5 @@ All of the above uses the existing API and event types, except:
 | `visual_rendered` in the client's event list (`src/api/eventMessage.ts`) | Frontend fix in this work: it is in the schema but was missing from the list, so rendered figures were dropped | n/a |
 | Ending a crashed live session with gaps (`endLiveSession` with `allow_gaps`) | Done in the live-capture PR. Without a body, `POST /api/live/{id}/end` skips the chunk check and ends with what arrived (missing audio becomes silence) | **Finish and make notes** calls `POST /api/live/{id}/end` without a body, which is already correct for a crashed session; `endLiveSession` is only needed to check the chunk count |
 | Per-session cost and time per stage | Done: `Session.cost_usd` and `cost_partial` in the session list (running totals, read incrementally from the call log) and `GET /usage` per step | n/a; stage times come from events |
-| Verified status for finished sessions without events (`renders.json` via the API) | Not requested yet | Badges show only when known from this run's events |
+| Verified status for finished sessions without events | Done: `notes.visuals[].verified` | Notes from before it was added: a screenshot's badge shows only when known from this run's events |
 | `session.duration_s` set at ingest | Not set by the backend today | The session page takes the length from the transcript's last segment; the library has no Length column |

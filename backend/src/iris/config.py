@@ -96,6 +96,12 @@ class Settings(BaseSettings):
     render_attempts: int = Field(default=2, ge=1, le=5)
     render_concurrency: int = Field(default=4, ge=1, le=16)
 
+    # Iris's own retries of one unit of work (a transcription chunk, a selection batch, a notes
+    # section, a synthesis call, a live window or batch) after a temporary API error, on top of
+    # the SDK's short retries: the delay before each further attempt (architecture section 1,
+    # "Errors and retries"). Figures are not retried: they fall back to the source crop.
+    api_retry_delays_s: list[float] = Field(default_factory=lambda: [15.0, 60.0, 120.0])
+
     # Ingest
     frame_fps: float = 1.0  # open question: 1 or 2 fps (architecture section 2)
     frame_max_width: int = 1280
@@ -142,6 +148,13 @@ class Settings(BaseSettings):
 
     # Server
     cors_origins: list[str] = ["http://localhost:5173"]
+
+    @field_validator("api_retry_delays_s", mode="after")
+    @classmethod
+    def _check_retry_delays(cls, delays: list[float]) -> list[float]:
+        if len(delays) > 10 or any(not 0 <= d <= 600 for d in delays):
+            raise ValueError("api_retry_delays_s takes up to 10 delays of 0 to 600 seconds")
+        return delays
 
     @model_validator(mode="after")
     def _check_live_windows(self) -> "Settings":

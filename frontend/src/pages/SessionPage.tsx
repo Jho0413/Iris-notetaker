@@ -12,10 +12,11 @@ import { StepList } from '../components/StepList'
 import { TabPanel, Tabs } from '../components/Tabs'
 import { TranscriptList } from '../components/TranscriptList'
 import { stepCosts, usageCost, usageRefreshKey } from '../session/cost'
+import { againLink, UNREACHABLE } from '../session/messages'
 import { act } from '../session/request'
 import { formatWhen, SOURCE_LABEL } from '../session/format'
 import {
-  announcement, currentSteps, failureHeadline, figureList, formatClock, progressView, provenance,
+  announcement, currentSteps, failureView, figureList, formatClock, progressView, provenance,
   runSeconds, sessionLength, STAGE_LABELS, stepLine, transcriptSegments, uiState, type FigureState,
   type RunState,
 } from '../session/state'
@@ -92,7 +93,7 @@ function SessionView({ id }: { id: string }) {
     return () => {
       live = false
     }
-  }, [id, run.status, run.error, reload])
+  }, [id, run.status, run.failure, reload])
 
   // Only the finished notes are shown, so notes and transcript are fetched once the session is
   // done. Leaving done (a re-run) drops them: the old run's notes are never shown meanwhile.
@@ -152,7 +153,7 @@ function SessionView({ id }: { id: string }) {
     )
     setBusy(false)
     if (!result.ok) {
-      setActionError(result.status === 409 ? 'This session is already processing.' : "Couldn't restart processing. Is the backend running?")
+      setActionError(result.status === 409 ? 'This session is already processing.' : UNREACHABLE)
     }
     setReload((n) => n + 1)
   }
@@ -163,7 +164,7 @@ function SessionView({ id }: { id: string }) {
     const result = await act(api.POST('/api/live/{session_id}/end', { params: { path: { session_id: id } } }))
     setBusy(false)
     if (!result.ok) {
-      setActionError(result.status === 0 ? "Couldn't reach the backend. Is it running?" : "Couldn't finish the recording. It may already be processing.")
+      setActionError(result.status === 0 ? UNREACHABLE : "Couldn't finish the recording. It may already be processing.")
     }
     setReload((n) => n + 1)
   }
@@ -174,7 +175,7 @@ function SessionView({ id }: { id: string }) {
     setBusy(false)
     setConfirmDelete(false)
     if (result.ok) navigate('/')
-    else setActionError(result.status === 0 ? "Couldn't reach the backend. Is it running?" : "Couldn't delete this session. It may be processing.")
+    else setActionError(result.status === 0 ? UNREACHABLE : "Couldn't delete this session. It may be processing.")
   }
 
   function showFigure(f: FigureState) {
@@ -210,10 +211,7 @@ function SessionView({ id }: { id: string }) {
     if (loadError === 'unreachable') {
       return (
         <div className="page error-panel" role="alert">
-          <h2>Can't reach the Iris backend</h2>
-          <p>
-            Start it with <code>make dev</code>, then try again.
-          </p>
+          <h2>{UNREACHABLE}</h2>
           <button type="button" className="btn" onClick={() => setReload((n) => n + 1)}>
             <Icon name="retry" /> Retry
           </button>
@@ -242,6 +240,8 @@ function SessionView({ id }: { id: string }) {
   const working = ui.kind === 'processing' || ui.kind === 'starting' || ui.kind === 'polishing'
   const sessionType = notes?.session_type
   const fromLabel = ui.fromStage ? STAGE_LABELS[ui.fromStage] : 'the start'
+  const failure = ui.kind === 'failed' ? failureView(session, run) : null
+  const again = againLink(session.source)
 
   return (
     <div className="session">
@@ -270,10 +270,15 @@ function SessionView({ id }: { id: string }) {
               <Icon name="download" /> Export Markdown
             </a>
           )}
-          {(ui.kind === 'failed' || ui.kind === 'stalled') && (
+          {(failure?.kind === 'general' || ui.kind === 'stalled') && (
             <button type="button" className="btn btn-primary" onClick={() => void rerun()} disabled={busy}>
               <Icon name="retry" /> {ui.kind === 'failed' ? 'Try again' : 'Resume'}
             </button>
+          )}
+          {failure?.kind === 'input' && (
+            <Link className="btn btn-primary" to={again.to}>
+              {again.label}
+            </Link>
           )}
           {ui.kind === 'recording-orphan' && (
             <button type="button" className="btn btn-primary" onClick={() => void finishLive()} disabled={busy}>
@@ -308,15 +313,14 @@ function SessionView({ id }: { id: string }) {
               </div>
             </div>
           )}
-          {ui.kind === 'failed' && (
+          {failure && (
             <div className="banner banner-error" role="alert">
               <Icon name="alert" />
               <div className="banner-body">
                 <p>
-                  <strong>{failureHeadline(session.error ?? run.error)}.</strong> The full message is
-                  under Details.
+                  <strong>{failure.headline}.</strong> {failure.message}
                 </p>
-                <p>Try again resumes from {fromLabel}. Steps that already finished are reused, so it costs little.</p>
+                {failure.kind === 'general' && <p>Try again resumes from {fromLabel}.</p>}
               </div>
             </div>
           )}
@@ -325,8 +329,8 @@ function SessionView({ id }: { id: string }) {
               <Icon name="alert" />
               <div className="banner-body">
                 <p>
-                  <strong>Processing stopped unexpectedly.</strong> The backend probably restarted while
-                  this session was running. Resume picks up from {fromLabel} and reuses finished steps.
+                  <strong>Processing stopped unexpectedly.</strong> Iris probably restarted while this
+                  session was running. Resume picks up from {fromLabel} and reuses finished steps.
                 </p>
               </div>
             </div>
@@ -420,7 +424,6 @@ function SessionView({ id }: { id: string }) {
           currentStage={session.current_stage}
           outline={notes ? outline : []}
           stream={stream.status}
-          error={session.error ?? run.error}
           showProgress={finished && stream.eventCount > 0}
           cost={cost}
           stepCosts={costs}

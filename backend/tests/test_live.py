@@ -19,8 +19,15 @@ from fastapi.testclient import TestClient
 
 from iris.config import Settings
 from iris.live.replay import encode_webm
+from iris.llm.errors import UserFacingError
 from iris.llm.usage import append_record
-from iris.models import FrameIndex, SourceKind, UsageRecord
+from iris.models import (
+    LIVE_WITHOUT_AUDIO,
+    UNREADABLE_LIVE_AUDIO,
+    FrameIndex,
+    SourceKind,
+    UsageRecord,
+)
 from iris.pipeline.context import StageContext
 from iris.sources.browser_live import (
     CLUSTER_ID,
@@ -206,19 +213,22 @@ def test_cluster_found_across_file_boundaries(tmp_path: Path, cut: int):
 
 def test_unreadable_audio_raises(paths: SessionPaths):
     store_audio_chunk(paths, 0, b"\x1a\x45\xdf\xa3 but not really webm")
-    with pytest.raises(ValueError, match="not a readable"):
+    with pytest.raises(UserFacingError, match="not a readable") as raised:
         finalize_audio(audio_chunks(paths), paths.audio, 16_000)
+    assert raised.value.message == UNREADABLE_LIVE_AUDIO
     assert not paths.audio.exists()
 
 
 async def test_ingest_requires_audio_and_its_first_chunk(tmp_path: Path, webm: bytes):
     paths = SessionPaths(tmp_path / "s1").ensure()
     ctx = StageContext("s1", SourceKind.BROWSER_LIVE, paths, Settings(data_dir=tmp_path))
-    with pytest.raises(ValueError, match="no audio was recorded"):
+    with pytest.raises(UserFacingError, match="no audio was recorded") as raised:
         await BrowserLiveSource().ingest(ctx)
+    assert raised.value.message == LIVE_WITHOUT_AUDIO
     store_audio_chunk(paths, 1, split(webm)[1])
-    with pytest.raises(ValueError, match="first audio chunk"):
+    with pytest.raises(UserFacingError, match="first audio chunk") as raised:
         await BrowserLiveSource().ingest(ctx)
+    assert raised.value.message == UNREADABLE_LIVE_AUDIO
 
 
 # --- Frames -----------------------------------------------------------------------------------

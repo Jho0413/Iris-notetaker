@@ -17,8 +17,10 @@ How it works (architecture section 1, "Life of a session: live"):
      pipeline's numbering. A batch made of the same moments, after the same content, as one of
      the select stage's has the same cache key, so stop reuses it.
   3. Each new figure renders in the background (``render.render_visual``), at most
-     ``live_render_concurrency`` at once. A failed render is logged and leaves no cache entry, so
-     the render stage retries it at stop.
+     ``live_render_concurrency`` at once, by the render stage's rules: an API error gives the
+     source crop, unverified and uncached, so the render stage tries the redraw again at stop. A
+     render that raises (a blocking error) is logged and leaves no cache entry; the next model
+     call (a batch here, or the run at stop) fails on the same error.
   4. ``selected_to`` advances to the end of the last moment read, never past ``closed_to``.
   5. When ``timeline.upstream_failed``: no more model calls; renders still running are
      cancelled (they leave no cache entry). Wait for stop.
@@ -186,7 +188,7 @@ class SelectLane(LiveLane):
                     visual.id,
                 )
                 return
-        self.ctx.emit(EventType.VISUAL_RENDERED, rendered.model_dump(mode="json"))
+        self.ctx.emit(EventType.VISUAL_RENDERED, render.rendered_event(rendered))
 
 
 def _load_batches(ctx: StageContext) -> list[list[str]]:

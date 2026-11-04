@@ -129,7 +129,7 @@ export class LiveCapture {
       this.release()
       this.discardSession()
       if (err instanceof CaptureError) throw err
-      throw new CaptureError(`Could not start recording: ${err}`, { cause: err })
+      throw new CaptureError("Recording couldn't start. Try again.", { cause: err })
     } finally {
       this.env.page.removeEventListener('pagehide', this.onPageHideWhileStarting)
       this.opening = undefined
@@ -267,7 +267,7 @@ export class LiveCapture {
     const pending = await this.queue.drain(this.options.drainTimeoutMs ?? DRAIN_TIMEOUT_MS)
     if (pending) {
       throw new EndSessionError(
-        `${pending} uploads haven't reached Iris yet. Check the backend is running, then try again.`,
+        `${pending} uploads haven't reached Iris yet. Try again in a moment.`,
       )
     }
     const rejectedAudio = this.queue.rejected.filter((r) => r.kind === 'audio')

@@ -53,6 +53,7 @@ from pydantic import BaseModel
 
 from iris.llm import usage
 from iris.llm.client import get_openai
+from iris.llm.errors import describe, retry_temporary
 from iris.markdown import MATH
 from iris.models import (
     Moment,
@@ -580,7 +581,11 @@ async def cached[M: BaseModel, R](
     except (FileNotFoundError, ValueError):
         pass
     with usage.purpose(purpose):
-        result = await generate(ctx, prompt, payload, schema, effort)
+        result = await retry_temporary(
+            lambda: generate(ctx, prompt, payload, schema, effort),
+            ctx.settings.api_retry_delays_s,
+            what=f"session {ctx.session_id}: {purpose}",
+        )
     checked = check(result)
     write_model(path, result)
     return checked
@@ -794,7 +799,7 @@ async def run(ctx: StageContext) -> None:
         report, result = await synthesize(ctx)
     except Exception as exc:  # synthesis is a polish: the assembled notes stay on any failure
         log.warning("synthesis failed for session %s", ctx.session_id, exc_info=True)
-        report = SynthesisReport(status="failed", reason=f"{type(exc).__name__}: {exc}"[:500])
+        report = SynthesisReport(status="failed", reason=describe(exc)[:500])
         result = None
     if result is None:
         ctx.paths.notes_synthesis.unlink(missing_ok=True)

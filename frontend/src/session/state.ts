@@ -10,6 +10,46 @@
 // history (all runs, in order) always lands on the latest run.
 import type { IrisEvent, Notes, Session, SessionStatus, Stage, Transcript } from '../api/client'
 
+export type FailureMessage = NonNullable<Session['failure_message']>
+export type FailureKind = NonNullable<Session['failure_kind']>
+
+/** Shown for every failure that isn't a known input problem, and for anything not on the list. */
+export const GENERIC_FAILURE: FailureMessage =
+  "Iris couldn't finish making the notes. Try again; finished steps are kept."
+
+/**
+ * The only failure messages shown: the backend's fixed list (docs/frontend.md §3, failed). Typed
+ * from the API schema, so the build fails if the lists drift apart. Any other text is replaced
+ * by `GENERIC_FAILURE`, so nothing the backend failed on can reach the page.
+ */
+const FAILURE_MESSAGES: Record<FailureMessage, true> = {
+  "Iris couldn't finish making the notes. Try again; finished steps are kept.": true,
+  "Iris couldn't read this file. Upload an audio or video recording.": true,
+  'This recording has no sound. Upload a recording with speech.': true,
+  'No audio was recorded. Check that the microphone works, then record again.': true,
+  "The recorded audio couldn't be read. Record the session again.": true,
+  'Iris found no speech or screen content in this recording to make notes from.': true,
+}
+
+/** `message` if it is one of ours, else the generic message. */
+export function knownFailureMessage(message: unknown): FailureMessage {
+  return typeof message === 'string' && Object.hasOwn(FAILURE_MESSAGES, message)
+    ? (message as FailureMessage)
+    : GENERIC_FAILURE
+}
+
+/** A known input problem only when the backend says so and its message is one of ours. */
+function knownFailureKind(kind: unknown, message: FailureMessage): FailureKind {
+  return kind === 'input' && message !== GENERIC_FAILURE ? 'input' : 'general'
+}
+
+export interface Failure {
+  message: FailureMessage
+  kind: FailureKind
+  /** The step it stopped at, if known. */
+  stage?: Stage
+}
+
 export type Segment = Transcript['segments'][number]
 export type StepStatus = 'pending' | 'running' | 'done' | 'failed' | 'stopped'
 
@@ -75,7 +115,8 @@ export interface RunState {
    * counts: no notes are shown before the session is done.
    */
   notes: { final: boolean; completed: number; total: number } | null
-  error?: string
+  /** This run's failure, from its `error` event: only our own message and its kind. */
+  failure?: Failure
   /** When the current run started (its `status: processing` event), in ms since the epoch. */
   runStart?: number
 }
@@ -111,12 +152,6 @@ function segments(value: unknown): Segment[] {
       ? [{ start: a, end: b, text }]
       : []
   })
-}
-
-/** The stage named by a runner error such as "write failed: TimeoutError: …". */
-export function stageFromError(message: string | null | undefined): Stage | undefined {
-  const name = message?.match(/^(\w+) failed:/)?.[1]
-  return isStage(name) ? name : undefined
 }
 
 function upsertFigure(state: RunState, id: string, patch: Partial<FigureState>): RunState {
@@ -219,8 +254,8 @@ export function applyEvent(state: RunState, event: IrisEvent): RunState {
       }
     }
     case 'error': {
-      const message = str(data.message)
-      const failed = stageFromError(message)
+      const message = knownFailureMessage(data.message)
+      const failed = isStage(data.stage) ? data.stage : undefined
       const stages = { ...state.stages }
       for (const s of STAGE_ORDER) {
         if (stages[s].status !== 'running') continue
@@ -229,7 +264,8 @@ export function applyEvent(state: RunState, event: IrisEvent): RunState {
       if (failed && stages[failed].status === 'pending') {
         stages[failed] = { ...stages[failed], status: 'failed' }
       }
-      return { ...state, stages, error: message }
+      const failure: Failure = { message, kind: knownFailureKind(data.kind, message), stage: failed }
+      return { ...state, stages, failure }
     }
     default:
       return state
@@ -266,9 +302,9 @@ export function figureList(run: RunState, notes: Notes | null): FigureState[] {
       t: v.frame.t,
       path: v.path,
       renderAs: v.render_as,
-      // A redraw only reaches the notes after passing its check. A screenshot may be requested
-      // or a fallback; only this run's events can tell which.
-      verified: v.render_as === 'screenshot' ? undefined : true,
+      // The notes say how each figure was made. Notes from before they did: a redraw only
+      // reaches them after passing its check, and a screenshot may be requested or a fallback.
+      verified: v.verified ?? (v.render_as === 'screenshot' ? undefined : true),
       rendered: true,
     })
   }
@@ -285,9 +321,9 @@ export function figureList(run: RunState, notes: Notes | null): FigureState[] {
 export type Provenance = 'verified' | 'screenshot' | 'unverified'
 
 /**
- * How a figure was produced, when it is known (docs/frontend.md §5, figures). A screenshot in the
- * finished notes may be a requested one or a fallback crop that failed its check; without this
- * run's events the two can't be told apart, so neither label is claimed.
+ * How a figure was produced, when it is known (docs/frontend.md §5, figures). `unverified` is the
+ * original image, shown because no redraw could be used (labelled neutrally, with no reason). In
+ * notes from before figures recorded this, a screenshot may be either, so neither is claimed.
  */
 export function provenance(figure: FigureState): Provenance | undefined {
   if (!figure.rendered || figure.verified === undefined) return undefined
@@ -339,11 +375,7 @@ export function uiState(
     case 'done':
       return { kind: 'finished', label: 'Finished' }
     case 'failed': {
-      const stage =
-        stageFromError(session.error ?? run.error) ??
-        STAGE_ORDER.find((s) => run.stages[s].status === 'failed') ??
-        session.current_stage ??
-        undefined
+      const stage = failedStage(session, run)
       return {
         kind: 'failed',
         label: stage ? `Failed · ${STAGE_LABELS[stage]}` : 'Failed',
@@ -542,8 +574,28 @@ export function formatDuration(seconds: number): string {
   return `${m} min ${String(Math.round(seconds % 60)).padStart(2, '0')} s`
 }
 
-/** Plain-language headline for a failure: "Writing notes failed". The raw text goes in Details. */
-export function failureHeadline(message: string | null | undefined): string {
-  const stage = stageFromError(message)
-  return stage ? `${STAGE_LABELS[stage]} failed` : 'Processing failed'
+/** The step a failed session stopped at: this run's, else the stored one. */
+function failedStage(session: Session, run: RunState): Stage | undefined {
+  return (
+    run.failure?.stage ??
+    STAGE_ORDER.find((s) => run.stages[s].status === 'failed') ??
+    session.current_stage ??
+    undefined
+  )
+}
+
+/**
+ * What a failed session shows (docs/frontend.md §3, failed): only our own message, from the fixed
+ * list, and what to do about it. `general`: try again. `input`: the recording itself is the
+ * problem, so upload or record another one. The step name is fine to show; nothing else is.
+ */
+export function failureView(session: Session, run: RunState): Failure & { headline: string } {
+  const message = knownFailureMessage(run.failure?.message ?? session.failure_message)
+  const kind = run.failure ? run.failure.kind : knownFailureKind(session.failure_kind, message)
+  const stage = failedStage(session, run)
+  const headline =
+    kind === 'input'
+      ? "Iris couldn't use this recording"
+      : stage ? `Stopped at ${STAGE_LABELS[stage]}` : "Iris couldn't finish the notes"
+  return { message, kind, stage, headline }
 }

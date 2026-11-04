@@ -11,7 +11,7 @@ export type Stage = components['schemas']['Stage']
 export type Notes = components['schemas']['Notes']
 export type Transcript = components['schemas']['Transcript']
 export type IrisEvent = components['schemas']['Event']
-export type SessionUsage = components['schemas']['SessionUsage']
+export type SessionUsage = components['schemas']['SessionUsageView']
 
 export const STAGES: Stage[] = [
   'ingest',
@@ -36,6 +36,6 @@ export async function uploadRecording(file: File, title?: string): Promise<Sessi
   form.append('file', file)
   if (title) form.append('title', title)
   const res = await fetch('/api/sessions', { method: 'POST', body: form })
-  if (!res.ok) throw new Error(`Upload failed: ${res.status} ${await res.text()}`)
+  if (!res.ok) throw new Error('Upload failed')
   return res.json()
 }

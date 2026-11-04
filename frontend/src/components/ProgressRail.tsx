@@ -20,7 +20,6 @@ export function ProgressRail(props: {
   currentStage?: Stage | null
   outline: OutlineItem[]
   stream: StreamStatus
-  error?: string | null
   showProgress: boolean
   /** The session's model cost so far; null shows nothing (no calls yet, or not loaded). */
   cost: Cost | null
@@ -100,7 +99,7 @@ export function ProgressRail(props: {
               </tbody>
             </table>
           )}
-          {!rows.some((r) => r.time) && <p>Step times are only available for runs since the backend started.</p>}
+          {!rows.some((r) => r.time) && <p>Step times are only available for runs since Iris started.</p>}
           {props.cost?.partial && (
             <p>
               Costs marked ≥ leave out model calls Iris has no price for yet, so the real cost may
@@ -109,9 +108,8 @@ export function ProgressRail(props: {
           )}
           <p>
             Live updates:{' '}
-            {props.stream === 'open' ? 'connected' : props.stream === 'connecting' ? 'waiting for the backend…' : 'reconnecting…'}
+            {props.stream === 'open' ? 'connected' : props.stream === 'connecting' ? 'waiting for Iris…' : 'reconnecting…'}
           </p>
-          {props.error && <div className="raw">{props.error}</div>}
         </details>
       </div>
     </aside>

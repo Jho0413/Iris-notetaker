@@ -37,7 +37,8 @@ import av
 import cv2
 import numpy as np
 
-from iris.models import FrameIndex, FrameRef
+from iris.llm.errors import UserFacingError
+from iris.models import LIVE_WITHOUT_AUDIO, UNREADABLE_LIVE_AUDIO, FrameIndex, FrameRef
 from iris.pipeline.context import StageContext
 from iris.sources.upload import JPEG_QUALITY, output_size
 from iris.store.layout import SessionPaths, write_model
@@ -139,9 +140,11 @@ class BrowserLiveSource:
         """Finalize the captured chunks and frames into ``audio.wav`` and ``frames.json``."""
         chunks = audio_chunks(ctx.paths)
         if not chunks:
-            raise ValueError("no audio was recorded")
+            raise UserFacingError(LIVE_WITHOUT_AUDIO, "no audio was recorded")
         if chunks[0][0] != 0:
-            raise ValueError("the first audio chunk (the stream header) is missing")
+            raise UserFacingError(
+                UNREADABLE_LIVE_AUDIO, "the first audio chunk (the stream header) is missing"
+            )
         missing = missing_audio_chunks(ctx.paths, chunks[-1][0] + 1)
         if missing:
             # The end request already refused gaps unless the client accepted them.
@@ -271,7 +274,7 @@ def finalize_audio(chunks: Sequence[tuple[int, Path]], dest: Path, rate: int) ->
     """
     runs = contiguous_runs(chunks)
     if not runs:
-        raise ValueError("no audio was recorded")
+        raise UserFacingError(LIVE_WITHOUT_AUDIO, "no audio was recorded")
     tmp = dest.with_suffix(dest.suffix + ".tmp")
     try:
         with wave.open(str(tmp), "wb") as out:
@@ -293,7 +296,7 @@ def finalize_audio(chunks: Sequence[tuple[int, Path]], dest: Path, rate: int) ->
         raise
     if wav.samples == 0:
         tmp.unlink(missing_ok=True)
-        raise ValueError("the live recording contains no audio")
+        raise UserFacingError(LIVE_WITHOUT_AUDIO, "the live recording contains no audio")
     tmp.replace(dest)
     return wav.samples / rate
 
@@ -368,12 +371,14 @@ def _decode_run(parts: Sequence[Part], wav: PlacedWav, *, required: bool) -> Non
             container = av.open(reader)
         except av.FFmpegError as e:
             if required:
-                raise ValueError("the live audio is not a readable recording") from e
+                raise UserFacingError(
+                    UNREADABLE_LIVE_AUDIO, f"the live audio is not a readable recording: {e}"
+                ) from e
             log.warning("skipping live audio that could not be opened: %s", e)
             return
         with container:
             if not container.streams.audio:
-                raise ValueError("the live recording has no audio track")
+                raise UserFacingError(LIVE_WITHOUT_AUDIO, "the live recording has no audio track")
             for packet in container.demux(container.streams.audio[0]):
                 try:
                     frames = packet.decode()

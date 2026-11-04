@@ -22,6 +22,7 @@ from openai.types.chat import ChatCompletionContentPartParam
 from pydantic import BaseModel
 
 from iris.llm.client import get_openai
+from iris.llm.errors import retry_temporary
 from iris.models import (
     AlignedMoment,
     Alignment,
@@ -328,7 +329,11 @@ async def read_batch(
     if result is None:
         # Invalid JSON, schema, encoding or decisions are a cache miss. Replace the
         # entry only after a fresh response passes the same validation.
-        result = await choose(ctx, prepared.content)
+        result = await retry_temporary(
+            lambda: choose(ctx, prepared.content),
+            ctx.settings.api_retry_delays_s,
+            what=f"session {ctx.session_id}: selection batch",
+        )
         validate_decisions(result, batch)
     write_model(cache, result)
     out = BatchResult(contents=[], visuals=[], rejected_moment_ids=[])

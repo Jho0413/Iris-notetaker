@@ -22,7 +22,6 @@ from iris.live import audio as audio_lane
 from iris.live.audio import (
     CONFIRM_S,
     PROMPT_CHARS,
-    WINDOW_ATTEMPTS,
     AudioLane,
     WindowFailed,
     window_cut,
@@ -40,6 +39,7 @@ from iris.sources.browser_live import (
     store_audio_chunk,
 )
 from iris.store.layout import SessionPaths, read_model, write_model
+from tests.api_errors import connection_error, status_error
 from tests.test_live import split
 
 RATE = 16_000
@@ -146,7 +146,6 @@ class Run:
             monkeypatch.setattr(llm_client, "_client", lambda _key: fake.client)
         else:
             monkeypatch.setattr(audio_lane, "get_openai", lambda _: fake.client)
-        monkeypatch.setattr(audio_lane, "RETRY_DELAY_S", 0.0)
         self.events: list[tuple[EventType, dict]] = []
         self.ctx = StageContext(
             "s1",
@@ -448,15 +447,31 @@ async def test_a_window_that_keeps_failing_fails_the_lane(
     tmp_path: Path, paths: SessionPaths, webm: bytes, monkeypatch
 ):
     async def gate(n: int) -> None:
-        raise RuntimeError("API down")
+        raise connection_error("API down")
+
+    fake = FakeTranscriber(gate)
+    s = settings(tmp_path)
+    run = Run(paths, s, fake, monkeypatch)
+    chunks = split(webm, 2000)
+    run.store(chunks, range(len(chunks)))
+    with pytest.raises(WindowFailed, match="API down"):
+        await asyncio.wait_for(run.task, 10)  # fails while recording; the thread is stopped
+    assert len(fake.calls) == 1 + len(s.api_retry_delays_s)  # retried with the settings' delays
+
+
+async def test_a_blocking_error_fails_the_lane_without_retries(
+    tmp_path: Path, paths: SessionPaths, webm: bytes, monkeypatch
+):
+    async def gate(n: int) -> None:
+        raise status_error(401, message="bad key")
 
     fake = FakeTranscriber(gate)
     run = Run(paths, settings(tmp_path), fake, monkeypatch)
     chunks = split(webm, 2000)
     run.store(chunks, range(len(chunks)))
-    with pytest.raises(WindowFailed, match="API down"):
-        await asyncio.wait_for(run.task, 10)  # fails while recording; the thread is stopped
-    assert len(fake.calls) == WINDOW_ATTEMPTS
+    with pytest.raises(WindowFailed, match="blocking"):
+        await asyncio.wait_for(run.task, 10)
+    assert len(fake.calls) == 1
 
 
 async def test_a_transient_failure_is_retried(
@@ -464,7 +479,7 @@ async def test_a_transient_failure_is_retried(
 ):
     async def gate(n: int) -> None:
         if n == 0:
-            raise RuntimeError("timeout")
+            raise connection_error("timeout")
 
     fake = FakeTranscriber(gate)
     run = Run(paths, settings(tmp_path), fake, monkeypatch)
@@ -483,7 +498,6 @@ async def test_failing_lane_is_marked_failed_by_the_processor(
 
     fake = FakeTranscriber(gate)
     monkeypatch.setattr(audio_lane, "get_openai", lambda _: fake.client)
-    monkeypatch.setattr(audio_lane, "RETRY_DELAY_S", 0.0)
     ctx = StageContext("s1", SourceKind.BROWSER_LIVE, paths, settings(tmp_path))
     processor = LiveProcessor(ctx, lambda c, t: [AudioLane(c, t)], finish_timeout_s=10)
     processor.start()
@@ -494,6 +508,39 @@ async def test_failing_lane_is_marked_failed_by_the_processor(
     await asyncio.wait_for(timeline.wait_until(lambda: Lane.AUDIO in timeline.failed), 10)
     timeline = await processor.finish()
     assert "WindowFailed" in timeline.failed[Lane.AUDIO]
+
+
+async def test_a_window_transcribed_at_stop_is_still_retried(
+    tmp_path: Path, paths: SessionPaths, webm: bytes, monkeypatch
+):
+    """The lane's flush at stop is what stop waits for: a temporary error there is retried, so
+    the live transcript is kept rather than transcribed again by the pipeline."""
+    failed_at_stop: list[int] = []
+    processor: LiveProcessor | None = None
+
+    async def gate(n: int) -> None:
+        if processor is not None and processor.timeline.ending and not failed_at_stop:
+            failed_at_stop.append(n)
+            raise connection_error("blip")
+
+    fake = FakeTranscriber(gate)
+    monkeypatch.setattr(audio_lane, "get_openai", lambda _: fake.client)
+    ctx = StageContext(
+        "s1", SourceKind.BROWSER_LIVE, paths, settings(tmp_path, api_retry_delays_s=[0.01])
+    )
+    processor = LiveProcessor(ctx, lambda c, t: [AudioLane(c, t)], finish_timeout_s=10)
+    processor.start()
+    for seq, data in enumerate(split(webm, 2000)):
+        store_audio_chunk(paths, seq, data)
+        processor.notify_audio()
+    timeline = await processor.finish()
+    assert failed_at_stop  # a call after stop did fail once
+    assert Lane.AUDIO in timeline.finished and Lane.AUDIO not in timeline.failed
+
+
+async def _until(predicate) -> None:
+    while not predicate():
+        await asyncio.sleep(0.01)
 
 
 async def test_a_restarted_lane_reuses_every_cached_window(

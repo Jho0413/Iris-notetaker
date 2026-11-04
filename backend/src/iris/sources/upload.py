@@ -19,7 +19,8 @@ import cv2
 import numpy as np
 from av.container import InputContainer
 
-from iris.models import FrameIndex, FrameRef
+from iris.llm.errors import UserFacingError
+from iris.models import UNREADABLE_UPLOAD, UPLOAD_WITHOUT_AUDIO, FrameIndex, FrameRef
 from iris.pipeline.context import StageContext
 from iris.store.layout import SessionPaths, write_model
 
@@ -42,17 +43,21 @@ class UploadSource:
         """Decode the upload into audio.wav and sampled frames, faster than real time.
 
         Audio and frames are decoded concurrently in worker threads (decoding is CPU bound and
-        FFmpeg releases the GIL).
+        FFmpeg releases the GIL). A file that can't be opened or decoded, or has no audio, is the
+        user's to fix: ``UserFacingError``.
         """
         src = ctx.paths.find_source()
         if src is None:
             raise FileNotFoundError("no source.* file in session")
         check_has_audio(src)  # fail fast, before spending time decoding video
         s = ctx.settings
-        await asyncio.gather(
-            asyncio.to_thread(extract_audio, src, ctx.paths.audio, s.audio_sample_rate),
-            asyncio.to_thread(ingest_frames, src, ctx.paths, s.frame_fps, s.frame_max_width),
-        )
+        try:
+            await asyncio.gather(
+                asyncio.to_thread(extract_audio, src, ctx.paths.audio, s.audio_sample_rate),
+                asyncio.to_thread(ingest_frames, src, ctx.paths, s.frame_fps, s.frame_max_width),
+            )
+        except av.FFmpegError as e:  # damaged or truncated past what the decoder can skip
+            raise UserFacingError(UNREADABLE_UPLOAD, f"{src.name} could not be decoded: {e}") from e
 
 
 # --- Opening ----------------------------------------------------------------------------------
@@ -62,7 +67,9 @@ def open_media(src: Path) -> InputContainer:
     try:
         return av.open(str(src))
     except av.FFmpegError as e:
-        raise ValueError(f"{src.name} is not a readable audio or video file") from e
+        raise UserFacingError(
+            UNREADABLE_UPLOAD, f"{src.name} is not a readable audio or video file: {e}"
+        ) from e
 
 
 def session_origin(container: InputContainer) -> float:
@@ -83,7 +90,7 @@ def first_video_stream(container: InputContainer) -> av.VideoStream | None:
 def check_has_audio(src: Path) -> None:
     with open_media(src) as container:
         if not container.streams.audio:
-            raise ValueError(f"{src.name} has no audio track; Iris needs speech to write notes")
+            raise UserFacingError(UPLOAD_WITHOUT_AUDIO, f"{src.name} has no audio track")
 
 
 # --- Audio ------------------------------------------------------------------------------------
@@ -99,7 +106,7 @@ def extract_audio(src: Path, dest: Path, rate: int) -> float:
     tmp = dest.with_suffix(dest.suffix + ".tmp")
     with open_media(src) as container:
         if not container.streams.audio:
-            raise ValueError(f"{src.name} has no audio track; Iris needs speech to write notes")
+            raise UserFacingError(UPLOAD_WITHOUT_AUDIO, f"{src.name} has no audio track")
         stream = container.streams.audio[0]
         stream.thread_type = "AUTO"
         origin = session_origin(container)

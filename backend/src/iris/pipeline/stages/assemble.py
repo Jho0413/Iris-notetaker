@@ -12,7 +12,16 @@ import re
 from pathlib import Path
 
 from iris.markdown import escape_text
-from iris.models import EventType, Notes, NotesDraft, Renders, Selection, SynthesizedDraft, Visual
+from iris.models import (
+    EventType,
+    Notes,
+    NotesDraft,
+    NotesVisual,
+    Renders,
+    Selection,
+    SynthesizedDraft,
+    Visual,
+)
 from iris.pipeline.context import StageContext
 from iris.store.layout import read_model, write_model
 
@@ -52,18 +61,19 @@ def drop_title_heading(markdown: str, title: str) -> str:
     return markdown
 
 
-def with_renders(visuals: list[Visual], renders: Path) -> list[Visual]:
-    """Point each visual at its render where ``renders.json`` has one; the others keep their
-    selected path (the source crop)."""
-    if not renders.exists():
-        return visuals
-    rendered = {r.id: r for r in read_model(renders, Renders).visuals}
-    return [
-        v.model_copy(update={"path": r.path, "render_as": r.render_as})
-        if (r := rendered.get(v.id))
-        else v
-        for v in visuals
-    ]
+def with_renders(visuals: list[Visual], renders: Path) -> list[NotesVisual]:
+    """Point each visual at its render where ``renders.json`` has one, with how it was made; the
+    others keep their selected path (the source crop)."""
+    rendered = {r.id: r for r in read_model(renders, Renders).visuals} if renders.exists() else {}
+    out = []
+    for v in visuals:
+        visual = NotesVisual(**v.model_dump())
+        if r := rendered.get(v.id):
+            visual = visual.model_copy(
+                update={"path": r.path, "render_as": r.render_as, "verified": r.verified}
+            )
+        out.append(visual)
+    return out
 
 
 def current_draft(ctx: StageContext, selection: Selection) -> NotesDraft:

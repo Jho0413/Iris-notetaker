@@ -27,7 +27,8 @@ the rest of the audio is cut the same way and the last window ends where the aud
 
 Windows are transcribed with ``transcribe.transcribe_chunk``, at most
 ``live_transcribe_concurrency`` at once (a window starts only while fewer than that many are
-uncommitted), each attempted up to ``WINDOW_ATTEMPTS`` times before the lane fails. Each window is
+uncommitted), each retried after a temporary API error (``retry_temporary``, with
+``api_retry_delays_s``) before the lane fails; other errors fail it at once. Each window is
 prompted with the tail of the text *committed when it is sent*: normally that is the previous
 window (windows end ~10 s apart and take a few seconds to transcribe), while a backlog (a slow API,
 or stop) is worked through concurrently with slightly older context. The cache entry records the
@@ -59,6 +60,7 @@ from iris.live.lane import LiveLane
 from iris.live.timeline import Lane, LiveTimeline
 from iris.llm import usage
 from iris.llm.client import get_openai
+from iris.llm.errors import describe, retry_temporary
 from iris.models import EventType, Stage, Transcript, TranscriptSegment
 from iris.pipeline.context import StageContext
 from iris.pipeline.stages import transcribe
@@ -76,8 +78,6 @@ log = logging.getLogger(__name__)
 
 CONFIRM_S = 1.0  # decoded audio needed past a window's search range before it is cut
 PROMPT_CHARS = 500  # tail of the committed transcript sent as a window's prompt (~120 tokens)
-WINDOW_ATTEMPTS = 3  # transcription attempts per window before the lane fails
-RETRY_DELAY_S = 2.0  # times the attempt number, between attempts
 MIN_API_S = 0.1  # the API rejects shorter audio; a shorter final window is committed empty
 MIN_TAIL_S = 1.0  # at stop, a shorter last window joins the one before (whisper hallucinates)
 PROGRESS_S = 5.0  # while catching up, the decoder reports progress at least this often
@@ -539,21 +539,19 @@ class AudioLane(LiveLane):
         if self._client is None:
             self._client = get_openai(self.ctx.settings)
         wav = transcribe.encode_wav(samples, self.rate)
-        for attempt in range(1, WINDOW_ATTEMPTS + 1):
-            try:
-                with usage.recording(self.ctx, Stage.TRANSCRIBE):
-                    return await transcribe.transcribe_chunk(
-                        self._client, self.model, wav, duration, prompt or None
-                    )
-            except Exception as exc:
-                where = f"window {i} at {offset:.1f}s"
-                if attempt == WINDOW_ATTEMPTS:
-                    raise WindowFailed(
-                        f"{where} failed {attempt} times: {type(exc).__name__}: {exc}"
-                    ) from exc
-                log.warning("%s: transcription failed (%s); retrying", where, exc)
-                await asyncio.sleep(RETRY_DELAY_S * attempt)
-        raise AssertionError("unreachable")
+        where = f"session {self.ctx.session_id}: live window {i} at {offset:.1f}s"
+        client = self._client
+
+        async def call() -> transcribe.ChunkTranscript:
+            with usage.recording(self.ctx, Stage.TRANSCRIBE):
+                return await transcribe.transcribe_chunk(
+                    client, self.model, wav, duration, prompt or None
+                )
+
+        try:
+            return await retry_temporary(call, self.ctx.settings.api_retry_delays_s, what=where)
+        except Exception as exc:
+            raise WindowFailed(f"{where} failed: {describe(exc)}") from exc
 
     async def _wait_committed(self, n: int) -> None:
         async with self._commits:

@@ -10,6 +10,10 @@ export interface EndRequest {
   allowGaps: boolean
 }
 
+// Messages are ours, written for the user: never the backend's text or status codes.
+const UNREACHABLE = "Iris isn't responding, so the session couldn't be finished. Try again in a moment."
+
+/** A failure to finish the session, with a message that can be shown to the user as is. */
 export class EndSessionError extends Error {
   constructor(message: string) {
     super(message)
@@ -41,18 +45,15 @@ export async function endLiveSession(
       body: JSON.stringify({ audio_chunks: request.audioChunks, allow_gaps: request.allowGaps }),
     })
   } catch {
-    throw new EndSessionError('Could not reach Iris to finish the session. Is the backend running?')
+    throw new EndSessionError(UNREACHABLE)
   }
   if (res.ok) return
   if (res.status === 409) {
     const detail = ((await res.json().catch(() => null)) as { detail?: unknown } | null)?.detail
     if (detail && typeof detail === 'object' && 'missing_audio_chunks' in detail) {
-      const { message, missing_audio_chunks: missing } = detail as {
-        message?: string
-        missing_audio_chunks?: number[]
-      }
+      const { missing_audio_chunks: missing } = detail as { missing_audio_chunks?: number[] }
       throw new MissingAudioError(
-        `Iris has not received all the audio yet (${message ?? 'audio chunks are missing'}).`,
+        "Iris hasn't received all the audio yet. Try again in a moment.",
         Array.isArray(missing) ? missing : [],
       )
     }
@@ -63,5 +64,5 @@ export async function endLiveSession(
       if (status && status !== 'recording') return
     }
   }
-  throw new EndSessionError(`Iris could not finish the session (HTTP ${res.status}).`)
+  throw new EndSessionError("Iris couldn't finish the session. Try again in a moment.")
 }

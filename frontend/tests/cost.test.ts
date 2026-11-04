@@ -40,7 +40,7 @@ test('costLabel: screen readers hear words, not symbols', () => {
 
 const session = (patch: Partial<Session>): Session => ({
   id: 's1', title: 'Algebra', source: 'upload', status: 'processing', current_stage: null,
-  error: null, duration_s: null, created_at: '2026-11-03T12:00:00Z',
+  failure_message: null, failure_kind: null, duration_s: null, created_at: '2026-11-03T12:00:00Z',
   updated_at: '2026-11-03T12:00:00Z', cost_usd: null, cost_partial: false, ...patch,
 })
 

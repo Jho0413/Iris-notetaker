@@ -6,6 +6,9 @@ iris run <session_id> [--from S]    re-run a session's pipeline, optionally from
 iris stage <session_id> <stage>     run one stage on its own (reads/writes session files)
 iris cost [<session_id>]            model usage and cost per stage, model and purpose
                                     (the most recent session if no id is given)
+iris show <session_id>              dev tool: a session's status and, if it failed, the stage,
+                                    what the user was told and the raw error (never served by
+                                    the API)
 iris replay-live <file>... [--url U] [--speed X]
                                     dev tool: play recordings into a running backend's live API
                                     in real time (or X times faster), as the browser would, and
@@ -21,9 +24,9 @@ from iris.config import get_settings
 from iris.events import EventBus
 from iris.jobs.runner import JobRunner
 from iris.llm.usage import read_usage
-from iris.models import SessionUsage, SourceKind, Stage, UsageTotals
+from iris.models import Session, SessionStatus, SessionUsage, SourceKind, Stage, UsageTotals
 from iris.sources.upload import save_upload
-from iris.store.db import SessionStore
+from iris.store.db import FailureDetail, SessionStore
 from iris.store.layout import session_paths
 
 
@@ -54,6 +57,41 @@ async def _stage(session_id: str, stage: Stage) -> None:
     runner = _runner()
     await runner.run_stage(runner.context(session_id), stage)
     print(f"{stage} done")
+
+
+# --- iris show --------------------------------------------------------------------------------
+
+
+def format_show(session: Session, detail: FailureDetail | None) -> str:
+    rows = [
+        ("session", session.id),
+        ("title", session.title),
+        ("source", session.source),
+        ("status", session.status),
+        ("stage", session.current_stage or "-"),
+    ]
+    if session.status == SessionStatus.FAILED or detail is not None:
+        rows += [
+            ("failure kind", session.failure_kind or "-"),
+            ("user message", session.failure_message or "-"),
+            ("raw error", detail.error if detail else "-"),
+            ("failed at", (detail.at if detail else None) or "unknown"),
+        ]
+    width = max(len(name) for name, _ in rows)
+    return "\n".join(f"{name:<{width}}  {value}" for name, value in rows)
+
+
+def _show(session_id: str) -> int:
+    store = SessionStore(get_settings().db_path)
+    try:
+        session = store.get(session_id)
+        if session is None:
+            print(f"no session {session_id}", file=sys.stderr)
+            return 1
+        print(format_show(session, store.failure_detail(session_id)))
+    finally:
+        store.close()
+    return 0
 
 
 # --- iris cost --------------------------------------------------------------------------------
@@ -145,6 +183,9 @@ def main() -> None:
     cost = sub.add_parser("cost")
     cost.add_argument("session_id", nargs="?", help="defaults to the most recent session")
 
+    show = sub.add_parser("show", help="a session's status and raw error (for developers)")
+    show.add_argument("session_id")
+
     replay = sub.add_parser("replay-live", help="play recordings into a running backend's live API")
     replay.add_argument("files", type=Path, nargs="+")
     replay.add_argument("--url", default="http://127.0.0.1:8000", help="the backend to replay into")
@@ -163,6 +204,8 @@ def main() -> None:
         asyncio.run(_stage(args.session_id, args.stage))
     elif args.cmd == "cost":
         sys.exit(_cost(args.session_id))
+    elif args.cmd == "show":
+        sys.exit(_show(args.session_id))
     elif args.cmd == "replay-live":
         from iris.live import replay as live_replay
 

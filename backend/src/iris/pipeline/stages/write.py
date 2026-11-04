@@ -27,8 +27,9 @@ from markdown_it.token import Token
 from pydantic import BaseModel
 
 from iris.llm.client import get_openai
+from iris.llm.errors import UserFacingError, retry_temporary
 from iris.markdown import protect_math
-from iris.models import EventType, NotesDraft, Selection, SessionType, Transcript
+from iris.models import NOTHING_TO_WRITE, EventType, NotesDraft, Selection, SessionType, Transcript
 from iris.pipeline.context import StageContext
 from iris.store.layout import read_model, write_model
 
@@ -223,8 +224,10 @@ def split_parts(
 def plan_parts(transcript: Transcript, selection: Selection, budget: int) -> list[WritingPart]:
     """Pack complete evidence into bounded JSON arrays; split oversized speech without loss."""
     closed, last = split_parts(transcript, selection, budget)
-    if last is None:
-        raise ValueError("no transcript or screen content to write notes from")
+    if last is None:  # silence and a blank screen: nothing the user said or showed to write up
+        raise UserFacingError(
+            NOTHING_TO_WRITE, "no transcript or screen content to write notes from"
+        )
     return [*closed, last]
 
 
@@ -355,7 +358,11 @@ async def write_section(
         section = read_model(cache, WrittenSection)
         validate_section(section, part, first)
     except (FileNotFoundError, ValueError):
-        section = await generate_section(ctx, payload)
+        section = await retry_temporary(
+            lambda: generate_section(ctx, payload),
+            ctx.settings.api_retry_delays_s,
+            what=f"session {ctx.session_id}: notes section",
+        )
         validate_section(section, part, first)
         cache.parent.mkdir(exist_ok=True)
         write_model(cache, section)
