@@ -32,6 +32,34 @@ test('stages move through running and done, with durations from event times', ()
   assert.equal(uiState(session, run).label, 'Processing · Transcribing')
 })
 
+test('stages promoted at stop are done, marked live and not timed', () => {
+  const promoted = (type: 'stage_started' | 'stage_finished', stage: string) =>
+    ev(type, { stage, promoted: true })
+  const events = [
+    ev('status', { status: 'processing' }),
+    ev('stage_started', { stage: 'ingest' }), ev('stage_finished', { stage: 'ingest' }),
+    promoted('stage_started', 'transcribe'), promoted('stage_finished', 'transcribe'),
+    promoted('stage_started', 'detect'),
+    ev('moment_found', { id: 'm1', start: 0, end: 9 }),
+    ev('moment_found', { id: 'm2', start: 9, end: 20 }),
+    promoted('stage_finished', 'detect'),
+    ev('stage_started', { stage: 'write' }),
+  ]
+  const run = reduceEvents(events)
+  assert.equal(run.stages.transcribe.status, 'done')
+  assert.equal(run.stages.transcribe.promoted, true)
+  assert.equal(stageSeconds(run.stages.transcribe), undefined)
+  assert.equal(stageDetail('transcribe', run), 'live')
+  assert.equal(stageDetail('detect', run), '2 moments · live')
+  assert.equal(run.stages.ingest.promoted, undefined)
+  assert.equal(stageSeconds(run.stages.ingest), 1)
+  assert.equal(run.stages.write.status, 'running')
+  // The next run starts fresh: a stage that runs there is no longer marked live.
+  const next = reduceEvents([...events, ev('status', { status: 'processing' }),
+    ev('stage_started', { stage: 'transcribe' })])
+  assert.equal(next.stages.transcribe.promoted, undefined)
+})
+
 test('replayed history changes nothing', () => {
   const events = [
     ev('status', { status: 'processing' }),

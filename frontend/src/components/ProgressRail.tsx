@@ -56,7 +56,9 @@ export function ProgressRail(props: {
   const summary = running.length
     ? running.map((s) => [STAGE_LABELS[s], stageDetail(s, run)].filter(Boolean).join(' ')).join(' · ')
     : props.finished ? 'All steps finished' : 'Progress'
-  const timed = STAGE_ORDER.filter((s) => stageSeconds(run.stages[s]) !== undefined)
+  const timed = STAGE_ORDER.filter(
+    (s) => run.stages[s].promoted || stageSeconds(run.stages[s]) !== undefined,
+  )
 
   return (
     <aside className={`rail${expanded ? ' expanded' : ''}`} aria-label="Session progress and details">
@@ -118,7 +120,11 @@ export function ProgressRail(props: {
                     <td>
                       <code>{s}</code>
                     </td>
-                    <td className="num">{formatDuration(stageSeconds(run.stages[s])!)}</td>
+                    <td className="num">
+                      {run.stages[s].promoted
+                        ? 'while recording'
+                        : formatDuration(stageSeconds(run.stages[s])!)}
+                    </td>
                   </tr>
                 ))}
               </tbody>

@@ -34,6 +34,8 @@ export interface StageRun {
   status: StepStatus
   startedAt?: string
   finishedAt?: string
+  /** Done while recording: the live work was promoted at stop instead of running the stage. */
+  promoted?: boolean
 }
 
 export interface FigureState {
@@ -144,10 +146,11 @@ export function applyEvent(state: RunState, event: IrisEvent): RunState {
     case 'stage_finished': {
       if (!isStage(data.stage)) return state
       const prev = state.stages[data.stage]
+      const promoted = data.promoted === true ? { promoted: true } : {}
       const next: StageRun =
         event.type === 'stage_started'
-          ? { ...prev, status: prev.status === 'done' ? 'done' : 'running', startedAt: event.at }
-          : { ...prev, status: 'done', finishedAt: event.at }
+          ? { ...prev, ...promoted, status: prev.status === 'done' ? 'done' : 'running', startedAt: event.at }
+          : { ...prev, ...promoted, status: 'done', finishedAt: event.at }
       return { ...state, stages: { ...state.stages, [data.stage]: next } }
     }
     case 'transcript_chunk': {
@@ -359,8 +362,17 @@ export function libraryState(session: Session): UiState {
   return uiState(session, emptyRun())
 }
 
-/** Count shown beside a running or finished step, e.g. "3 of 5". */
+/**
+ * Count shown beside a running or finished step, e.g. "3 of 5". A step done while recording
+ * (promoted at stop) says so: "4 moments · live".
+ */
 export function stageDetail(stage: Stage, run: RunState): string | undefined {
+  const count = stageCount(stage, run)
+  if (!run.stages[stage].promoted) return count
+  return count ? `${count} · live` : 'live'
+}
+
+function stageCount(stage: Stage, run: RunState): string | undefined {
   switch (stage) {
     case 'transcribe': {
       const n = Object.keys(run.chunks).length
@@ -386,9 +398,9 @@ export function stageDetail(stage: Stage, run: RunState): string | undefined {
   }
 }
 
-/** Seconds a step took, when both of its events are known. */
+/** Seconds a step took, when both of its events are known (not for a step done live). */
 export function stageSeconds(step: StageRun): number | undefined {
-  if (!step.startedAt || !step.finishedAt) return undefined
+  if (step.promoted || !step.startedAt || !step.finishedAt) return undefined
   const ms = Date.parse(step.finishedAt) - Date.parse(step.startedAt)
   return Number.isFinite(ms) && ms >= 0 ? ms / 1000 : undefined
 }
