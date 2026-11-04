@@ -486,7 +486,8 @@ def detect_moments(
     return moments
 
 
-def _event(m: Moment) -> dict:
+def moment_event(m: Moment) -> dict:
+    """The MOMENT_FOUND event data for a moment (also emitted by the live screen lane)."""
     return {"id": m.id, "start": m.start, "end": m.end, "frame": m.frame.path}
 
 
@@ -496,7 +497,7 @@ async def run(ctx: StageContext, params: DetectParams | None = None) -> None:
 
     def on_moment(m: Moment) -> None:
         # Detection runs in a worker thread; deliver events on the event loop.
-        loop.call_soon_threadsafe(ctx.emit, EventType.MOMENT_FOUND, _event(m))
+        loop.call_soon_threadsafe(ctx.emit, EventType.MOMENT_FOUND, moment_event(m))
 
     moments = await asyncio.to_thread(detect_moments, ctx.paths.root, index, params, on_moment)
     write_model(ctx.paths.moments, Moments(moments=moments))
