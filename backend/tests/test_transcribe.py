@@ -2,6 +2,7 @@
 
 import asyncio
 import io
+import json
 import wave
 from pathlib import Path
 from types import SimpleNamespace
@@ -256,9 +257,9 @@ def test_transcribe_language_setting(tmp_path: Path, value, expected):
     assert s.transcribe_language == expected
 
 
-@pytest.mark.parametrize("value", ["english", "e", "en-GB"])
-def test_transcribe_language_setting_rejects_non_codes(tmp_path: Path, value):
-    with pytest.raises(ValueError, match="ISO-639-1"):
+@pytest.mark.parametrize("value", ["english", "e", "en-GB", "jp", "zz"])
+def test_transcribe_language_setting_rejects_unknown_codes(tmp_path: Path, value):
+    with pytest.raises(ValueError, match="not a language Whisper knows"):
         Settings(data_dir=tmp_path, transcribe_language=value)
 
 
@@ -355,6 +356,38 @@ async def test_stage_sends_the_language_and_a_changed_language_resends_every_chu
     again = client.audio.transcriptions.calls
     assert len(again) == len(first)
     assert all("language" not in c for c in again)
+
+
+def strip_requested_language(cache_dir: Path) -> None:
+    """Make every cache entry look as it did before ``requested_language`` existed."""
+    for path in cache_dir.glob("*.json"):
+        data = json.loads(path.read_text())
+        del data["requested_language"]
+        path.write_text(json.dumps(data))
+
+
+async def test_chunks_cached_before_the_language_setting_are_resent_in_english(ctx, monkeypatch):
+    write_wav(ctx.paths.audio, make_audio(bursts_pattern(20)))
+    use_client(monkeypatch, fake_client())
+    ctx.settings = ctx.settings.model_copy(update={"transcribe_language": None})
+    await transcribe.run(ctx, **SMALL)
+    strip_requested_language(ctx.paths.transcript_chunks_dir)
+
+    # Detected then, detected now: still cached.
+    def no_client(_settings):
+        raise AssertionError("no API call expected: these chunks were detected too")
+
+    monkeypatch.setattr(transcribe, "get_openai", no_client)
+    await transcribe.run(ctx, **SMALL)
+
+    # Under the default ("en") they may hold a misdetected language: every chunk is sent again.
+    client = fake_client()
+    use_client(monkeypatch, client)
+    ctx.settings = ctx.settings.model_copy(update={"transcribe_language": "en"})
+    await transcribe.run(ctx, **SMALL)
+    calls = client.audio.transcriptions.calls
+    n_chunks = len(list(ctx.paths.transcript_chunks_dir.glob("*.json")))
+    assert len(calls) == n_chunks and all(c["language"] == "en" for c in calls)
 
 
 async def test_stage_resends_chunks_whose_boundaries_changed(ctx, monkeypatch):

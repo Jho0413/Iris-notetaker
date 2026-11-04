@@ -8,6 +8,7 @@ transcription client is a fake that records each call.
 import asyncio
 import hashlib
 import io
+import json
 import random
 import wave
 from pathlib import Path
@@ -764,6 +765,25 @@ async def test_every_window_is_sent_the_language_and_a_changed_one_invalidates_t
     await Run(paths, settings(tmp_path, transcribe_language="auto"), again, monkeypatch).stop()
     assert len(again.calls) == len(first.calls)
     assert all(c["language"] is None for c in again.calls)
+
+
+async def test_windows_cached_before_the_language_setting_are_resent_in_english(
+    tmp_path: Path, paths: SessionPaths, webm: bytes, monkeypatch
+):
+    chunks = split(webm, 2000)
+    first = FakeTranscriber()
+    run = Run(paths, settings(tmp_path, transcribe_language="auto"), first, monkeypatch)
+    run.store(chunks, range(len(chunks)))
+    await run.stop()
+    for path in paths.live_transcript_windows_dir.glob("*.json"):  # as written before the field
+        data = json.loads(path.read_text())
+        del data["requested_language"]
+        path.write_text(json.dumps(data))
+
+    again = FakeTranscriber()
+    await Run(paths, settings(tmp_path, transcribe_language="en"), again, monkeypatch).stop()
+    assert len(again.calls) == len(first.calls)
+    assert all(c["language"] == "en" for c in again.calls)
 
 
 async def test_at_stop_a_very_short_tail_joins_the_last_window(

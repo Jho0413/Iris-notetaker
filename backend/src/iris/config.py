@@ -1,12 +1,21 @@
 """Settings, read from environment variables (prefix ``IRIS_``) or ``backend/.env``."""
 
-import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# The two-letter codes Whisper knows (its tokenizer's language list), so a typo such as "jp" for
+# "ja" fails at startup instead of failing every transcription request.
+_WHISPER_CODES = (
+    "af am ar as az ba be bg bn bo br bs ca cs cy da de el en es et eu fa fi fo fr gl gu ha "
+    "he hi hr ht hu hy id is it ja jw ka kk km kn ko la lb ln lo lt lv mg mi mk ml mn mr ms "
+    "mt my ne nl nn no oc pa pl ps pt ro ru sa sd si sk sl sn so sq sr su sv sw ta te tg th "
+    "tk tl tr tt uk ur uz vi yi yo zh"
+)
+TRANSCRIBE_LANGUAGES = frozenset(_WHISPER_CODES.split())
 
 # --- Model prices (cost tracking) --------------------------------------------------------------
 
@@ -162,8 +171,11 @@ class Settings(BaseSettings):
         code = str(value).strip().lower()
         if code in ("", "auto"):
             return None
-        if not re.fullmatch(r"[a-z]{2}", code):
-            raise ValueError('transcribe_language takes an ISO-639-1 code such as "en", or "auto"')
+        if code not in TRANSCRIBE_LANGUAGES:
+            raise ValueError(
+                f'transcribe_language "{code}" is not a language Whisper knows: use an ISO-639-1 '
+                'code such as "en", "fr" or "ja", or "auto"'
+            )
         return code
 
     @field_validator("api_retry_delays_s", mode="after")
