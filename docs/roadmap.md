@@ -29,7 +29,7 @@ fixed release dates; revisit their scope after the MVP is in use.
   $2.50 was spent in one day of development runs before tracking; the figure checks, screen
   reading, notes and SVG calls on `gpt-5.5` are suspected to be the main driver, alongside image
   generation. The first real measurements (below, under "Process sessions while they happen")
-  point the same way: the physics recording with 3 figures cost $0.89, against $0.12 for the
+  point the same way: the physics recording with 3 figures cost $0.89, against $0.11 for the
   algebra one with none. A per-step breakdown on varied sessions is still needed.
 - Long transcripts are processed in sections and joined, then a final synthesis pass consolidates
   them (merges split worked examples, applies later corrections, drops repeats, deduplicates
