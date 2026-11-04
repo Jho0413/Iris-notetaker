@@ -207,7 +207,11 @@ class Renders(BaseModel):
 
 
 class NotesDraft(BaseModel):
-    """Markdown containing ``[visual:<id>]`` markers, before images are resolved."""
+    """The notes as far as they are written, before assembly.
+
+    Stored in notes_draft.json with ``[visual:<id>]`` markers. ``GET /notes/draft`` serves it
+    with the markers resolved to markdown images, as ``GET /notes`` does.
+    """
 
     session_type: SessionType
     title: str

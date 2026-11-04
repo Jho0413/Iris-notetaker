@@ -414,7 +414,10 @@ export interface components {
         };
         /**
          * NotesDraft
-         * @description Markdown containing ``[visual:<id>]`` markers, before images are resolved.
+         * @description The notes as far as they are written, before assembly.
+         *
+         *     Stored in notes_draft.json with ``[visual:<id>]`` markers. ``GET /notes/draft`` serves it
+         *     with the markers resolved to markdown images, as ``GET /notes`` does.
          */
         NotesDraft: {
             session_type: components["schemas"]["SessionType"];
@@ -422,6 +425,8 @@ export interface components {
             title: string;
             /** Markdown */
             markdown: string;
+            /** Parts */
+            parts?: number | null;
         };
         /** Session */
         Session: {
