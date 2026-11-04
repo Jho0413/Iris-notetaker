@@ -295,23 +295,6 @@ def cached_decisions(cache: Path, batch: list[AlignedMoment]) -> Decisions | Non
     return result
 
 
-def cached_prefix(
-    ctx: StageContext, items: list[AlignedMoment], earlier: list[MomentContent]
-) -> int:
-    """The length of the longest prefix of ``items`` that is a cached batch, or 0 (blocking).
-
-    Local work only (no model call). The live select lane batches by timing, so after a restart
-    it uses this to find the batches it already paid for.
-    """
-    cache_dir = ctx.paths.root / "selection_batches"
-    context = summarize(earlier[-EARLIER_MOMENTS:])
-    for n in range(len(items), 0, -1):
-        key = prepare_batch(ctx, items[:n], context).cache_key
-        if cached_decisions(cache_dir / f"{key}.json", items[:n]) is not None:
-            return n
-    return 0
-
-
 @dataclass
 class BatchResult:
     """What reading one batch of moments added to the selection."""

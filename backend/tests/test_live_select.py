@@ -15,7 +15,7 @@ import pytest
 from iris.config import Settings
 from iris.live import LiveProcessor
 from iris.live.screen import ScreenLane
-from iris.live.select import SelectLane
+from iris.live.select import SelectBatches, SelectLane
 from iris.live.timeline import Lane, LiveTimeline
 from iris.models import (
     Alignment,
@@ -394,6 +394,63 @@ async def test_a_fresh_lane_reuses_the_batches_already_paid_for(
     third.start()
     await third.stop()
     assert vision.calls[4:] == [["m005"]]
+
+
+async def test_a_fresh_lane_waits_to_rebuild_a_batch_split_by_the_gate(
+    ctx: StageContext, vision: FakeVision, renderer: FakeRenderer
+):
+    """After a restart the transcript may release a cached batch's moments one at a time."""
+    driver = Driver(ctx).start()
+    vision.release.clear()
+    await driver.close(0)
+    await driver.transcribe(0, to=100)
+    await asyncio.wait_for(vision.started.wait(), 5)
+    await driver.close(1, 2)
+    await driver.transcribe(1, 2, to=100)
+    vision.release.set()
+    before = await driver.stop()
+    assert vision.calls == [["m001"], ["m002", "m003"]]
+
+    fresh = Driver(ctx)
+    await fresh.close(0, 1, 2)
+    await fresh.transcribe(0, 1, to=25)  # past m002's gate (20 + 5), not m003's (35)
+    fresh.start()
+    await fresh.selected(10)
+    await settle()
+    assert fresh.timeline.selected_to == 10  # m002 waits for m003, its batch-mate
+    await fresh.transcribe(2, to=100)
+    after = await fresh.stop()
+    assert len(vision.calls) == 2
+    assert after.selection() == before.selection()
+
+
+async def test_a_replay_that_no_longer_matches_is_dropped(
+    ctx: StageContext, vision: FakeVision, renderer: FakeRenderer
+):
+    ctx.paths.live_dir.mkdir(parents=True, exist_ok=True)
+    write_model(
+        ctx.paths.live_select_batches,
+        SelectBatches(batches=[["m001", "m002"], ["m003"]]),
+    )
+    driver = Driver(ctx).start()
+    await driver.close(0)  # the screen lane stops after one moment: the batch can't form
+    await driver.transcribe(0, to=100)
+    timeline = await driver.stop()
+    assert vision.calls == [["m001"]]
+    assert [c.moment_id for c in timeline.contents] == ["m001"]
+
+
+async def test_an_unreadable_batch_record_is_ignored(
+    ctx: StageContext, vision: FakeVision, renderer: FakeRenderer
+):
+    ctx.paths.live_dir.mkdir(parents=True, exist_ok=True)
+    ctx.paths.live_select_batches.write_text("{not json")
+    driver = Driver(ctx).start()
+    await driver.close(0)
+    await driver.transcribe(0, to=100)
+    await driver.selected(10)
+    await driver.stop()
+    assert read_model(ctx.paths.live_select_batches, SelectBatches).batches == [["m001"]]
 
 
 async def test_stop_reads_the_rest_once_the_transcript_is_done_and_waits_for_renders(
