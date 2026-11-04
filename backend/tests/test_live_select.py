@@ -348,8 +348,8 @@ async def test_upstream_failure_stops_model_calls(
     assert timeline.contents == [] and timeline.selected_to == 0
 
 
-async def test_upstream_failure_mid_recording_skips_queued_renders(
-    ctx: StageContext, vision: FakeVision, renderer: FakeRenderer
+async def test_upstream_failure_mid_recording_cancels_renders(
+    ctx: StageContext, vision: FakeVision, renderer: FakeRenderer, events: list
 ):
     ctx.settings.live_render_concurrency = 1
     driver = Driver(ctx).start()
@@ -359,11 +359,41 @@ async def test_upstream_failure_mid_recording_skips_queued_renders(
     await until(lambda: renderer.started == ["v000001"])
     await driver.timeline.fail_lane(Lane.SCREEN, "boom")
     await driver.close(2)
-    renderer.hold["v000001"].set()  # the running render completes; the queued one is dropped
+    await until(lambda: renderer.running == 0)  # the running render is cancelled
     await driver.timeline.request_end()
     await asyncio.wait_for(driver.task, 5)
     assert vision.calls == [["m001", "m002"]]
-    assert renderer.started == ["v000001"]
+    assert renderer.started == ["v000001"]  # the queued one never started
+    assert not [kind for kind, _ in events if kind == EventType.VISUAL_RENDERED]
+
+
+async def test_a_fresh_lane_reuses_the_batches_already_paid_for(
+    ctx: StageContext, vision: FakeVision, renderer: FakeRenderer
+):
+    """After a backend restart the backlog is read in the batches cached before it."""
+    driver = Driver(ctx).start()
+    for i in range(4):  # moments pass the gate one at a time: batches of one
+        await driver.close(i)
+        await driver.transcribe(i, to=10.0 * i + 15)
+        await driver.selected(10.0 * i + 10)
+    before = await driver.stop()
+    assert vision.calls == [["m001"], ["m002"], ["m003"], ["m004"]]
+
+    fresh = Driver(ctx)  # a new timeline: the other lanes replay to the same results
+    await fresh.close(0, 1, 2, 3)
+    await fresh.transcribe(0, 1, 2, 3, to=100)
+    fresh.start()
+    after = await fresh.stop()
+    assert len(vision.calls) == 4
+    assert after.selection() == before.selection()
+
+    # A new moment after the restart is batched with nothing cached: one call for both.
+    third = Driver(ctx)
+    await third.close(0, 1, 2, 3, 4)
+    await third.transcribe(0, 1, 2, 3, 4, to=100)
+    third.start()
+    await third.stop()
+    assert vision.calls[4:] == [["m005"]]
 
 
 async def test_stop_reads_the_rest_once_the_transcript_is_done_and_waits_for_renders(

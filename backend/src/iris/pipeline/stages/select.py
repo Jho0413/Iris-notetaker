@@ -285,6 +285,33 @@ def render(source: Path, target: Path, crop: Box | None) -> None:
         tmp.unlink(missing_ok=True)
 
 
+def cached_decisions(cache: Path, batch: list[AlignedMoment]) -> Decisions | None:
+    """The cached decisions for a batch, or None if missing or invalid (never trusted)."""
+    try:
+        result = read_model(cache, Decisions)
+        validate_decisions(result, batch)
+    except (FileNotFoundError, ValueError):
+        return None
+    return result
+
+
+def cached_prefix(
+    ctx: StageContext, items: list[AlignedMoment], earlier: list[MomentContent]
+) -> int:
+    """The length of the longest prefix of ``items`` that is a cached batch, or 0 (blocking).
+
+    Local work only (no model call). The live select lane batches by timing, so after a restart
+    it uses this to find the batches it already paid for.
+    """
+    cache_dir = ctx.paths.root / "selection_batches"
+    context = summarize(earlier[-EARLIER_MOMENTS:])
+    for n in range(len(items), 0, -1):
+        key = prepare_batch(ctx, items[:n], context).cache_key
+        if cached_decisions(cache_dir / f"{key}.json", items[:n]) is not None:
+            return n
+    return 0
+
+
 @dataclass
 class BatchResult:
     """What reading one batch of moments added to the selection."""
@@ -314,10 +341,8 @@ async def read_batch(
         prepare_batch, ctx, batch, summarize(earlier[-EARLIER_MOMENTS:])
     )
     cache = cache_dir / f"{prepared.cache_key}.json"
-    try:
-        result = read_model(cache, Decisions)
-        validate_decisions(result, batch)
-    except (FileNotFoundError, ValueError):
+    result = cached_decisions(cache, batch)
+    if result is None:
         # Invalid JSON, schema, encoding or decisions are a cache miss. Replace the
         # entry only after a fresh response passes the same validation.
         result = await choose(ctx, prepared.content)

@@ -20,8 +20,12 @@ How it works (architecture section 1, "Life of a session: live"):
      ``live_render_concurrency`` at once. A failed render is logged and leaves no cache entry, so
      the render stage retries it at stop.
   4. ``selected_to`` advances to the end of the last moment read, never past ``closed_to``.
-  5. When ``timeline.upstream_failed``: no more model calls (select or render); wait for stop.
-  6. On ``timeline.ending``: wait for the screen lane to finish and the gate to pass (a finished
+  5. When ``timeline.upstream_failed``: no more model calls; renders still running are
+     cancelled (they leave no cache entry). Wait for stop.
+  6. Batches depend on timing, so a fresh lane (after a backend restart) replaying a backlog
+     first looks for the longest run of gated moments that is already a cached batch
+     (``select.cached_prefix``, local work) and reads that, so nothing is paid for twice.
+  7. On ``timeline.ending``: wait for the screen lane to finish and the gate to pass (a finished
      audio lane passes it), read the remaining moments, wait for the renders already running,
      and return. Renders not started by then are left to the render stage, which renders every
      figure at stop anyway (hitting the cache for those done live), with more concurrency.
@@ -86,8 +90,14 @@ class SelectLane(LiveLane):
                 if not batch:
                     break  # drained
                 await self._read(batch)
+            if self._halted():
+                # Nothing made from here on can be promoted: stop paying for renders too. A
+                # render writes its cache entry without awaiting, so cancelling leaves none half
+                # written.
+                for task in self._renders:
+                    task.cancel()
             if self._renders:
-                await asyncio.gather(*self._renders)
+                await asyncio.gather(*self._renders, return_exceptions=True)
             await tl.wait_until(lambda: tl.ending)
         finally:
             pending = [task for task in self._renders if not task.done()]
@@ -99,6 +109,11 @@ class SelectLane(LiveLane):
     async def _read(self, moments: list[Moment]) -> None:
         tl = self.timeline
         items = align.align(moments, tl.segments)
+        if len(items) > 1:
+            # After a restart, read the backlog in the batches already paid for.
+            cached = await asyncio.to_thread(select.cached_prefix, self.ctx, items, tl.contents)
+            if cached:
+                moments, items = moments[:cached], items[:cached]
         with usage.recording(self.ctx, Stage.SELECT):
             result = await select.read_batch(self.ctx, items, tl.contents, len(tl.visuals) + 1)
         self.read += len(moments)
