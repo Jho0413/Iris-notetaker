@@ -288,7 +288,7 @@ tested function (`src/session/state.ts`).
 |---|---|---|
 | `status` | `status` | Updates the chip and actions; `processing` starts a new run (clears run state, starts the run timer, hides any notes shown); `done` fetches the notes and transcript and shows them; `failed` fetches the session for its error |
 | `stage_started` | `stage`, `promoted`, `at` | Step becomes running; records its start time for Details; the header names it |
-| `stage_finished` | `stage`, `promoted`, `at` | Step becomes done; duration shown in Details. `promoted: true` (a live session's stage done while recording and kept at stop): the step's detail says "live" ("2 moments · live") and Details shows "while recording" instead of a duration |
+| `stage_finished` | `stage`, `promoted`, `segments`, `at` | Step becomes done; duration shown in Details. `promoted: true` (a live session's stage done while recording and kept at stop): the step's detail says "live" ("2 moments · live") and Details shows "while recording" instead of a duration. A promoted transcribe step carries `segments`, the transcript's size ("412 segments · live"): its parts were transcribed before this run's counts were reset, so they can't be counted from `transcript_chunk` |
 | `transcript_chunk` | `chunk`, `segments` | Segments stored by chunk index: the Transcribing step's count; while recording, "Transcribed to m:ss" on the Live page (the latest segment end) |
 | `moment_found` | `id`, `start`, `end` | Count shown in the Finding-what-was-shown step; while recording, "3 screens" |
 | `visual_selected` | `id`, `caption`, `frame.t`, `render_as` | Render total updated; while recording, "2 figures read" |
@@ -299,8 +299,9 @@ tested function (`src/session/state.ts`).
 
 A live session's run at stop reports the stages whose work was kept from recording (transcribe,
 detect, align, select, or only transcribe) as started and finished with `promoted: true`, with the
-`moment_found` and `visual_selected` events those stages would emit replayed between them, so the
-progress list and counts look as for any run (architecture section 1, "Life of a session: live").
+`moment_found` and `visual_selected` events those stages would emit replayed between them, and the
+transcript's size on transcribe's `stage_finished` (`segments`), so the progress list and counts
+look as for any run (architecture section 1, "Life of a session: live").
 
 **When there are no events.** Event history lives in backend memory and is lost on restart. A
 finished session opened later gets everything over REST instead: `GET /notes`, `GET /transcript`,

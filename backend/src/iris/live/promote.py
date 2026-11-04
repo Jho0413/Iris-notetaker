@@ -28,7 +28,9 @@ source crop ingest didn't leave in place), since the stages it skips would have 
 Promoted stages make no model calls. The runner reports each as a stage that started and finished
 with ``promoted: true``; ``promote`` replays the events the stage itself would emit for the UI's
 counts (``moment_found`` per moment, ``visual_selected`` per figure). The transcript is fetched
-whole once transcribe finishes, so no ``transcript_chunk`` is replayed.
+whole once transcribe finishes, so no ``transcript_chunk`` is replayed; instead the transcribe
+step's ``stage_finished`` carries its ``segments`` count (``promote``'s return value), since the UI
+reset its per-run counts when processing started and the live windows' events came before that.
 """
 
 import asyncio
@@ -110,12 +112,17 @@ def remaining_plan(promoted: tuple[Stage, ...]) -> list[list[Stage]]:
     return [group for group in groups if group]
 
 
-async def promote(ctx: StageContext, tl: LiveTimeline, stage: Stage) -> None:
-    """Write ``stage``'s output from the timeline (atomically) and emit the events it would."""
+async def promote(ctx: StageContext, tl: LiveTimeline, stage: Stage) -> dict:
+    """Write ``stage``'s output from the timeline (atomically) and emit the events it would.
+
+    Returns extra data for the stage's ``stage_finished`` event (empty for most stages).
+    """
     paths = ctx.paths
     if stage == Stage.TRANSCRIBE:
-        await asyncio.to_thread(write_model, paths.transcript, tl.transcript())
-    elif stage == Stage.DETECT:
+        transcript = tl.transcript()
+        await asyncio.to_thread(write_model, paths.transcript, transcript)
+        return {"segments": len(transcript.segments)}
+    if stage == Stage.DETECT:
         moments = Moments(moments=list(tl.moments))
         await asyncio.to_thread(write_model, paths.moments, moments)
         for m in moments.moments:
@@ -131,3 +138,4 @@ async def promote(ctx: StageContext, tl: LiveTimeline, stage: Stage) -> None:
             ctx.emit(EventType.VISUAL_SELECTED, visual.model_dump(mode="json"))
     else:
         raise ValueError(f"{stage} has no live output to promote")
+    return {}

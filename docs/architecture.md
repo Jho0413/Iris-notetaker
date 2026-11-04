@@ -218,7 +218,9 @@ Late data is never lost: everything captured stays on disk and the final run use
    Promoted stages make no model calls. Each is reported as `stage_started`/`stage_finished` with
    `promoted: true`, and the events the stage itself would emit are replayed (`moment_found` per
    moment, `visual_selected` per figure), so the UI's progress and counts look as for a run; the
-   transcript is fetched whole once transcribe finishes. A re-run (`POST /sessions/{id}/run`) has
+   transcript is fetched whole once transcribe finishes, and transcribe's `stage_finished` carries
+   its size (`segments`) because the live windows' `transcript_chunk` events came before the run
+   started. A re-run (`POST /sessions/{id}/run`) has
    no processor and runs its plan as before.
 4. **Synthesis**, as for uploads: see "Final synthesis" below.
 

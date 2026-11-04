@@ -36,6 +36,12 @@ export interface StageRun {
   finishedAt?: string
   /** Reported as promoted: its live work is being kept at stop instead of running the stage. */
   promoted?: boolean
+  /**
+   * Transcript segments, from a promoted transcribe step's `stage_finished`. Its parts were
+   * transcribed while recording, before this run's counts were reset, so they can't be counted
+   * from `transcript_chunk` events.
+   */
+  segments?: number
 }
 
 /** Done while recording: promoted at stop, and the promotion finished. */
@@ -153,10 +159,17 @@ export function applyEvent(state: RunState, event: IrisEvent): RunState {
       if (!isStage(data.stage)) return state
       const prev = state.stages[data.stage]
       const promoted = data.promoted === true ? { promoted: true } : {}
+      const count = num(data.segments)
       const next: StageRun =
         event.type === 'stage_started'
           ? { ...prev, ...promoted, status: prev.status === 'done' ? 'done' : 'running', startedAt: event.at }
-          : { ...prev, ...promoted, status: 'done', finishedAt: event.at }
+          : {
+              ...prev,
+              ...promoted,
+              ...(count !== undefined && count >= 0 ? { segments: Math.floor(count) } : {}),
+              status: 'done',
+              finishedAt: event.at,
+            }
       return { ...state, stages: { ...state.stages, [data.stage]: next } }
     }
     case 'transcript_chunk': {
@@ -477,6 +490,11 @@ export function stageDetail(stage: Stage, run: RunState): string | undefined {
 function stageCount(stage: Stage, run: RunState): string | undefined {
   switch (stage) {
     case 'transcribe': {
+      // Promoted at stop: the backend reports the transcript's size (see `StageRun.segments`).
+      const segments = run.stages.transcribe.segments
+      if (segments !== undefined) {
+        return segments ? `${segments} ${segments === 1 ? 'segment' : 'segments'}` : undefined
+      }
       const n = Object.keys(run.chunks).length
       return n ? `${n} ${n === 1 ? 'part' : 'parts'}` : undefined
     }

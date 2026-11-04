@@ -107,10 +107,10 @@ class JobRunner:
         data = {"stage": stage, "promoted": True}
         self.bus.publish(ctx.session_id, EventType.STAGE_STARTED, data)
         try:
-            await promote.promote(ctx, timeline, stage)
+            extra = await promote.promote(ctx, timeline, stage)
         except Exception as exc:
             raise StageError(stage, exc) from exc
-        self.bus.publish(ctx.session_id, EventType.STAGE_FINISHED, data)
+        self.bus.publish(ctx.session_id, EventType.STAGE_FINISHED, {**extra, **data})
 
     async def run_stage(self, ctx: StageContext, stage: Stage) -> None:
         self.store.update(ctx.session_id, current_stage=stage)
