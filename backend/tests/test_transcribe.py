@@ -240,6 +240,33 @@ async def test_transcribe_chunk_diarized_keeps_speakers():
     assert result.segments[0].speaker == "A"
 
 
+async def test_transcribe_chunk_sends_the_language_only_when_given():
+    client = Recorder({"text": "hi"})
+    await transcribe_chunk(client, "whisper-1", b"wav", 1.0, language="en")
+    assert client.kwargs["language"] == "en"
+    await transcribe_chunk(client, "whisper-1", b"wav", 1.0)
+    assert "language" not in client.kwargs  # the model detects it
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"), [("en", "en"), (" FR ", "fr"), ("auto", None), ("", None), (None, None)]
+)
+def test_transcribe_language_setting(tmp_path: Path, value, expected):
+    s = Settings(data_dir=tmp_path, transcribe_language=value)
+    assert s.transcribe_language == expected
+
+
+@pytest.mark.parametrize("value", ["english", "e", "en-GB"])
+def test_transcribe_language_setting_rejects_non_codes(tmp_path: Path, value):
+    with pytest.raises(ValueError, match="ISO-639-1"):
+        Settings(data_dir=tmp_path, transcribe_language=value)
+
+
+def test_transcribe_language_defaults_to_english(tmp_path: Path, monkeypatch):
+    monkeypatch.delenv("IRIS_TRANSCRIBE_LANGUAGE", raising=False)
+    assert Settings(data_dir=tmp_path, _env_file=None).transcribe_language == "en"
+
+
 async def test_transcribe_chunk_plain_string_response():
     result = await transcribe_chunk(Recorder("hello"), "some-model", b"wav", 3.0)
     assert result.segments[0].text == "hello"
@@ -307,6 +334,27 @@ async def test_stage_reuses_cached_chunks(ctx, monkeypatch):
     ctx.paths.transcript.unlink()
     await transcribe.run(ctx, **SMALL)
     assert ctx.paths.transcript.read_text() == first
+
+
+async def test_stage_sends_the_language_and_a_changed_language_resends_every_chunk(
+    ctx, monkeypatch
+):
+    write_wav(ctx.paths.audio, make_audio(bursts_pattern(20)))
+    client = fake_client()
+    use_client(monkeypatch, client)
+    ctx.settings = ctx.settings.model_copy(update={"transcribe_language": "en"})
+    await transcribe.run(ctx, **SMALL)
+    first = client.audio.transcriptions.calls
+    assert first and all(c["language"] == "en" for c in first)
+
+    # Chunks cached before the setting existed (or with another language) are paid for again.
+    client = fake_client()
+    use_client(monkeypatch, client)
+    ctx.settings = ctx.settings.model_copy(update={"transcribe_language": None})
+    await transcribe.run(ctx, **SMALL)
+    again = client.audio.transcriptions.calls
+    assert len(again) == len(first)
+    assert all("language" not in c for c in again)
 
 
 async def test_stage_resends_chunks_whose_boundaries_changed(ctx, monkeypatch):

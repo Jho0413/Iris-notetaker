@@ -33,7 +33,9 @@ prompted with the tail of the text *committed when it is sent*: normally that is
 window (windows end ~10 s apart and take a few seconds to transcribe), while a backlog (a slow API,
 or stop) is worked through concurrently with slightly older context. The cache entry records the
 prompt and which window it was taken from, and is reused only if its audio, model and prompt
-match the text now committed there; a damaged entry is regenerated. Windows commit strictly in
+match the text now committed there; a damaged entry is regenerated. Every window is sent the
+configured ``transcribe_language`` (the cache records it too), so a misdetected first window
+can't carry the wrong language into the rest through the prompt. Windows commit strictly in
 order. The transcript's language is that of the first window with speech (the timeline keeps the
 first language published, and silent windows are often misdetected), in the timeline and
 ``live/transcript.json`` alike. Memory stays bounded: window samples are read back from
@@ -323,6 +325,7 @@ class CachedWindow(BaseModel):
     end: float
     audio_sha1: str
     model: str
+    requested_language: str | None = None  # ``transcribe_language`` when sent (None: detected)
     prompt: str  # as sent ("" for none)
     prompt_through: int  # the last window whose text the prompt was taken from (-1: none)
     language: str | None = None
@@ -364,6 +367,7 @@ class AudioLane(LiveLane):
         s = ctx.settings
         self.rate = s.audio_sample_rate
         self.model = s.transcribe_model
+        self.language = s.transcribe_language
         self.min_len = max(1, int(s.live_window_min_s * self.rate))
         self.max_len = int(s.live_window_max_s * self.rate)
         self.confirm = int(CONFIRM_S * self.rate)
@@ -487,6 +491,7 @@ class AudioLane(LiveLane):
             cached.index == i
             and cached.audio_sha1 == digest
             and cached.model == self.model
+            and cached.requested_language == self.language
             and abs(cached.start - t0) < 1e-6
             and abs(cached.end - t1) < 1e-6
             and -1 <= cached.prompt_through < i
@@ -525,6 +530,7 @@ class AudioLane(LiveLane):
             end=end / self.rate,
             audio_sha1=digest,
             model=self.model,
+            requested_language=self.language,
             prompt=prompt,
             prompt_through=through,
             language=language,
@@ -545,7 +551,7 @@ class AudioLane(LiveLane):
         async def call() -> transcribe.ChunkTranscript:
             with usage.recording(self.ctx, Stage.TRANSCRIBE):
                 return await transcribe.transcribe_chunk(
-                    client, self.model, wav, duration, prompt or None
+                    client, self.model, wav, duration, prompt or None, language=self.language
                 )
 
         try:

@@ -217,7 +217,12 @@ def supports_prompt(model: str) -> bool:
 
 
 async def transcribe_chunk(
-    client: Any, model: str, wav_bytes: bytes, duration_s: float, prompt: str | None = None
+    client: Any,
+    model: str,
+    wav_bytes: bytes,
+    duration_s: float,
+    prompt: str | None = None,
+    language: str | None = None,
 ) -> ChunkTranscript:
     """Transcribe one chunk. Timestamps in the result are relative to the chunk start.
 
@@ -231,7 +236,8 @@ async def transcribe_chunk(
     (verbose_json) or the first of ``languages`` (gpt-transcribe).
 
     ``prompt`` (the transcript just before this audio, for continuity across live windows) is
-    sent only where ``supports_prompt``; uploads send none.
+    sent only where ``supports_prompt``; uploads send none. ``language`` (ISO-639-1) is sent if
+    given (``Settings.transcribe_language``); otherwise the model detects it.
     """
     if "diarize" in model:
         params: dict[str, Any] = {"response_format": "diarized_json", "chunking_strategy": "auto"}
@@ -241,6 +247,8 @@ async def transcribe_chunk(
         params = {"response_format": "json"}
     if prompt and supports_prompt(model):
         params["prompt"] = prompt
+    if language:
+        params["language"] = language
 
     resp = await client.audio.transcriptions.create(
         model=model, file=("chunk.wav", wav_bytes, "audio/wav"), **params
@@ -279,6 +287,7 @@ class CachedChunk(BaseModel):
     end: float
     audio_sha1: str
     model: str
+    requested_language: str | None = None  # ``transcribe_language`` when sent (None: detected)
     language: str | None = None
     segments: list[TranscriptSegment]
 
@@ -304,6 +313,7 @@ async def run(
     """Chunk lengths come from the arguments, else settings (``transcribe_target_chunk_s`` /
     ``transcribe_max_chunk_s``, if defined), else ``chunk_lengths_for(model)``."""
     model = ctx.settings.transcribe_model
+    requested = ctx.settings.transcribe_language
     default_target, default_max = chunk_lengths_for(model)
     if target_s is None:
         target_s = getattr(ctx.settings, "transcribe_target_chunk_s", None) or default_target
@@ -341,7 +351,11 @@ async def run(
             except ValueError:
                 log.warning("ignoring unreadable chunk cache %s", path)
             else:
-                if cached.audio_sha1 == digest and cached.model == model:
+                if (
+                    cached.audio_sha1 == digest
+                    and cached.model == model
+                    and cached.requested_language == requested
+                ):
                     finish(cached)
                     continue
         todo.append((i, s, e, digest))
@@ -357,7 +371,9 @@ async def run(
                 offset = s / rate
                 wav = encode_wav(samples[s:e], rate)
                 result = await retry_temporary(
-                    lambda: transcribe_chunk(client, model, wav, (e - s) / rate),
+                    lambda: transcribe_chunk(
+                        client, model, wav, (e - s) / rate, language=requested
+                    ),
                     ctx.settings.api_retry_delays_s,
                     what=f"session {ctx.session_id}: transcription chunk {i}",
                 )
@@ -367,6 +383,7 @@ async def run(
                 end=e / rate,
                 audio_sha1=digest,
                 model=model,
+                requested_language=requested,
                 language=result.language,
                 segments=[
                     seg.model_copy(update={"start": seg.start + offset, "end": seg.end + offset})

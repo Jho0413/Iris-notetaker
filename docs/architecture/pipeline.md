@@ -12,7 +12,9 @@ stages while recording ([`live.md`](live.md)); failures follow [`errors.md`](err
    low fixed rate (`IRIS_FRAME_FPS`, default 1 fps), downscaled, each tagged with its timestamp.
 3. **Transcribe and detect, in parallel.**
    - *Transcribe:* audio is split at silences into chunks, transcribed concurrently, and merged into
-     one timestamped transcript.
+     one timestamped transcript. Every chunk is sent the spoken language, `IRIS_TRANSCRIBE_LANGUAGE`
+     (default `en`; `auto` lets the model detect it, which can misread accents, e.g. British
+     English as Welsh). The notes are written in the transcript's language.
    - *Detect moments:* frames are diffed locally to find where the screen changed and where it
      settled. Each moment is a stretch of time with one representative "settled" frame, plus its
      *builds* (content added over time, such as lines of working), following canvas scrolling.

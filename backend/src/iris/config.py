@@ -1,5 +1,6 @@
 """Settings, read from environment variables (prefix ``IRIS_``) or ``backend/.env``."""
 
+import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
@@ -85,6 +86,10 @@ class Settings(BaseSettings):
     # OpenAI. Reads OPENAI_API_KEY as well as IRIS_OPENAI_API_KEY.
     openai_api_key: str | None = Field(default=None, validation_alias="OPENAI_API_KEY")
     transcribe_model: str = "whisper-1"  # the only OpenAI transcription model with timestamps
+    # Spoken language (ISO-639-1, e.g. "en"), sent with every transcription request. Detection
+    # is unreliable (whisper-1 hears some British English as Welsh, and a live session's first
+    # window carries its guess into the rest through the prompt). "auto" lets the model detect it.
+    transcribe_language: str | None = "en"
     vision_model: str = "gpt-5.5"  # reads the screen; checks rendered visuals
     notes_model: str = "gpt-5.5"
     diagram_model: str = "gpt-5.5"  # writes SVG for exact diagrams, charts and graphs
@@ -148,6 +153,18 @@ class Settings(BaseSettings):
 
     # Server
     cors_origins: list[str] = ["http://localhost:5173"]
+
+    @field_validator("transcribe_language", mode="before")
+    @classmethod
+    def _check_language(cls, value: object) -> str | None:
+        if value is None:
+            return None
+        code = str(value).strip().lower()
+        if code in ("", "auto"):
+            return None
+        if not re.fullmatch(r"[a-z]{2}", code):
+            raise ValueError('transcribe_language takes an ISO-639-1 code such as "en", or "auto"')
+        return code
 
     @field_validator("api_retry_delays_s", mode="after")
     @classmethod
