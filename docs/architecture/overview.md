@@ -17,8 +17,9 @@ it.
 ## Goals
 
 - **Users:** one person, running locally on a laptop. No accounts or hosting.
-- **Input:** an uploaded recording, or live capture in the browser (mic plus screen share). Next, a
-  desktop app that records any screen or window; later, integrations such as meeting platforms.
+- **Input:** an uploaded recording, or live capture (mic plus screen share) in the browser or in
+  the macOS desktop app, which records any screen or window with system audio. Later, integrations
+  such as meeting platforms.
 - **Visuals:** anything shown on screen (handwriting, sketches, diagrams, slides) is rebuilt as a
   clean visual: typeset maths, plotted graphs, rendered diagrams, tables, illustrations, or a
   cleaned-up screenshot where the screen is already clean. No restriction on visual type.
@@ -34,9 +35,9 @@ it.
    visual, with no restriction on visual type. Redraws must match what was shown and said: each is
    verified against the source frames and transcript, and source frames stay on disk so any visual
    can be regenerated. If no redraw passes, the source crop is shown instead.
-2. **One pipeline, many sources.** An uploaded file, live browser capture, and later a desktop app or
-   a meeting bot all produce the same thing: timestamped audio and frames. Everything downstream is
-   unaware of where they came from.
+2. **One pipeline, many sources.** An uploaded file, live capture in the browser or the desktop
+   app, and later a meeting bot all produce the same thing: timestamped audio and frames.
+   Everything downstream is unaware of where they came from.
 3. **Local work first, model calls last.** Finding what changed on screen is free OpenCV work on the
    machine. Models only see the few moments that survive it.
 4. **Never lose a session.** Every stage writes its output to disk as it goes. A crash, a closed tab or
@@ -57,14 +58,41 @@ it.
 ```
 
 Everything runs on your laptop. The UI and the backend are two local processes. The backend is the
-engine: any client can feed it a recording and read back the notes as Markdown. Next, a desktop app
-(Electron) wraps both, with the backend running as a bundled sidecar.
+engine: any client can feed it a recording and read back the notes as Markdown.
+
+### The desktop app
+
+`Iris.app` (macOS, `desktop/`) is the same UI and backend with no terminal: Electron shows the UI
+and starts a bundled backend (a standalone Python with Iris installed) as its child process.
+
+```
+Iris.app
+├── Electron main process
+│     • app://iris/api/*  → http://127.0.0.1:<port>/api/* with X-Iris-Token, streamed both ways
+│     • app://iris/<file> → the built UI; any other path → index.html (client-side routes)
+│     • starts the backend: python3 -I -m iris serve --port <free port>
+│         env: OPENAI_API_KEY (from the Keychain-encrypted store), IRIS_DATA_DIR, IRIS_API_TOKEN,
+│              IRIS_PARENT_PID; data and logs in ~/Library/Application Support/Iris
+├── Window: app://iris/, the web UI unchanged
+└── Resources/backend/python, Resources/frontend
+```
+
+- **The backend never serves the UI.** Electron serves it from the `app://` scheme and forwards
+  `/api` to the backend, so the UI still loads (and says the engine isn't running) if the backend
+  stops.
+- **A per-launch token** (`IRIS_API_TOKEN`) guards the API: the backend refuses (401) any request
+  without it, so other local processes and web pages can't use it. The app adds it to every
+  forwarded request; the page never sees it, or the port.
+- **The backend can't outlive the app.** It stops on quit and, if the app crashes or is
+  force-quit, exits on its own once the app's process is gone (`IRIS_PARENT_PID`).
+- **Capture** goes through the UI's own `getDisplayMedia` call, answered by the macOS system picker
+  (any screen or window) with system audio.
 
 ## Components
 
 | Component | Job | Notes |
 |---|---|---|
-| **Sources** | Turn an input into timestamped audio and frames on disk | File upload, browser live capture. Next: desktop capture |
+| **Sources** | Turn an input into timestamped audio and frames on disk | File upload, live capture (browser or desktop app) |
 | **Pipeline** | Transcribe, find visual moments, read screens, rebuild figures, write notes | [`pipeline.md`](pipeline.md) |
 | **Job runner** | Runs a session's stages, in parallel where possible | In-process `asyncio`; single user, so no queue server |
 | **Store** | Session files plus an index of sessions | Files under `sessions/<id>/` (`store/layout.py` lists every file), metadata in SQLite |
@@ -80,7 +108,7 @@ is in the session, so adding a source never touches the pipeline.
 |---|---|---|
 | File upload | Built | PyAV over the file |
 | Browser live | Built | `getUserMedia` / `getDisplayMedia`, chunks posted to the backend ([`live.md`](live.md)) |
-| Desktop capture | Next | Native screen and system-audio capture in the desktop app |
+| Desktop capture | Built (macOS) | The desktop app: the browser live source, with any screen or window and system audio from the macOS picker |
 | Meeting platforms | Later | Zoom, Meet or Teams integrations that stream the call |
 
 ## Key libraries
@@ -103,7 +131,7 @@ is in the session, so adding a source never touches the pipeline.
 ## Not built yet
 
 - Accounts, hosting, sharing links
-- The desktop app and meeting integrations
+- Meeting integrations; the desktop app on Windows, and signed for distribution
 - Editing notes inside Iris
 
 ## Open questions
