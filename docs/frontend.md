@@ -37,7 +37,7 @@ step that failed and reuses the work already done (and paid for)
 ([architecture principle 4](architecture.md#principles)).
 
 The pipeline's internal stage names (ingest, transcribe, detect, align, select, write, render,
-assemble) appear only in the **Details** panel. Everywhere else the UI uses these labels:
+assemble, synthesize) appear only in the **Details** panel. Everywhere else the UI uses these labels:
 
 | Stage | Plain label |
 |---|---|
@@ -49,6 +49,12 @@ assemble) appear only in the **Details** panel. Everywhere else the UI uses thes
 | write | Writing notes |
 | render | Redrawing figures |
 | assemble | Putting the notes together |
+| synthesize | Polishing notes |
+
+**Polishing notes** is the last step. The notes are already assembled and readable when it starts
+(the chip says *Polishing notes* and a note above them says a final pass is tidying them); when it
+finishes the polished notes replace them. If polishing fails, the session still finishes with the
+assembled notes ([architecture, Synthesize](architecture.md#synthesize)).
 
 ## 2. Screens and flows
 
@@ -116,8 +122,15 @@ later, so this screen is built around *is it still recording?* and *how do I sto
 - **Recording:** a recording bar pinned across the top of the window. It shows a red dot, the label
   **Recording**, the elapsed time in tabular numerals, capture status in words (Screen shared ·
   Microphone on) and **Stop and make notes**. Below it, centred and calm: a large timer, a small
-  screen preview, and one line on what happens when you stop. A **Show live transcript** disclosure
-  (closed by default) reveals the transcript as it arrives, once live processing emits events (§4).
+  screen preview, and one line on what happens when you stop. Two disclosures, closed by default,
+  show what live processing has made so far (§4). Each has a fixed height whatever it holds, so
+  nothing arriving moves the page, and mounts its contents only while open:
+  - **Show live transcript:** lines from `transcript_chunk` events, in time order. Opening it
+    starts at the latest line; it follows new lines only while the reader is at the bottom (within
+    24px), otherwise **Jump to latest** appears (`src/session/follow.ts`).
+  - **Show notes so far:** the live draft (`GET /notes/draft`), rendered like the final notes, with
+    figures as the original crop until they're redrawn. Refetched on every `notes_updated`; until
+    the first one it says a draft appears once enough has been said and shown.
 - **Screen sharing ended** (the user stopped sharing from the browser bar), the microphone
   disconnected or the browser's recorder failed: Iris stops and makes notes, the same as **Stop and
   make notes**. The capture module reports these through its `onEnded` callback.
@@ -160,6 +173,7 @@ from the first event to the finished notes, so nothing jumps when the notes land
 │   reading column (max 68ch)                       │   ● Writing notes · 2 of 4        │
 │                                                   │   ● Redrawing figures · 3 of 5   │
 │                                                   │   ○ Putting the notes together   │
+│                                                   │   ○ Polishing notes              │
 │                                                   │  On this page (finished)         │
 │                                                   │  Cost (slot, §7)                 │
 │                                                   │  Details ▸ stages, times, errors │
@@ -180,8 +194,10 @@ from the first event to the finished notes, so nothing jumps when the notes land
 - **Below 1120px** the rail moves above the tabs as a one-line summary ("Writing notes 2/4 ·
   Redrawing figures 3/5"), with **Details** expanding it.
 
-**Notes tab.** While processing, this shows the notes as far as they've got (§4). Once finished,
-it is the reading view: session type, title, then the notes at a 68-character measure.
+**Notes tab.** While recording or processing, this shows the draft: the notes as far as they've
+got (§4), under a note that it fills in as Iris works and that figures show the original crop until
+they're redrawn. Once finished, it is the reading view: session type, title, then the notes at a
+68-character measure.
 
 **Transcript tab.** Segments with start times (`12:04`), in time order. During processing, chunks
 arrive out of order (they're transcribed concurrently) and are inserted in place without moving the
@@ -215,6 +231,7 @@ states below. Each has a text label as well as a colour (§6).
 | **Starting** | `created` | Starting… (neutral) | none |
 | **Processing** | `processing`, no notes yet | Processing · current step (accent) | none |
 | **Draft** | `processing`, and at least one notes section is written | Draft · 2 of 4 sections (amber) | none |
+| **Polishing** | `processing`, and this run's notes are assembled (`notes_updated` with `final: true`) or the synthesize step is running | Polishing notes (accent) | Export (the assembled notes) |
 | **Stalled** | `processing`, but a connection attempt to the event stream delivers no event within 5 s, so the run isn't active (the backend restarted) | Stopped unexpectedly (neutral) | Resume (`POST /run?from_stage=<current_stage>`) |
 | **Finished** | `done` | Finished (green) | Export |
 | **Failed** | `failed` | Failed · step (red) | Try again (`POST /run?from_stage=<failed stage>`) |
@@ -255,15 +272,20 @@ tested function (`src/session/state.ts`).
 | Event | Data used | UI effect |
 |---|---|---|
 | `status` | `status` | Updates the chip and actions; `processing` starts a new run (clears run state); `done` fetches the final notes; `failed` fetches the session for its error |
-| `stage_started` | `stage`, `at` | Step becomes running; records its start time for Details; the header names it |
-| `stage_finished` | `stage`, `at` | Step becomes done; duration shown in Details; after `transcribe`, fetch the full transcript |
+| `stage_started` | `stage`, `promoted`, `at` | Step becomes running; records its start time for Details; the header names it |
+| `stage_finished` | `stage`, `promoted`, `at` | Step becomes done; duration shown in Details; after `transcribe`, fetch the full transcript; around `synthesize`, refetch the notes (the polished notes replace the assembled ones). `promoted: true` (a live session's stage done while recording and kept at stop): the step's detail says "live" ("2 moments · live") and Details shows "while recording" instead of a duration |
 | `transcript_chunk` | `chunk`, `segments` | Segments stored by chunk index and shown in time order; ribbon shows how much is transcribed |
 | `moment_found` | `id`, `start`, `end` | Count shown in the Finding-what-was-shown step; tick on the ribbon |
 | `visual_selected` | `id`, `caption`, `frame.t`, `render_as` | Figure placeholder added; ribbon marker (hollow); render total updated |
 | `visual_rendered` | `id`, `path`, `render_as`, `verified` | Placeholder replaced by the image; badge from `verified` and `render_as`; ribbon marker filled |
-| `notes_updated` | `final`, `completed_parts`, `total_parts` | `final: false` → Draft, "2 of 4 sections", draft refetched (§7); `final: true` → fetch notes |
+| `notes_updated` | `final`, `completed_parts`, `total_parts`, event time | `final: false` → Draft, "2 of 4 sections", draft refetched (§7; every such event, also a live tail rewrite with the same counts; `live: true` marks the live draft lane's); `final: true` → fetch notes, which stay readable while they are polished (Polishing) |
 | `error` | `message` | Failed banner text (the session's `error` is the source of truth) |
 | unknown type or malformed | none | Ignored (`decodeSessionEvent`) |
+
+A live session's run at stop reports the stages whose work was kept from recording (transcribe,
+detect, align, select, or only transcribe) as started and finished with `promoted: true`, with the
+`moment_found` and `visual_selected` events those stages would emit replayed between them, so the
+progress list and counts look as for any run (architecture section 1, "Life of a session: live").
 
 **When there are no events.** Event history lives in backend memory and is lost on restart. A
 finished session opened later gets everything over REST instead: `GET /notes`, `GET /transcript`,
@@ -277,7 +299,15 @@ Details then says "Step times are only available for runs since the backend star
 - The live transcript follows new lines only while the reader is at the bottom; otherwise a **Jump
   to latest** button appears.
 - Figure boxes keep a fixed 4:3 size until the image loads.
-- When the draft is refetched, the reader keeps their scroll position.
+- When the draft is refetched, the reader keeps their scroll position: sections are added and
+  the open last one rewritten at the end, never above what is being read. A failed refetch
+  (backend unreachable or erroring) keeps the draft already shown. A 404 clears it: there is no
+  draft, or the backend dropped it because the run is selecting figures again and its figure ids
+  no longer apply.
+- The draft is fetched once when the page loads (recording or processing), then on each
+  `notes_updated` and when the run's select stage starts (`draftRefreshKey` in
+  `src/session/draft.ts`), so a draft the backend dropped before selecting again is cleared;
+  replayed events don't refetch.
 - Status changes are announced politely to screen readers; transcript chunks are not.
 
 ## 5. Visual design
@@ -415,7 +445,7 @@ All of the above uses the existing API and event types, except:
 | Need | Status | Until then |
 |---|---|---|
 | `visual_rendered` in the client's event list (`src/api/eventMessage.ts`) | Frontend fix in this work: it is in the schema but was missing from the list, so rendered figures were dropped | n/a |
-| Draft notes text: `GET /api/sessions/{id}/notes/draft` (returns `NotesDraft`) | Planned by live-processing work (phase 2) | The Notes tab shows draft progress ("2 of 4 sections done") without the text. `fetchDraft` in `src/session/draft.ts` is ready; set `DRAFT_ENDPOINT_ENABLED` once the endpoint exists |
+| Draft notes text: `GET /api/sessions/{id}/notes/draft` (returns `NotesDraft`, 404 when there is none) | Done with live processing. Like `GET /notes`, figure markers are resolved by the backend: to the redrawn figure once `renders.json` has it, to the source crop until then (all through recording); markers for figures not selected yet are dropped. While recording it is the live draft lane's, while processing the write stage's | n/a (`fetchDraft` in `src/session/draft.ts`) |
 | Ending a crashed live session with gaps (`endLiveSession` with `allow_gaps`) | Done in the live-capture PR. Without a body, `POST /api/live/{id}/end` skips the chunk check and ends with what arrived (missing audio becomes silence) | **Finish and make notes** calls `POST /api/live/{id}/end` without a body, which is already correct for a crashed session; `endLiveSession` is only needed to check the chunk count |
 | Per-session cost and time per stage | Cost-tracking work in progress | The rail's **Cost** slot and the library's **Cost** column are designed but not built; stage times come from events |
 | Verified status for finished sessions without events (`renders.json` via the API) | Not requested yet | Badges show only when known from this run's events |

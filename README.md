@@ -16,7 +16,8 @@ discussed is placed in the notes next to what was said about it.
 5. **Select** the moments worth keeping and rebuild each as a professional visual, checked against
    what was shown and said.
 6. **Write** notes in a style suited to the session (meeting, lecture or demo), with each visual placed
-   where it belongs.
+   where it belongs, then consolidate them across the whole session (split worked examples joined,
+   later corrections applied, repeats and duplicate figures removed).
 7. **Show and export** the finished notes, with visuals embedded.
 
 ## Requirements
@@ -92,8 +93,8 @@ models missing from the table are reported as unpriced, not guessed. Cached work
 On the Live page, Iris asks for a screen, window or tab to share, then for the microphone. Audio is
 uploaded in 5-second chunks and the screen at about one frame per second, on the same clock.
 Failed uploads are retried, and **Stop** waits until everything has arrived before the session is
-processed like an upload. The captured chunks stay in the session folder (`live/`), so a failed run
-can be retried with `uv run iris run <session_id>`.
+finished. The captured chunks stay in the session folder (`live/`), so a failed run can be retried
+with `uv run iris run <session_id>`.
 
 | Browser (desktop) | Microphone | Shared audio | Status |
 |---|---|---|---|
@@ -124,6 +125,31 @@ What happens when capture is interrupted:
   finish it with
   `curl -X POST http://127.0.0.1:8000/api/live/<session_id>/end`.
 
+#### Live processing
+
+While recording, Iris does the pipeline's work as the input arrives: the audio is transcribed in
+windows cut at pauses (the first text shows about 20 seconds in), each screen is read once it has
+been left, its figures are redrawn in the background, and a draft of the notes is written and
+refreshed on the Live and Session pages. At **Stop**, the last window, the screen still showing
+and the end of the notes are finished, and everything done live is kept: the transcript, moments
+and figures become the session's own, so only that tail is new work and model calls. If part of
+the live work failed (or missed a late chunk or frame), stop redoes only what it affects: with a
+good live transcript it is not transcribed again; otherwise the session is processed like an
+upload. A screen left up for the whole session is only read at stop, so such a session takes about
+as long after stop as an upload. Set `IRIS_LIVE_PROCESSING=false` to turn live processing off: the
+session is then processed after stop, like an upload. Window lengths, draft refresh interval and
+concurrency are `IRIS_LIVE_*` settings (`backend/.env.example`; architecture section 1, "Life of a
+session: live").
+
+To try live processing without a browser, replay a recording into a running backend (paid model
+calls; use a scratch data folder):
+
+```sh
+cd backend
+IRIS_DATA_DIR=/tmp/iris-scratch uv run iris serve --port 8001   # in one terminal
+uv run iris replay-live recording.mov --url http://127.0.0.1:8001 [--speed 2]
+```
+
 ### Layout
 
 ```
@@ -131,10 +157,12 @@ backend/src/iris/
   api/            FastAPI routes: sessions, live input, SSE progress events, health
   sources/        upload + browser live: turn input into audio.wav + frames/ in a session
   pipeline/
-    stages/       transcribe, detect, align, select, write, render, assemble (read session files,
-                  write their own)
+    stages/       transcribe, detect, align, select, write, render, assemble, synthesize (read
+                  session files, write their own)
     __init__.py   stage registry and PLAN (stage order; groups run concurrently)
-    live.py       incremental processing while a live session runs (not implemented yet)
+  live/           processing while a live session records: audio, screen, select and draft
+                  lanes over a shared timeline; promote.py (live work promoted at stop);
+                  replay.py (`iris replay-live`, a dev tool)
   jobs/runner.py  runs a session's PLAN as an asyncio task, publishes progress
   store/          SQLite session index + on-disk session folder layout (layout.py lists every file)
   llm/            OpenAI client; usage.py records every model call and its cost (usage.json)

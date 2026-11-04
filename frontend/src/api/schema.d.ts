@@ -114,6 +114,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/sessions/{session_id}/notes/draft": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Notes Draft
+         * @description The notes as far as they're written: the live draft while recording, then the write
+         *     stage's sections while processing.
+         *
+         *     Served like ``GET /notes``: ``[visual:<id>]`` markers are resolved to markdown images here,
+         *     to the rendered figure where ``renders.json`` has one and to the selected source crop
+         *     otherwise (the case throughout recording). Markers for figures not selected yet are dropped.
+         */
+        get: operations["get_notes_draft_api_sessions__session_id__notes_draft_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/sessions/{session_id}/export": {
         parameters: {
             query?: never;
@@ -246,7 +271,7 @@ export interface paths {
         put?: never;
         /**
          * End Live
-         * @description Stop recording and run the full pipeline over the whole session.
+         * @description Stop recording and finish the session: the live work is kept, the rest is processed.
          *
          *     The browser flushes its uploads first and says how many audio chunks it recorded. If any are
          *     missing, this returns 409 with ``detail.missing_audio_chunks`` and the session keeps recording,
@@ -387,6 +412,22 @@ export interface components {
             /** Visuals */
             visuals: components["schemas"]["Visual"][];
         };
+        /**
+         * NotesDraft
+         * @description The notes as far as they are written, before assembly.
+         *
+         *     Stored in notes_draft.json with ``[visual:<id>]`` markers. ``GET /notes/draft`` serves it
+         *     with the markers resolved to markdown images, as ``GET /notes`` does.
+         */
+        NotesDraft: {
+            session_type: components["schemas"]["SessionType"];
+            /** Title */
+            title: string;
+            /** Markdown */
+            markdown: string;
+            /** Parts */
+            parts?: number | null;
+        };
         /** Session */
         Session: {
             /** Id */
@@ -485,7 +526,7 @@ export interface components {
          * Stage
          * @enum {string}
          */
-        Stage: "ingest" | "transcribe" | "detect" | "align" | "select" | "write" | "render" | "assemble";
+        Stage: "ingest" | "transcribe" | "detect" | "align" | "select" | "write" | "render" | "assemble" | "synthesize";
         /** Transcript */
         Transcript: {
             /** Language */
@@ -916,6 +957,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Notes"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_notes_draft_api_sessions__session_id__notes_draft_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotesDraft"];
                 };
             };
             /** @description Validation Error */

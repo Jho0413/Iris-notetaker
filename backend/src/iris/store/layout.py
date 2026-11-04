@@ -5,6 +5,17 @@ sessions/<id>/
     live/audio/<n>.webm   live audio chunks, by sequence number (browser live source only)
     live/frames/<t_ms>.jpg
                           live screen frames as captured (browser live source only)
+    live/audio.pcm        live: the contiguous audio decoded so far, 16-bit mono at
+                          audio_sample_rate (sample i is at i / rate seconds)
+    live/transcript_windows/<i>_<start_ms>_<end_ms>.json
+                          live: one transcribed window each (cache, like transcript_chunks/)
+    live/transcript.json  live: Transcript committed so far (complete up to transcribed_to)
+    live/frames.json      live: FrameIndex of the normalised frames fed to detection so far
+    live/moments.json     live: Moments closed so far
+    live/selection.json   live: Selection of the moments read so far
+    live/select_batches.json
+                          live: the moment ids of each batch the select lane read, so a lane
+                          restarted mid-recording reads the same batches (and hits their cache)
     audio.wav             16 kHz mono
     frames/<t_ms>.jpg     sampled frames
     frames.json           FrameIndex
@@ -24,7 +35,12 @@ sessions/<id>/
     renders.json          Renders
     notes_sections/<hash>.json
                           validated writing sections, keyed by model, prompt and inputs
-    notes_draft.json      NotesDraft
+    notes_draft.json      NotesDraft (written by write, and by the live draft lane while recording)
+    synthesis_cache/<hash>.json
+                          synthesis edit plans and section rewrites, keyed by model, prompt
+                          and inputs
+    notes_synthesis.json  SynthesizedDraft: the notes draft after the synthesis pass
+    synthesis.json        SynthesisReport: what synthesis did, or why it skipped or failed
     notes.json            Notes
     notes.md              final markdown (for export)
     usage_calls.jsonl     one UsageRecord per model call, appended by iris.llm.usage
@@ -55,6 +71,39 @@ class SessionPaths:
     @property
     def live_frames_dir(self) -> Path:
         return self.root / "live" / "frames"
+
+    # Live processing outputs (iris/live/). Each lane writes only its own; see the docstring above.
+    @property
+    def live_dir(self) -> Path:
+        return self.root / "live"
+
+    @property
+    def live_pcm(self) -> Path:
+        return self.live_dir / "audio.pcm"
+
+    @property
+    def live_transcript_windows_dir(self) -> Path:
+        return self.live_dir / "transcript_windows"
+
+    @property
+    def live_transcript(self) -> Path:
+        return self.live_dir / "transcript.json"
+
+    @property
+    def live_frame_index(self) -> Path:
+        return self.live_dir / "frames.json"
+
+    @property
+    def live_moments(self) -> Path:
+        return self.live_dir / "moments.json"
+
+    @property
+    def live_selection(self) -> Path:
+        return self.live_dir / "selection.json"
+
+    @property
+    def live_select_batches(self) -> Path:
+        return self.live_dir / "select_batches.json"
 
     @property
     def audio(self) -> Path:
@@ -99,6 +148,18 @@ class SessionPaths:
     @property
     def notes_draft(self) -> Path:
         return self.root / "notes_draft.json"
+
+    @property
+    def synthesis_cache_dir(self) -> Path:
+        return self.root / "synthesis_cache"
+
+    @property
+    def notes_synthesis(self) -> Path:
+        return self.root / "notes_synthesis.json"
+
+    @property
+    def synthesis_report(self) -> Path:
+        return self.root / "synthesis.json"
 
     @property
     def notes(self) -> Path:

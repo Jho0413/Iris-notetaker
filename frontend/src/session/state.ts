@@ -14,7 +14,7 @@ export type Segment = Transcript['segments'][number]
 export type StepStatus = 'pending' | 'running' | 'done' | 'failed' | 'stopped'
 
 export const STAGE_ORDER: readonly Stage[] = [
-  'ingest', 'transcribe', 'detect', 'align', 'select', 'write', 'render', 'assemble',
+  'ingest', 'transcribe', 'detect', 'align', 'select', 'write', 'render', 'assemble', 'synthesize',
 ]
 
 /** Plain-language step names (docs/frontend.md §1). Internal names stay in Details. */
@@ -27,12 +27,20 @@ export const STAGE_LABELS: Record<Stage, string> = {
   write: 'Writing notes',
   render: 'Redrawing figures',
   assemble: 'Putting the notes together',
+  synthesize: 'Polishing notes',
 }
 
 export interface StageRun {
   status: StepStatus
   startedAt?: string
   finishedAt?: string
+  /** Reported as promoted: its live work is being kept at stop instead of running the stage. */
+  promoted?: boolean
+}
+
+/** Done while recording: promoted at stop, and the promotion finished. */
+export function doneLive(step: StageRun): boolean {
+  return step.promoted === true && step.status === 'done'
 }
 
 export interface FigureState {
@@ -55,7 +63,11 @@ export interface RunState {
   figures: Record<string, FigureState>
   /** Figure ids in the order they were selected. */
   figureOrder: string[]
-  notes: { final: boolean; completed: number; total: number } | null
+  /**
+   * Notes progress from `notes_updated`. `updatedAt` is the latest such event's time: it changes
+   * whenever the draft does (a section added or the live tail rewritten), so pages refetch on it.
+   */
+  notes: { final: boolean; completed: number; total: number; updatedAt?: number } | null
   error?: string
   /** When the current run started (its `status: processing` event), in ms since the epoch. */
   runStart?: number
@@ -139,10 +151,11 @@ export function applyEvent(state: RunState, event: IrisEvent): RunState {
     case 'stage_finished': {
       if (!isStage(data.stage)) return state
       const prev = state.stages[data.stage]
+      const promoted = data.promoted === true ? { promoted: true } : {}
       const next: StageRun =
         event.type === 'stage_started'
-          ? { ...prev, status: prev.status === 'done' ? 'done' : 'running', startedAt: event.at }
-          : { ...prev, status: 'done', finishedAt: event.at }
+          ? { ...prev, ...promoted, status: prev.status === 'done' ? 'done' : 'running', startedAt: event.at }
+          : { ...prev, ...promoted, status: 'done', finishedAt: event.at }
       return { ...state, stages: { ...state.stages, [data.stage]: next } }
     }
     case 'transcript_chunk': {
@@ -188,6 +201,7 @@ export function applyEvent(state: RunState, event: IrisEvent): RunState {
           final: final || state.notes?.final === true,
           completed: Math.max(completed, state.notes?.completed ?? 0),
           total: Math.max(total, state.notes?.total ?? 0),
+          updatedAt: timed ? Math.max(at, state.notes?.updatedAt ?? at) : state.notes?.updatedAt,
         },
       }
     }
@@ -281,6 +295,7 @@ export type UiStateKind =
   | 'starting'
   | 'processing'
   | 'draft'
+  | 'polishing'
   | 'stalled'
   | 'finished'
   | 'failed'
@@ -330,6 +345,10 @@ export function uiState(
         }
       }
       const notes = run.notes
+      // This run's notes are assembled and readable; the synthesis pass will replace them.
+      if (notes?.final || run.stages.synthesize.status === 'running') {
+        return { kind: 'polishing', label: STAGE_LABELS.synthesize }
+      }
       if (notes && !notes.final && notes.completed > 0) {
         return {
           kind: 'draft',
@@ -348,8 +367,17 @@ export function libraryState(session: Session): UiState {
   return uiState(session, emptyRun())
 }
 
-/** Count shown beside a running or finished step, e.g. "3 of 5". */
+/**
+ * Count shown beside a running or finished step, e.g. "3 of 5". A step done while recording
+ * (promoted at stop) says so: "4 moments · live".
+ */
 export function stageDetail(stage: Stage, run: RunState): string | undefined {
+  const count = stageCount(stage, run)
+  if (!doneLive(run.stages[stage])) return count
+  return count ? `${count} · live` : 'live'
+}
+
+function stageCount(stage: Stage, run: RunState): string | undefined {
   switch (stage) {
     case 'transcribe': {
       const n = Object.keys(run.chunks).length
@@ -375,9 +403,9 @@ export function stageDetail(stage: Stage, run: RunState): string | undefined {
   }
 }
 
-/** Seconds a step took, when both of its events are known. */
+/** Seconds a step took, when both of its events are known (not for a step done while recording). */
 export function stageSeconds(step: StageRun): number | undefined {
-  if (!step.startedAt || !step.finishedAt) return undefined
+  if (doneLive(step) || !step.startedAt || !step.finishedAt) return undefined
   const ms = Date.parse(step.finishedAt) - Date.parse(step.startedAt)
   return Number.isFinite(ms) && ms >= 0 ? ms / 1000 : undefined
 }

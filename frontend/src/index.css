@@ -198,14 +198,14 @@ h1, h2, h3 { line-height: 1.2; letter-spacing: -0.01em; text-wrap: balance; }
   border-radius: 999px; font-size: 0.8125rem; font-weight: 500; white-space: nowrap;
   border: 1px solid var(--border); background: var(--surface-2); color: var(--text-2); }
 .chip .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
-.chip-processing, .chip-starting { background: var(--accent-soft); border-color: var(--accent-line);
+.chip-processing, .chip-starting, .chip-polishing { background: var(--accent-soft); border-color: var(--accent-line);
   color: var(--accent); }
 .chip-draft { background: var(--warning-soft); border-color: var(--warning-line); color: var(--warning); }
 .chip-finished { background: var(--success-soft); border-color: var(--success-line); color: var(--success); }
 .chip-failed, .chip-recording { background: var(--recording-soft); border-color: var(--recording-line);
   color: var(--recording); }
 .chip-recording .dot, .rec-dot { animation: pulse 1.6s ease-in-out infinite; }
-.chip-processing .icon, .chip-starting .icon { animation: spin 1.4s linear infinite; }
+.chip-processing .icon, .chip-starting .icon, .chip-polishing .icon { animation: spin 1.4s linear infinite; }
 @keyframes pulse { 50% { opacity: 0.35; } }
 @keyframes spin { to { transform: rotate(360deg); } }
 
@@ -310,6 +310,11 @@ h1, h2, h3 { line-height: 1.2; letter-spacing: -0.01em; text-wrap: balance; }
 .disclosure > summary .icon { transition: transform var(--fast) var(--ease); }
 .disclosure[open] > summary .icon { transform: rotate(90deg); }
 .disclosure > .disclosure-body { border-top: 1px solid var(--border); padding: 4px 16px 16px; }
+/* Live panels keep one height whatever they hold, so arriving lines never move the page. */
+.disclosure > .live-panel { height: 320px; display: flex; flex-direction: column; padding: 0; }
+.live-panel > .live-transcript { flex: 1; min-height: 0; max-height: none; padding: 4px 16px 0; }
+.live-panel > .placeholder { margin: 0; padding: 16px; }
+.disclosure > .live-notes { height: 480px; display: block; overflow: auto; padding: 4px 24px 16px; }
 
 /* ---- Session ----------------------------------------------------------------------------------- */
 

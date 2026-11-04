@@ -285,76 +285,116 @@ def render(source: Path, target: Path, crop: Box | None) -> None:
         tmp.unlink(missing_ok=True)
 
 
+def cached_decisions(cache: Path, batch: list[AlignedMoment]) -> Decisions | None:
+    """The cached decisions for a batch, or None if missing or invalid (never trusted)."""
+    try:
+        result = read_model(cache, Decisions)
+        validate_decisions(result, batch)
+    except (FileNotFoundError, ValueError):
+        return None
+    return result
+
+
+@dataclass
+class BatchResult:
+    """What reading one batch of moments added to the selection."""
+
+    contents: list[MomentContent]
+    visuals: list[Visual]
+    rejected_moment_ids: list[str]
+
+
+async def read_batch(
+    ctx: StageContext,
+    batch: list[AlignedMoment],
+    earlier: list[MomentContent],
+    first_visual: int,
+) -> BatchResult:
+    """Read one batch of moments: its cached decisions, or one vision call.
+
+    ``earlier`` is the content already captured (the last ``EARLIER_MOMENTS`` are summarised for
+    the model); ``first_visual`` is the number of the batch's first figure, so ids follow pipeline
+    order across batches. Saves each figure's source crop and emits VISUAL_SELECTED. Used by
+    ``run`` and by the live select lane, so both make the same calls and cache entries.
+    """
+    cache_dir = ctx.paths.root / "selection_batches"
+    cache_dir.mkdir(exist_ok=True)
+    ctx.paths.visuals_dir.mkdir(exist_ok=True)
+    prepared = await asyncio.to_thread(
+        prepare_batch, ctx, batch, summarize(earlier[-EARLIER_MOMENTS:])
+    )
+    cache = cache_dir / f"{prepared.cache_key}.json"
+    result = cached_decisions(cache, batch)
+    if result is None:
+        # Invalid JSON, schema, encoding or decisions are a cache miss. Replace the
+        # entry only after a fresh response passes the same validation.
+        result = await choose(ctx, prepared.content)
+        validate_decisions(result, batch)
+    write_model(cache, result)
+    out = BatchResult(contents=[], visuals=[], rejected_moment_ids=[])
+    by_id = {d.moment_id: d for d in result.decisions}
+    for item, frame in zip(batch, prepared.frames, strict=True):
+        decision = by_id[item.moment.id]
+        if not decision.keep:
+            out.rejected_moment_ids.append(item.moment.id)
+            continue
+        builds = item.moment.builds
+        elements = []
+        for element in decision.elements:
+            t = builds[element.build].t if element.build in range(len(builds)) else None
+            visual_id = None
+            if element.kind == "figure":
+                # IDs come from pipeline order, never from model-controlled filenames.
+                visual_id = f"v{first_visual + len(out.visuals):06d}"
+                crop = valid_crop(element.region, frame.width, frame.height)
+                source = f"visuals/{visual_id}.source.jpg"
+                await asyncio.to_thread(render, frame.path, ctx.paths.root / source, crop)
+                visual = Visual(
+                    id=visual_id,
+                    moment_id=item.moment.id,
+                    frame=item.moment.frame,
+                    crop=crop,
+                    caption=element.caption.strip(),
+                    path=source,
+                    description=element.content.strip(),
+                    render_as=element.render_as or "image",
+                    source_path=source,
+                )
+                out.visuals.append(visual)
+                ctx.emit(EventType.VISUAL_SELECTED, visual.model_dump(mode="json"))
+            elements.append(
+                BoardElement(
+                    kind=element.kind,
+                    content=element.content.strip(),
+                    t=t,
+                    visual_id=visual_id,
+                )
+            )
+        out.contents.append(
+            MomentContent(
+                moment_id=item.moment.id,
+                start=item.moment.start,
+                end=item.moment.end,
+                elements=elements,
+            )
+        )
+    return out
+
+
 async def run(ctx: StageContext) -> None:
     items = read_model(ctx.paths.alignment, Alignment).items
     if len({item.moment.id for item in items}) != len(items):
         raise ValueError("alignment contains duplicate moment ids")
     selection = Selection(visuals=[])
-    cache_dir = ctx.paths.root / "selection_batches"
-    cache_dir.mkdir(exist_ok=True)
+    (ctx.paths.root / "selection_batches").mkdir(exist_ok=True)
     ctx.paths.visuals_dir.mkdir(exist_ok=True)
     size = ctx.settings.selection_batch_size
     for offset in range(0, len(items), size):
         batch = items[offset : offset + size]
-        prepared = await asyncio.to_thread(
-            prepare_batch, ctx, batch, summarize(selection.contents[-EARLIER_MOMENTS:])
-        )
-        cache = cache_dir / f"{prepared.cache_key}.json"
-        try:
-            result = read_model(cache, Decisions)
-            validate_decisions(result, batch)
-        except (FileNotFoundError, ValueError):
-            # Invalid JSON, schema, encoding or decisions are a cache miss. Replace the
-            # entry only after a fresh response passes the same validation.
-            result = await choose(ctx, prepared.content)
-            validate_decisions(result, batch)
-        write_model(cache, result)
-        by_id = {d.moment_id: d for d in result.decisions}
-        for item, frame in zip(batch, prepared.frames, strict=True):
-            decision = by_id[item.moment.id]
-            if not decision.keep:
-                selection.rejected_moment_ids.append(item.moment.id)
-                continue
-            builds = item.moment.builds
-            elements = []
-            for element in decision.elements:
-                t = builds[element.build].t if element.build in range(len(builds)) else None
-                visual_id = None
-                if element.kind == "figure":
-                    # IDs come from pipeline order, never from model-controlled filenames.
-                    visual_id = f"v{len(selection.visuals) + 1:06d}"
-                    crop = valid_crop(element.region, frame.width, frame.height)
-                    source = f"visuals/{visual_id}.source.jpg"
-                    await asyncio.to_thread(render, frame.path, ctx.paths.root / source, crop)
-                    visual = Visual(
-                        id=visual_id,
-                        moment_id=item.moment.id,
-                        frame=item.moment.frame,
-                        crop=crop,
-                        caption=element.caption.strip(),
-                        path=source,
-                        description=element.content.strip(),
-                        render_as=element.render_as or "image",
-                        source_path=source,
-                    )
-                    selection.visuals.append(visual)
-                    ctx.emit(EventType.VISUAL_SELECTED, visual.model_dump(mode="json"))
-                elements.append(
-                    BoardElement(
-                        kind=element.kind,
-                        content=element.content.strip(),
-                        t=t,
-                        visual_id=visual_id,
-                    )
-                )
-            selection.contents.append(
-                MomentContent(
-                    moment_id=item.moment.id,
-                    start=item.moment.start,
-                    end=item.moment.end,
-                    elements=elements,
-                )
-            )
+        result = await read_batch(ctx, batch, selection.contents, len(selection.visuals) + 1)
+        selection.contents.extend(result.contents)
+        selection.visuals.extend(result.visuals)
+        selection.rejected_moment_ids.extend(result.rejected_moment_ids)
         write_model(ctx.paths.selection, selection)
     # Also produce a valid output for audio-only sessions without invoking a model.
     write_model(ctx.paths.selection, selection)

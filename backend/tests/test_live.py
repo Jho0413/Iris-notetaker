@@ -4,22 +4,20 @@ Recordings are synthetic: a WebM/Opus stream encoded with PyAV and cut into byte
 MediaRecorder timeslice chunks, and solid-colour JPEG frames.
 """
 
-import io
 import json
 import random
 import time
 import wave
-from fractions import Fraction
 from pathlib import Path
 from types import SimpleNamespace
 
-import av
 import cv2
 import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
 from iris.config import Settings
+from iris.live.replay import encode_webm
 from iris.models import FrameIndex, SourceKind
 from iris.pipeline.context import StageContext
 from iris.sources.browser_live import (
@@ -47,26 +45,11 @@ COLOURS = [(0, 0, 255), (0, 255, 0), (255, 0, 0), (0, 255, 255), (255, 0, 255), 
 
 
 def make_webm(seconds: int = SECONDS) -> bytes:
-    """A mono Opus WebM: a 440 Hz tone during ``TONE_SECONDS``, silence otherwise.
-
-    Clusters are short, as in MediaRecorder output (FFmpeg's default is a few seconds).
-    """
-    buf = io.BytesIO()
-    n = 960  # 20 ms Opus frames
-    with av.open(buf, "w", format="webm", options={"cluster_time_limit": "500"}) as out:
-        stream = out.add_stream("libopus", rate=RATE)
-        stream.layout = "mono"
-        for k in range(seconds * RATE // n):
-            t = (np.arange(n) + k * n) / RATE
-            loud = int(k * n / RATE) in TONE_SECONDS
-            s = (0.3 * loud * np.sin(2 * np.pi * 440 * t)).astype(np.float32).reshape(1, -1)
-            frame = av.AudioFrame.from_ndarray(s, format="flt", layout="mono")
-            frame.sample_rate = RATE
-            frame.pts = k * n
-            frame.time_base = Fraction(1, RATE)
-            out.mux(stream.encode(frame))
-        out.mux(stream.encode())
-    return buf.getvalue()
+    """A mono Opus WebM: a 440 Hz tone during ``TONE_SECONDS``, silence otherwise (short clusters,
+    as in MediaRecorder output)."""
+    t = np.arange(seconds * RATE) / RATE
+    loud = np.isin(t.astype(int), list(TONE_SECONDS))
+    return encode_webm([(0.3 * loud * np.sin(2 * np.pi * 440 * t)).astype(np.float32)]).data
 
 
 def split(data: bytes, size: int = 4000) -> list[bytes]:
@@ -374,6 +357,7 @@ def wait_until_idle(client: TestClient, sid: str, timeout: float = 10.0) -> None
 
 def fake_openai(monkeypatch) -> None:
     """Fake every model call the pipeline makes (no network, no cost)."""
+    from iris.live import audio
     from iris.pipeline.stages import render, select, transcribe, write
     from tests.test_write import section
 
@@ -414,7 +398,7 @@ def fake_openai(monkeypatch) -> None:
         chat=SimpleNamespace(completions=SimpleNamespace(parse=parse)),
         audio=SimpleNamespace(transcriptions=SimpleNamespace(create=transcribe_audio)),
     )
-    for module in (write, select, transcribe, render):
+    for module in (write, select, transcribe, render, audio):
         monkeypatch.setattr(module, "get_openai", lambda _: fake)
 
 

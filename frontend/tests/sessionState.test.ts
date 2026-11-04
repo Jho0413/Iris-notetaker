@@ -3,9 +3,10 @@ import test from 'node:test'
 import type { IrisEvent, Notes, Session } from '../src/api/client.ts'
 import {
   emptyRun, eventKey, failureHeadline, figureList, formatClock, formatDuration, libraryState, provenance,
-  reduceEvents, sessionLength, stageDetail, stageFromError, stageSeconds, transcriptSegments,
-  uiState,
+  reduceEvents, sessionLength, STAGE_ORDER, stageDetail, stageFromError, stageSeconds,
+  transcriptSegments, uiState,
 } from '../src/session/state.ts'
+import { STAGES } from '../src/api/client.ts'
 
 let tick = 0
 function ev(type: IrisEvent['type'], data: Record<string, unknown> = {}): IrisEvent {
@@ -29,6 +30,46 @@ test('stages move through running and done, with durations from event times', ()
   assert.equal(run.stages.transcribe.status, 'running')
   assert.equal(run.stages.detect.status, 'pending')
   assert.equal(uiState(session, run).label, 'Processing · Transcribing')
+})
+
+test('stages promoted at stop are done, marked live and not timed', () => {
+  const promoted = (type: 'stage_started' | 'stage_finished', stage: string) =>
+    ev(type, { stage, promoted: true })
+  const events = [
+    ev('status', { status: 'processing' }),
+    ev('stage_started', { stage: 'ingest' }), ev('stage_finished', { stage: 'ingest' }),
+    promoted('stage_started', 'transcribe'), promoted('stage_finished', 'transcribe'),
+    promoted('stage_started', 'detect'),
+    ev('moment_found', { id: 'm1', start: 0, end: 9 }),
+    ev('moment_found', { id: 'm2', start: 9, end: 20 }),
+    promoted('stage_finished', 'detect'),
+    ev('stage_started', { stage: 'write' }),
+  ]
+  const run = reduceEvents(events)
+  assert.equal(run.stages.transcribe.status, 'done')
+  assert.equal(run.stages.transcribe.promoted, true)
+  assert.equal(stageSeconds(run.stages.transcribe), undefined)
+  assert.equal(stageDetail('transcribe', run), 'live')
+  assert.equal(stageDetail('detect', run), '2 moments · live')
+  assert.equal(run.stages.ingest.promoted, undefined)
+  assert.equal(stageSeconds(run.stages.ingest), 1)
+  assert.equal(run.stages.write.status, 'running')
+  // The next run starts fresh: a stage that runs there is no longer marked live.
+  const next = reduceEvents([...events, ev('status', { status: 'processing' }),
+    ev('stage_started', { stage: 'transcribe' })])
+  assert.equal(next.stages.transcribe.promoted, undefined)
+})
+
+test('a promotion that fails is shown as failed, not as done live', () => {
+  const run = reduceEvents([
+    ev('status', { status: 'processing' }),
+    ev('stage_started', { stage: 'select', promoted: true }),
+    ev('visual_selected', { id: 'v1', caption: 'Graph', frame: { t: 4 } }),
+    ev('error', { message: 'select failed: OSError: disk full' }),
+  ])
+  assert.equal(run.stages.select.status, 'failed')
+  assert.equal(stageDetail('select', run), '1 figure')
+  assert.equal(stageSeconds(run.stages.select), undefined)
 })
 
 test('replayed history changes nothing', () => {
@@ -141,7 +182,8 @@ test('UI states cover recording, draft, stalled, finished and failed', () => {
   const final = reduceEvents([ev('notes_updated', { final: false, completed_parts: 4,
     total_parts: 4 }), ev('notes_updated', { final: true })])
   assert.equal(final.notes?.completed, 4)
-  assert.equal(uiState(session, final).kind, 'processing')
+  // Assembled notes are readable while the synthesis pass polishes them.
+  assert.deepEqual(uiState(session, final), { kind: 'polishing', label: 'Polishing notes' })
 
   const rec = { ...session, status: 'recording' as const }
   assert.equal(uiState(rec, emptyRun(), { capturing: true }).kind, 'recording')
@@ -154,6 +196,36 @@ test('UI states cover recording, draft, stalled, finished and failed', () => {
   // The latest status event wins over a stale stored session.
   const done = reduceEvents([ev('status', { status: 'done' })])
   assert.equal(uiState(session, done).kind, 'finished')
+})
+
+test('the synthesis pass is the last step, after the notes are assembled', () => {
+  assert.equal(STAGE_ORDER[STAGE_ORDER.length - 1], 'synthesize')
+  assert.deepEqual(STAGES, [...STAGE_ORDER])
+  const run = reduceEvents([
+    ev('status', { status: 'processing' }),
+    ev('stage_started', { stage: 'assemble' }),
+    ev('notes_updated', { final: true }),
+    ev('stage_finished', { stage: 'assemble' }),
+    ev('stage_started', { stage: 'synthesize' }),
+  ])
+  assert.equal(run.stages.assemble.status, 'done')
+  assert.equal(run.stages.synthesize.status, 'running')
+  assert.equal(uiState(session, run).kind, 'polishing')
+  // Synthesis re-assembles: a second final notes event changes nothing but stays polishing.
+  const again = reduceEvents([ev('status', { status: 'processing' }),
+    ev('stage_started', { stage: 'synthesize' }), ev('notes_updated', { final: true }),
+    ev('stage_finished', { stage: 'synthesize' })])
+  assert.equal(again.stages.synthesize.status, 'done')
+  assert.equal(uiState(session, again).kind, 'polishing')
+  const done = reduceEvents([ev('status', { status: 'processing' }),
+    ev('stage_finished', { stage: 'synthesize' }), ev('status', { status: 'done' })])
+  assert.equal(uiState(session, done).kind, 'finished')
+  // A stalled synthesis resumes from synthesis; a library row names the step.
+  const stalled = uiState({ ...session, current_stage: 'synthesize' }, emptyRun(), { stalled: true })
+  assert.equal(stalled.fromStage, 'synthesize')
+  assert.equal(libraryState({ ...session, current_stage: 'synthesize' }).label,
+    'Processing · Polishing notes')
+  assert.equal(stageDetail('synthesize', run), undefined)
 })
 
 test('library rows use the stored session only', () => {

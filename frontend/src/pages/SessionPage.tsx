@@ -10,7 +10,7 @@ import { SessionRibbon } from '../components/SessionRibbon'
 import { StatusChip } from '../components/StatusChip'
 import { TabPanel, Tabs } from '../components/Tabs'
 import { TranscriptList } from '../components/TranscriptList'
-import { fetchDraft, type NotesDraft } from '../session/draft'
+import { draftRefreshKey, fetchDraft, type NotesDraft } from '../session/draft'
 import { act } from '../session/request'
 import { formatWhen, SOURCE_LABEL } from '../session/format'
 import {
@@ -96,7 +96,7 @@ function SessionView({ id }: { id: string }) {
     return () => {
       live = false
     }
-  }, [id, run.notes?.final, run.status, reload])
+  }, [id, run.notes?.final, run.stages.synthesize.status, run.status, reload])
 
   useEffect(() => {
     let live = true
@@ -106,15 +106,19 @@ function SessionView({ id }: { id: string }) {
     }
   }, [id, run.stages.transcribe.status, reload])
 
-  const draftSections = run.notes && !run.notes.final ? run.notes.completed : 0
+  // The draft while recording or processing: once on load, then on every `notes_updated`. A failed
+  // fetch keeps the draft already shown.
+  const draftKey = draftRefreshKey(run.status ?? session?.status, run)
   useEffect(() => {
-    if (!draftSections) return
+    if (draftKey === null) return
     let live = true
-    void fetchDraft(id).then((d) => live && setDraft(d))
+    void fetchDraft(id).then((d) => {
+      if (live && d !== undefined) setDraft(d)
+    })
     return () => {
       live = false
     }
-  }, [id, draftSections])
+  }, [id, draftKey])
 
   const ui = session
     ? uiState(session, run, { stalled: stream.quiet && (run.status ?? session.status) === 'processing' })
@@ -227,7 +231,8 @@ function SessionView({ id }: { id: string }) {
   }
 
   const finished = ui.kind === 'finished'
-  const working = ui.kind === 'processing' || ui.kind === 'draft' || ui.kind === 'starting'
+  const working =
+    ui.kind === 'processing' || ui.kind === 'draft' || ui.kind === 'starting' || ui.kind === 'polishing'
   const sessionType = notes?.session_type ?? draft?.session_type
   const rendered = figures.filter((f) => f.rendered).length
   const fromLabel = ui.fromStage ? STAGE_LABELS[ui.fromStage] : 'the start'
@@ -356,7 +361,11 @@ function SessionView({ id }: { id: string }) {
                   <div className="banner banner-info" role="note">
                     <Icon name="file" />
                     <div className="banner-body">
-                      <p>These notes are from an earlier run. They'll be replaced when this one finishes.</p>
+                      <p>
+                        {ui.kind === 'polishing'
+                          ? "These notes are ready to read. A final pass is tidying them across the whole session; they'll update when it finishes."
+                          : "These notes are from an earlier run. They'll be replaced when this one finishes."}
+                      </p>
                     </div>
                   </div>
                 )}
@@ -370,7 +379,25 @@ function SessionView({ id }: { id: string }) {
                 />
               </>
             ) : draft ? (
-              <NotesView sessionId={session.id} title={draft.title} markdown={draft.markdown} onOutline={setOutline} />
+              <>
+                <div className="banner banner-info" role="note">
+                  <Icon name="file" />
+                  <div className="banner-body">
+                    <p>
+                      This is a draft. It fills in as Iris works, and figures show the original crop
+                      until they're redrawn.
+                    </p>
+                  </div>
+                </div>
+                <NotesView
+                  sessionId={session.id}
+                  title={draft.title}
+                  markdown={draft.markdown}
+                  figures={figureMeta}
+                  hideTitle={draft.title.trim() === session.title.trim()}
+                  onOutline={setOutline}
+                />
+              </>
             ) : (
               <NotesPlaceholder kind={ui.kind} run={run.notes} />
             )}

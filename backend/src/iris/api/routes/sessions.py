@@ -10,7 +10,8 @@ from fastapi.responses import FileResponse, PlainTextResponse
 
 from iris.api.deps import PathsDep, RunnerDep, SessionDep, SettingsDep, StoreDep
 from iris.export import export_markdown_embedded
-from iris.models import Notes, Session, SourceKind, Stage, Transcript
+from iris.models import Notes, NotesDraft, Selection, Session, SourceKind, Stage, Transcript
+from iris.pipeline.stages.assemble import drop_title_heading, resolve_markers, with_renders
 from iris.sources.upload import save_upload
 from iris.store.layout import read_model, session_paths
 
@@ -47,11 +48,14 @@ def get_session(session: SessionDep) -> Session:
 
 
 @router.delete("/{session_id}", status_code=204)
-def delete_session(session: SessionDep, paths: PathsDep, store: StoreDep, runner: RunnerDep):
+async def delete_session(session: SessionDep, paths: PathsDep, store: StoreDep, runner: RunnerDep):
     if runner.is_running(session.id):
         raise HTTPException(409, "session is processing")
+    # Remove the row before any await, so live input or an end request arriving meanwhile is
+    # refused (404) instead of restarting processing on a session being deleted.
     store.delete(session.id)
-    shutil.rmtree(paths.root, ignore_errors=True)
+    await runner.live.cancel(session.id)  # stop live processing before its files go
+    await asyncio.to_thread(shutil.rmtree, paths.root, ignore_errors=True)
 
 
 @router.post("/{session_id}/run", response_model=Session)
@@ -77,6 +81,26 @@ def get_notes(paths: PathsDep) -> Notes:
     if not paths.notes.exists():
         raise HTTPException(404, "notes not ready")
     return read_model(paths.notes, Notes)
+
+
+@router.get("/{session_id}/notes/draft", response_model=NotesDraft)
+def get_notes_draft(paths: PathsDep) -> NotesDraft:
+    """The notes as far as they're written: the live draft while recording, then the write
+    stage's sections while processing.
+
+    Served like ``GET /notes``: ``[visual:<id>]`` markers are resolved to markdown images here,
+    to the rendered figure where ``renders.json`` has one and to the selected source crop
+    otherwise (the case throughout recording). Markers for figures not selected yet are dropped.
+    """
+    try:
+        draft = read_model(paths.notes_draft, NotesDraft)
+        selection = next((p for p in (paths.selection, paths.live_selection) if p.exists()), None)
+        visuals = read_model(selection, Selection).visuals if selection else []
+        visuals = with_renders(visuals, paths.renders)
+    except FileNotFoundError:  # no draft yet, or the session was deleted meanwhile
+        raise HTTPException(404, "no draft notes") from None
+    markdown = resolve_markers(drop_title_heading(draft.markdown, draft.title), visuals)
+    return draft.model_copy(update={"markdown": markdown})
 
 
 @router.get("/{session_id}/export", response_class=PlainTextResponse)

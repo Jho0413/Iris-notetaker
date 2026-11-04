@@ -76,10 +76,13 @@ async def _read_body(request: Request) -> bytes:
 
 
 @router.post("", response_model=Session, status_code=201)
-def start_live(body: LiveStart, store: StoreDep, settings: SettingsDep) -> Session:
+async def start_live(
+    body: LiveStart, store: StoreDep, settings: SettingsDep, runner: RunnerDep
+) -> Session:
     session = store.create(body.title, SourceKind.BROWSER_LIVE)
     session_paths(settings.sessions_dir, session.id).ensure()
     store.update(session.id, status=SessionStatus.RECORDING)
+    runner.live.ensure(session.id)
     return store.get(session.id)  # type: ignore[return-value]
 
 
@@ -88,6 +91,7 @@ async def post_audio(
     session: SessionDep,
     paths: PathsDep,
     store: StoreDep,
+    runner: RunnerDep,
     request: Request,
     seq: Annotated[int, Query(ge=0, le=MAX_AUDIO_SEQ)],
 ) -> None:
@@ -104,7 +108,8 @@ async def post_audio(
         store_audio_chunk(paths, seq, data)
     except ChunkConflict as e:
         raise HTTPException(409, str(e)) from e
-    # Phase 2: hand to LiveProcessor.on_audio_chunk
+    if processor := runner.live.ensure(session.id):
+        processor.notify_audio()
 
 
 @router.post("/{session_id}/frame", status_code=204)
@@ -112,6 +117,7 @@ async def post_frame(
     session: SessionDep,
     paths: PathsDep,
     store: StoreDep,
+    runner: RunnerDep,
     request: Request,
     t: Annotated[float, Query(ge=0, le=MAX_FRAME_T, allow_inf_nan=False)],
 ) -> None:
@@ -127,7 +133,8 @@ async def post_frame(
         store_frame(paths, t, data)
     except ChunkConflict as e:
         raise HTTPException(409, str(e)) from e
-    # Phase 2: hand to LiveProcessor.on_frame
+    if processor := runner.live.ensure(session.id):
+        processor.notify_frame()
 
 
 @router.post(
@@ -142,7 +149,7 @@ async def end_live(
     runner: RunnerDep,
     body: LiveEnd | None = None,
 ) -> Session:
-    """Stop recording and run the full pipeline over the whole session.
+    """Stop recording and finish the session: the live work is kept, the rest is processed.
 
     The browser flushes its uploads first and says how many audio chunks it recorded. If any are
     missing, this returns 409 with ``detail.missing_audio_chunks`` and the session keeps recording,

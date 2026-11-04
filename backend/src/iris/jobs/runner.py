@@ -5,8 +5,9 @@ import logging
 
 from iris.config import Settings
 from iris.events import EventBus
+from iris.live import LiveRegistry, LiveTimeline, promote
 from iris.llm import usage
-from iris.models import EventType, SessionStatus, Stage
+from iris.models import EventType, SessionStatus, SourceKind, Stage
 from iris.pipeline import STAGES, plan_from
 from iris.pipeline.context import StageContext
 from iris.store.db import SessionStore
@@ -21,6 +22,8 @@ class JobRunner:
         self.bus = bus
         self.settings = settings
         self._tasks: dict[str, asyncio.Task[None]] = {}
+        # Processors of live sessions being recorded (iris/live/); finished when the run starts.
+        self.live = LiveRegistry(self.context, enabled=settings.live_processing)
 
     def is_running(self, session_id: str) -> bool:
         task = self._tasks.get(session_id)
@@ -49,8 +52,15 @@ class JobRunner:
         self.store.clear_error(session_id)
         self._set_status(session_id, SessionStatus.PROCESSING)
         try:
-            for group in plan_from(from_stage):
-                await asyncio.gather(*(self.run_stage(ctx, s) for s in group))
+            timeline = None
+            if ctx.source == SourceKind.BROWSER_LIVE:
+                # Recording has stopped: let the live lanes flush before ingest reads live/.
+                # None when the session has no processor (a re-run, or live processing is off).
+                timeline = await self.live.finish(session_id)
+            if timeline is not None and from_stage is None:
+                await self._run_live(ctx, timeline)
+            else:
+                await self._run_plan(ctx, plan_from(from_stage))
         except Exception as exc:
             log.exception("session %s failed", session_id)
             message = str(exc) if isinstance(exc, StageError) else f"{type(exc).__name__}: {exc}"
@@ -59,6 +69,48 @@ class JobRunner:
             self.bus.publish(session_id, EventType.STATUS, {"status": SessionStatus.FAILED})
             return
         self._set_status(session_id, SessionStatus.DONE)
+
+    async def _run_plan(self, ctx: StageContext, plan: list[list[Stage]]) -> None:
+        if any(Stage.SELECT in group for group in plan):
+            # The selection is made again, so visual ids may change: a draft written against
+            # the old one (live, or by an earlier run) must not be served meanwhile.
+            ctx.paths.notes_draft.unlink(missing_ok=True)
+        for group in plan:
+            await asyncio.gather(*(self.run_stage(ctx, s) for s in group))
+
+    async def _run_live(self, ctx: StageContext, timeline: LiveTimeline) -> None:
+        """A live session at stop: ingest, promote what the live lanes finished, run the rest.
+
+        What can be promoted is decided after ingest, which leaves the frames the live moments
+        refer to in place (``live/promote.py``). The draft is deleted only if select runs again.
+        """
+        if not timeline.complete:
+            # The selection will be made again either way.
+            ctx.paths.notes_draft.unlink(missing_ok=True)
+        await self.run_stage(ctx, Stage.INGEST)
+        promoted = promote.promotable(ctx, timeline)
+        log.info(
+            "session %s: promoting %s (lanes finished %s, failed %s, skipped input %s)",
+            ctx.session_id,
+            [str(s) for s in promoted] or "nothing",
+            sorted(map(str, timeline.finished)),
+            sorted(map(str, timeline.failed)),
+            sorted(map(str, timeline.skipped_input)),
+        )
+        for stage in promoted:
+            await self.promote_stage(ctx, timeline, stage)
+        await self._run_plan(ctx, promote.remaining_plan(promoted))
+
+    async def promote_stage(self, ctx: StageContext, timeline: LiveTimeline, stage: Stage) -> None:
+        """Write a stage's output from the live timeline, reported like a run of the stage."""
+        self.store.update(ctx.session_id, current_stage=stage)
+        data = {"stage": stage, "promoted": True}
+        self.bus.publish(ctx.session_id, EventType.STAGE_STARTED, data)
+        try:
+            await promote.promote(ctx, timeline, stage)
+        except Exception as exc:
+            raise StageError(stage, exc) from exc
+        self.bus.publish(ctx.session_id, EventType.STAGE_FINISHED, data)
 
     async def run_stage(self, ctx: StageContext, stage: Stage) -> None:
         self.store.update(ctx.session_id, current_stage=stage)
@@ -75,6 +127,7 @@ class JobRunner:
         self.bus.publish(session_id, EventType.STATUS, {"status": status})
 
     async def shutdown(self) -> None:
+        await self.live.shutdown()
         for task in self._tasks.values():
             task.cancel()
         await asyncio.gather(*self._tasks.values(), return_exceptions=True)

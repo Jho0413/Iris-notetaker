@@ -45,7 +45,9 @@ def seg(start: float, end: float, text: str) -> TranscriptSegment:
 def test_plan_from():
     assert plan_from(None) == PLAN
     assert plan_from(Stage.DETECT)[0] == [Stage.TRANSCRIBE, Stage.DETECT]
-    assert plan_from(Stage.ASSEMBLE) == [[Stage.ASSEMBLE]]
+    assert plan_from(Stage.ASSEMBLE) == [[Stage.ASSEMBLE], [Stage.SYNTHESIZE]]
+    assert plan_from(Stage.SYNTHESIZE) == [[Stage.SYNTHESIZE]]
+    assert PLAN[-1] == [Stage.SYNTHESIZE] and sum(len(g) for g in PLAN) == len(Stage)
 
 
 def test_align_assigns_overlapping_segments():

@@ -3,13 +3,29 @@
 Each stage is ``async def run(ctx: StageContext) -> None`` that reads files from the session and
 writes its own output file. ``PLAN`` lists the stages in groups; stages within a group run
 concurrently, groups run in order.
+
+Finishing is two steps: assemble publishes the notes as written, so they can be read at once, then
+synthesize consolidates them across the session and assemble runs again inside the synthesize
+stage, so the polished notes replace the assembled ones. Each stage appears once in ``PLAN``:
+``plan_from``, ``Session.current_stage`` and the UI's progress list need no special cases, and a
+re-run from ``synthesize`` re-polishes without rewriting anything else. Assemble uses the
+synthesized draft only while it matches the current notes draft and selection.
 """
 
 from collections.abc import Awaitable, Callable
 
 from iris.models import Stage
 from iris.pipeline.context import StageContext
-from iris.pipeline.stages import align, assemble, detect, render, select, transcribe, write
+from iris.pipeline.stages import (
+    align,
+    assemble,
+    detect,
+    render,
+    select,
+    synthesize,
+    transcribe,
+    write,
+)
 
 StageFn = Callable[[StageContext], Awaitable[None]]
 
@@ -21,6 +37,13 @@ async def _ingest(ctx: StageContext) -> None:
     await SOURCES[ctx.source].ingest(ctx)
 
 
+async def _synthesize(ctx: StageContext) -> None:
+    # synthesize.run never raises for a failed synthesis (it records it and keeps the assembled
+    # notes), so assembling again either publishes the synthesized notes or the same notes.
+    await synthesize.run(ctx)
+    await assemble.run(ctx)
+
+
 STAGES: dict[Stage, StageFn] = {
     Stage.INGEST: _ingest,
     Stage.TRANSCRIBE: transcribe.run,
@@ -30,6 +53,7 @@ STAGES: dict[Stage, StageFn] = {
     Stage.WRITE: write.run,
     Stage.RENDER: render.run,
     Stage.ASSEMBLE: assemble.run,
+    Stage.SYNTHESIZE: _synthesize,
 }
 
 PLAN: list[list[Stage]] = [
@@ -38,7 +62,8 @@ PLAN: list[list[Stage]] = [
     [Stage.ALIGN],
     [Stage.SELECT],
     [Stage.WRITE, Stage.RENDER],  # notes only need figure descriptions, not the images
-    [Stage.ASSEMBLE],
+    [Stage.ASSEMBLE],  # the notes as written: shown while synthesis runs
+    [Stage.SYNTHESIZE],  # consolidated notes replace them; on failure the assembled notes stay
 ]
 
 
