@@ -120,7 +120,15 @@ every change; the reviewer says which sections it checked.
 
 ## 5. Quality
 
-- Matches the conventions in `CLAUDE.md`.
+- Matches the conventions and engineering practices in `CLAUDE.md`.
+- Simple: no options, layers or abstractions without a current use; nothing more complex than the
+  task needs.
+- Reuse: nothing rebuilt that Iris or a dependency already provides (a component, CSS class or
+  token, helper, or library); no near-copies of existing code.
+- Scope: no unrelated refactors, renames or reformatting in the diff.
+- One source of truth: no copied constants, settings, file names or user-facing wording.
+- Logic that decides something is in pure functions with tests; routes, components and the
+  Electron main process stay thin.
 - Names and docstrings explain *why* where it isn't obvious; no dead code or stale TODOs for work
   this change completed. Module docstrings (Reads/Writes) and the docs match the behaviour.
 - Tunable numbers are named constants or `Settings` fields with documented defaults, not magic

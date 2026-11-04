@@ -259,6 +259,30 @@ components:
     textColor: "{colors.recording}"
     height: "56px"
     padding: "0 20px"
+  select:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.text}"
+    rounded: "{rounded.sm}"
+    padding: "0 32px 0 10px"
+    height: "32px"
+  settings-rows:
+    backgroundColor: "{colors.surface}"
+    rounded: "{rounded.md}"
+    width: "760px"
+  settings-row:
+    padding: "12px 16px"
+    height: "56px"
+  save-bar:
+    backgroundColor: "{colors.accent-soft}"
+    rounded: "{rounded.md}"
+    padding: "10px 12px 10px 16px"
+  lock-chip:
+    backgroundColor: "{colors.surface-2}"
+    textColor: "{colors.text-2}"
+    rounded: "{rounded.pill}"
+    padding: "0 7px"
+    height: "20px"
+    typography: "{typography.caption}"
   dialog:
     backgroundColor: "{colors.surface}"
     textColor: "{colors.text}"
@@ -420,8 +444,8 @@ and 600 (300 only for the recorder clock).
 ## Layout
 
 - **Shell:** a sticky 56px top bar; main content padded 32px 24px 64px (24px 16px 48px under 560px).
-- **Widths:** library and most pages cap at 960px; upload and live setup at 600px; the session page
-  at 1200px, centred.
+- **Widths:** library and most pages cap at 960px; settings at 760px; upload and live setup at
+  600px; the session page at 1200px, centred.
 - **Session page:** header (breadcrumb, title and meta left; status chip and actions right), the
   ribbon 20px below, then a two-column grid: reading column `minmax(0, 1fr)` plus a 300px sticky
   rail, 32px apart. The notes column is capped at 68ch inside its track. Until the notes are
@@ -505,11 +529,30 @@ Compact, quiet, and obvious about the one thing to do.
 - **Focus:** border turns indigo and the 2px ring sits flush (0 offset).
 - **Drop zone:** a dashed `border-strong` panel (10px radius, 40px padding) that turns indigo-washed
   on hover or drag-over; the whole zone is a labelled file input and takes the focus ring.
+- **Select:** the native `<select>`, 32px, styled as a field (`field-border`, 6px radius), with a
+  16px chevron drawn as a mask in `text-2` so it follows the theme. A changed, unsaved value keeps
+  the indigo focus edge (1px inset ring) until it is saved or discarded.
 - **Disabled:** 60% opacity.
+
+### Settings
+Grouped rows, like the library list: each group is a 13px `text-2` heading at 600 over one
+bordered `surface` panel (10px radius) of rows at least 56px tall, split by hairlines. A row is
+the setting's name (500) and a 13px `text-2` description at most 60ch on the left, its control on
+the right (a 240px select, a value, or a mono path). Under 560px a row stacks, control below,
+except one-value rows (Version) that stay on one line.
+- **Save bar:** changes collect instead of saving at once. While anything is unsaved, a sticky bar
+  sits 16px above the window's bottom edge: `accent-soft` with an `accent-line` hairline, the change
+  in words ("Spoken language changed to **French**"), then Discard and the primary Save. No shadow.
+  Leaving the page with an unsaved change asks first: the confirm dialog inside Iris; closing,
+  reloading or quitting asks too (the browser's prompt, or the desktop app's own dialog).
+- **Saved:** a 13px `success` line with a check, saying what now applies.
+- **Pinned by `.env`:** the control is disabled, a neutral "Set outside Iris" lock chip (20px pill)
+  follows the name, and the description names the variable and how to free it.
 
 ### Navigation
 - **Top bar:** `surface-2` with a bottom hairline; wordmark (indigo iris mark plus "Iris"), nav
-  links, then Upload, Record live and the light / dark / system switch on the right.
+  links, then Upload, Record live, a 32px ghost gear button for Settings (`surface-3` while on the
+  page) and the light / dark / system switch on the right.
 - **Nav links:** 32px, `text-2` at 500, hover to `text` on `surface-3`.
 - **Theme switch:** a 3-segment control on `surface`; the pressed segment is `surface-3`.
 - **Tabs:** 40px text tabs, 20px apart, over a hairline; selected tab in `text` with a 2px indigo

@@ -28,10 +28,11 @@ from iris.models import Session, SessionStatus, SessionUsage, SourceKind, Stage,
 from iris.sources.upload import save_upload
 from iris.store.db import FailureDetail, SessionStore
 from iris.store.layout import session_paths
+from iris.user_settings import load_settings
 
 
 def _runner() -> JobRunner:
-    settings = get_settings()
+    settings = load_settings()  # with what the Settings page saved, as the server runs sessions
     settings.sessions_dir.mkdir(parents=True, exist_ok=True)
     return JobRunner(SessionStore(settings.db_path), EventBus(), settings)
 

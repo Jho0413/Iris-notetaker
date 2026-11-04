@@ -28,7 +28,7 @@ Iris.app
 | How the window gets the UI and reaches the API | Electron serves the built UI from a custom `app://` scheme and forwards `/api/*` to the backend | The backend stays the engine and never serves a client's files; the UI still loads, and says the engine isn't running, if the backend stops; the token never enters the page. The frontend and the API are the same as in the browser |
 | Local API security | A random per-launch token, given to the backend in its environment and added by the handler to every forwarded request | The backend otherwise accepts anything on `127.0.0.1` with the user's key loaded. `EventSource` and `<img>` can't set headers, but every request goes through the handler, so the page needs no token or cookie |
 | API key | A first-run key screen; stored encrypted with Electron `safeStorage` (its key is in the macOS Keychain) in `userData`; passed to the backend as `OPENAI_API_KEY` at launch | Never written in plain text, never built in, never sent to a page |
-| Data folder | `~/Library/Application Support/Iris` (`userData`), as `IRIS_DATA_DIR` and the backend's working directory | A `.env` there still sets `IRIS_*` options |
+| Data folder | `~/Library/Application Support/Iris` (`userData`), as `IRIS_DATA_DIR` and the backend's working directory | The Settings page saves `settings.json` there; a `.env` there still sets `IRIS_*` options and wins over the page |
 | Python bundle | python-build-standalone with Iris installed into it, bytecode precompiled at build time | Runs from any folder with an empty environment, with no import hooks to maintain |
 | Framework | Electron | The system WebView (e.g. Tauri) has weak screen and system-audio capture, and capture is Iris's core |
 | Signing | Ad-hoc (`identity: "-"`), not notarized | No Developer ID yet: the app is for the user's own Mac |
@@ -68,9 +68,11 @@ whole request body ahead of the socket. Server-sent events stream event by event
   on `app://` (`sendBeaconOrKeepalive` in `frontend/src/capture/liveCapture.ts`).
 - **XHR upload progress never fires** through a custom protocol, so the upload page shows
   "Uploading…" until the response. Locally, 500 MB takes about a second.
-- **Electron cancels a `beforeunload` close silently**, without a dialog. The live page asks
-  before unloading while it records, so the main process shows its own "Stop recording?" dialog
-  (`will-prevent-unload`).
+- **Electron cancels a `beforeunload` close silently**, without a dialog. Two pages ask before
+  unloading: the live page while it records, and Settings with an unsaved change. So the main
+  process shows its own dialog (`will-prevent-unload`), worded by page in `src/unload.cjs`: "Stop
+  recording?" for the live page, "Leave without saving?" (or "Quit without saving?", which cancels
+  the quit if kept) otherwise.
 - **Capture errors** name Iris and the System Settings pane instead of the browser
   (`describeCaptureError`, when the page's protocol is `app:`).
 

@@ -3,6 +3,50 @@
 Read `README.md` and `docs/architecture/overview.md` first (the rest of `docs/architecture/` covers
 the pipeline, live sessions, errors and the desktop app). This file covers how we work.
 
+## How we build a change
+
+A **bigger change** (a feature, a new screen or flow, an API change, anything with a design or
+behaviour choice in it) goes through these steps, in order:
+
+1. **Plan and brainstorm.** Read the issue and the code it touches, then work out the approach
+   with the user: lay out the options and their trade-offs, and recommend one. Write a short
+   plan: what changes, where, and what's out of scope. For UI work, show 2–3 options as a
+   clickable HTML mockup (using the real `frontend/src/index.css`, served on a local port) and let
+   the user pick.
+2. **Ask.** Put the decisions that are the user's to make (scope, behaviour, wording) to them as
+   clarifying questions instead of guessing. Build only once the plan is agreed.
+3. **Implement** on the task's own branch, following the conventions below.
+4. **Prove it works.** Tests for the behaviour and its edge cases, and seeing it work for real:
+   drive the UI in a browser (desktop and mobile widths, light and dark), call the API or run the
+   CLI, and check the desktop app when it is affected. Report what was verified, how, and anything
+   that couldn't be.
+5. **Review** as in the Definition of done: the `code-reviewer` agent, fixes, re-verification.
+
+A **small fix** (a bug with an obvious fix, a typo, a one-line change) can go straight to step 3,
+but it is still proven to work (step 4).
+
+## Engineering practices
+
+- **Keep it simple.** Build the smallest thing that does the job. No options, layers or
+  abstractions "for later": add them when a second real use appears. Between two designs, pick the
+  one with fewer moving parts.
+- **Reuse, don't rebuild.** Before writing something new, look for what Iris already has
+  (components, CSS classes and tokens in `index.css`, helpers like `act()`, `write_model`,
+  `ConfirmDialog`) and then for a well-kept library. Extend what exists instead of making a
+  near-copy.
+- **Change only what the task needs.** No drive-by refactors, renames or reformatting; note them
+  and do them separately, unless the user asks. Remove code a change leaves unused.
+- **One source of truth.** Settings, file names, wording and constants live in one place
+  (`Settings`, `store/layout.py`, `session/messages.ts`) and are imported, never copied.
+- **Pure logic, thin edges.** Keep decisions in small pure functions (no I/O) that plain
+  `pytest` / `node --test` can cover; keep routes, components and the Electron main process thin.
+- **Check at the boundary, trust inside.** Validate what comes in (API requests, files on disk,
+  model output) once, where it enters; code behind that works with typed, valid data.
+- **Fail clearly.** Developers get the full error in the log; the user gets plain words and a way
+  to recover. Never swallow an error silently.
+- **Names and comments explain why.** Name things for what they mean to the user or the domain;
+  comment the reason behind non-obvious code, not what it does.
+
 ## Conventions
 
 - **Stage contract.** A pipeline stage is `async def run(ctx: StageContext) -> None`. It reads files from
@@ -52,9 +96,11 @@ A branch is ready to merge only when all of these hold:
 
 1. **Checks pass** locally and in CI.
 2. **Tests cover the behaviour and the edge cases** in `docs/review-checklist.md` that apply.
-3. **Independent review:** the `code-reviewer` agent (`.claude/agents/code-reviewer.md`) reviewed
+3. **Shown working:** the change was exercised for real (browser, API, CLI or desktop app), and the
+   PR says what was verified and how.
+4. **Independent review:** the `code-reviewer` agent (`.claude/agents/code-reviewer.md`) reviewed
    the branch diff against `main` with fresh context, and every blocker and should-fix finding is
    fixed or explicitly waived by the user.
-4. **Re-verified:** after fixes, the reviewer confirmed each finding is resolved.
-5. **Human merge:** a PR is opened with a summary, test results and the review outcome. The user
-   merges.
+5. **Re-verified:** after fixes, the reviewer confirmed each finding is resolved.
+6. **Human merge:** a PR is opened with a summary, test results, what was verified and the review
+   outcome. The user merges.

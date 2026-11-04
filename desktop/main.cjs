@@ -30,6 +30,7 @@ const { registerScheme, handleAppProtocol } = require('./src/handler.cjs')
 const { createKeyStore } = require('./src/keystore.cjs')
 const policy = require('./src/policy.cjs')
 const { ORIGIN } = require('./src/routes.cjs')
+const { unloadPrompt } = require('./src/unload.cjs')
 
 const PACKAGED = app.isPackaged
 const REPO = path.resolve(__dirname, '..')
@@ -124,19 +125,16 @@ function showMainWindow() {
   win.on('closed', () => {
     if (mainWindow === win) mainWindow = null
   })
-  // The live page asks before unloading while it records (beforeunload). Electron would cancel
-  // the close silently, so ask here.
+  // A page refusing to unload (beforeunload): the live page while it records, Settings with an
+  // unsaved change. Electron would cancel the close or reload silently, so ask here
+  // (src/unload.cjs picks the question by page).
   win.webContents.on('will-prevent-unload', (event) => {
-    if (quitConfirmed) return event.preventDefault()
-    const choice = dialog.showMessageBoxSync(win, {
-      type: 'warning',
-      buttons: ['Stop Recording', 'Keep Recording'],
-      defaultId: 1,
-      cancelId: 1,
-      message: 'Stop recording?',
-      detail: 'Iris is recording. If you leave this page, the recording stops and Iris makes notes from what it has so far.',
-    })
-    if (choice === 0) event.preventDefault()
+    const prompt = unloadPrompt(win.webContents.getURL(), { quitting: quitConfirmed })
+    if (!prompt) return event.preventDefault()
+    const { leave, ...options } = prompt
+    if (dialog.showMessageBoxSync(win, options) === leave) return event.preventDefault()
+    // Kept: the window stays open, which cancels a quit in progress, so the next one asks again.
+    quitConfirmed = false
   })
   const crashes = []
   win.webContents.on('render-process-gone', async (_e, details) => {

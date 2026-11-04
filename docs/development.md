@@ -17,6 +17,16 @@ make dev                          # API on :8000, UI on http://localhost:5173
 Settings are `IRIS_*` environment variables (`backend/src/iris/config.py`, documented in
 `backend/.env.example`). Session data lives in `backend/data/` (`iris.db` plus `sessions/<id>/`).
 
+The **Settings** page (gear icon in the top bar) saves the options a user can change, so far the
+spoken language, to `settings.json` in the data folder (`backend/data/` here, the app's data
+folder in the desktop app). A saved change applies to the next session without restarting the
+engine (and to **Try again** when it starts from transcription; one that resumes later keeps the
+transcript it has) (`iris/user_settings.py`, `GET`/`PUT /api/settings`). A value set
+explicitly still wins: an `IRIS_*` environment variable or `.env` line pins it, and the page shows
+it locked with the variable's name. So `make dev`, the CLI and tests behave as before; the CLI
+(`iris process`, `iris run`) also reads `settings.json`. A damaged `settings.json` is ignored with a
+warning in the log, and the next save replaces it.
+
 ## Commands
 
 ```sh
@@ -60,8 +70,9 @@ A copy downloaded from elsewhere needs right-click → **Open** the first time.
 **Where things live** (packaged app):
 
 - Data: `~/Library/Application Support/Iris` (`iris.db`, `sessions/<id>/`), the backend's
-  `IRIS_DATA_DIR` and working directory, so a `.env` there still sets `IRIS_*` options (e.g.
-  `IRIS_TRANSCRIBE_LANGUAGE=fr`).
+  `IRIS_DATA_DIR` and working directory. `settings.json` there holds what the Settings page
+  saved; a `.env` there still sets `IRIS_*` options (e.g. `IRIS_TRANSCRIBE_LANGUAGE=fr`) and wins
+  over the page.
 - The OpenAI key: `openai-key.bin` in the same folder, encrypted with Electron `safeStorage` (the
   key to it is in the macOS Keychain as "Iris Safe Storage"). Entered on the first-run screen;
   **Iris → Change OpenAI API Key…** replaces it and restarts the engine.

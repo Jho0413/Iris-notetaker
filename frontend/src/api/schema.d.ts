@@ -291,10 +291,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get App Settings */
+        get: operations["get_app_settings_api_settings_get"];
+        /**
+         * Update App Settings
+         * @description Save the given settings. 409 if one is pinned by the environment or ``.env``.
+         */
+        put: operations["update_app_settings_api_settings_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AppSettings */
+        AppSettings: {
+            transcribe_language: components["schemas"]["LanguageSetting"];
+            /** Languages */
+            languages: string[];
+            /** Version */
+            version: string;
+            /** Data Dir */
+            data_dir: string;
+        };
         /** Body_create_upload_session_api_sessions_post */
         Body_create_upload_session_api_sessions_post: {
             /** File */
@@ -366,6 +397,16 @@ export interface components {
             ok: boolean;
             /** Version */
             version: string;
+        };
+        /** LanguageSetting */
+        LanguageSetting: {
+            /** Value */
+            value: string;
+            /** Default */
+            default: string;
+            source: components["schemas"]["SettingSource"];
+            /** Env Var */
+            env_var: string;
         };
         /** LiveEnd */
         LiveEnd: {
@@ -532,6 +573,19 @@ export interface components {
              * @default []
              */
             records: components["schemas"]["UsageRecordView"][];
+        };
+        /**
+         * SettingSource
+         * @enum {string}
+         */
+        SettingSource: "default" | "saved" | "pinned";
+        /**
+         * SettingsUpdate
+         * @description Fields to change. A field left out (or null) is left as it is.
+         */
+        SettingsUpdate: {
+            /** Transcribe Language */
+            transcribe_language?: string | null;
         };
         /**
          * SourceKind
@@ -1208,6 +1262,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SessionUsageView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_app_settings_api_settings_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppSettings"];
+                };
+            };
+        };
+    };
+    update_app_settings_api_settings_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SettingsUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppSettings"];
                 };
             };
             /** @description Validation Error */

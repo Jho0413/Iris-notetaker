@@ -60,6 +60,7 @@ backend/src/iris/
   llm/            OpenAI client, usage and cost recording, error handling
   cli.py          the `iris` command
   config.py       settings (IRIS_* environment variables)
+  user_settings.py  what the Settings page saved (settings.json), under IRIS_* and .env
   models.py       shared types: API models and every stage's output
 frontend/src/
   api/            typed client (generated from OpenAPI) + progress events
@@ -67,7 +68,8 @@ frontend/src/
   components/     notes view (Markdown, KaTeX, figures) and progress
   notes/          rehype transform for step cards, callouts and figures
   session/        session state, progress stream, upload and cost hooks
-  pages/          library, upload, live, session
+  pages/          library, upload, live, session, settings
+  settings/       the Settings page's language list and wording
 desktop/          the macOS app (Electron): app:// handler, backend lifecycle, key screen,
                   packaging (scripts/, electron-builder.yml)
 docs/

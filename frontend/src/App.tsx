@@ -4,6 +4,7 @@ import { useTheme, type ThemeChoice } from './components/theme'
 import { LibraryPage } from './pages/LibraryPage'
 import { LivePage } from './pages/LivePage'
 import { SessionPage } from './pages/SessionPage'
+import { SettingsPage } from './pages/SettingsPage'
 import { UploadPage } from './pages/UploadPage'
 
 const THEMES: { id: ThemeChoice; icon: IconName; label: string }[] = [
@@ -56,6 +57,9 @@ function Layout() {
           <Link to="/live" className="btn btn-primary" aria-label="Record live">
             <Icon name="record" /> <span className="btn-label">Record live</span>
           </Link>
+          <NavLink to="/settings" className="btn btn-ghost btn-icon" aria-label="Settings" title="Settings">
+            <Icon name="gear" />
+          </NavLink>
           <ThemeSwitch />
         </div>
       </header>
@@ -86,6 +90,7 @@ const router = createBrowserRouter([
       { path: '/upload', element: <UploadPage /> },
       { path: '/live', element: <LivePage /> },
       { path: '/sessions/:id', element: <SessionPage /> },
+      { path: '/settings', element: <SettingsPage /> },
       { path: '*', element: <NotFound /> },
     ],
   },
