@@ -11,7 +11,7 @@
 // answers it: the macOS system picker where available, else the first screen, with system audio
 // ("loopback") on both paths.
 
-const { app, BrowserWindow, desktopCapturer, session, systemPreferences } = require('electron')
+const { app, BrowserWindow, desktopCapturer, session, shell, systemPreferences } = require('electron')
 const { spawn } = require('node:child_process')
 const fs = require('node:fs')
 const os = require('node:os')
@@ -63,10 +63,25 @@ async function isUp(url) {
   }
 }
 
+/** Only the Iris UI (or the probe's local page) may capture the screen. */
+function isIris(url) {
+  if (PROBE && url?.startsWith('file:')) return true
+  try {
+    return new URL(url).origin === new URL(UI).origin
+  } catch {
+    return false
+  }
+}
+
 function handleDisplayMedia() {
   session.defaultSession.setDisplayMediaRequestHandler(
     async (request, callback) => {
       // Reached when the system picker isn't used (probe, or macOS without it).
+      const from = request.frame?.url ?? request.securityOrigin
+      if (!isIris(from)) {
+        log(`[capture] refused a capture request from ${from}`)
+        return callback({})
+      }
       try {
         const sources = await desktopCapturer.getSources({ types: ['screen'] })
         log(`[capture] fallback handler: ${sources.length} screen(s), audio requested: ${request.audioRequested}`)
@@ -128,7 +143,7 @@ const PROBE_SCRIPT = `(async () => {
       levels.push(Math.sqrt(buf.reduce((s, x) => s + x * x, 0) / buf.length))
     }
     rec.stop(); await new Promise((r) => (rec.onstop = r))
-    out.audioRms = { max: +Math.max(...levels).toFixed(4), median: +levels.sort()[20].toFixed(4) }
+    out.audioRms = { max: +Math.max(...levels).toFixed(4), median: +levels.sort((a, b) => a - b)[20].toFixed(4) }
     out.webmChunks = chunks
   }
   stream.getTracks().forEach((t) => t.stop())
@@ -166,6 +181,19 @@ async function openUi() {
     title: 'Iris',
     // Recording happens with Iris in the background: don't throttle its 1 fps frame ticker.
     webPreferences: { backgroundThrottling: false },
+  })
+  // Links in the notes open in the browser; the window only ever shows the Iris UI.
+  const openOutside = (url) => {
+    if (/^https?:/.test(url)) shell.openExternal(url)
+  }
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    openOutside(url)
+    return { action: 'deny' }
+  })
+  win.webContents.on('will-navigate', (event, url) => {
+    if (isIris(url)) return
+    event.preventDefault()
+    openOutside(url)
   })
   await win.loadURL(UI)
 }
