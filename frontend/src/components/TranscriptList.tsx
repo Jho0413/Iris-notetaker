@@ -1,55 +1,17 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { followScrollTop, isAtBottom } from '../session/follow'
 import { formatClock, type Segment } from '../session/state'
-import { Icon } from './Icon'
 
-/**
- * Transcript segments with start times. With `follow`, the list keeps the newest line in view
- * only while the reader is already at the bottom; otherwise it offers "Jump to latest".
- */
-export function TranscriptList({ segments, follow = false }: { segments: Segment[]; follow?: boolean }) {
-  const box = useRef<HTMLDivElement>(null)
-  const [atBottom, setAtBottom] = useState(true)
-
-  // Before paint, so a followed line never flashes below the fold (and nothing jumps).
-  useLayoutEffect(() => {
-    const el = box.current
-    if (!follow || !el) return
-    const top = followScrollTop(atBottom, el)
-    if (top !== null) el.scrollTop = top
-  }, [segments, follow, atBottom])
-
-  useEffect(() => {
-    const el = box.current
-    if (!follow || !el) return
-    const onScroll = () => setAtBottom(isAtBottom(el))
-    el.addEventListener('scroll', onScroll, { passive: true })
-    return () => el.removeEventListener('scroll', onScroll)
-  }, [follow])
-
+/** Transcript segments with start times. */
+export function TranscriptList({ segments }: { segments: Segment[] }) {
   return (
-    <div ref={box} className={follow ? 'live-transcript' : undefined}>
-      <ol className="transcript">
-        {segments.map((s, i) => (
-          <li key={`${s.start}-${i}`}>
-            <time className="num" dateTime={`PT${Math.floor(s.start)}S`}>
-              {formatClock(s.start)}
-            </time>
-            <p>{s.text.trim()}</p>
-          </li>
-        ))}
-      </ol>
-      {follow && !atBottom && (
-        <div className="jump">
-          <button
-            type="button"
-            className="btn btn-sm"
-            onClick={() => box.current?.scrollTo({ top: box.current.scrollHeight })}
-          >
-            <Icon name="arrowDown" /> Jump to latest
-          </button>
-        </div>
-      )}
-    </div>
+    <ol className="transcript">
+      {segments.map((s, i) => (
+        <li key={`${s.start}-${i}`}>
+          <time className="num" dateTime={`PT${Math.floor(s.start)}S`}>
+            {formatClock(s.start)}
+          </time>
+          <p>{s.text.trim()}</p>
+        </li>
+      ))}
+    </ol>
   )
 }

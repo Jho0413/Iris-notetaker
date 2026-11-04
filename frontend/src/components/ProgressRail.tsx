@@ -2,31 +2,15 @@ import { useState } from 'react'
 import type { Stage } from '../api/client'
 import type { StreamStatus } from '../session/useSessionStream'
 import {
-  doneLive, formatDuration, STAGE_LABELS, STAGE_ORDER, stageDetail, stageSeconds, type RunState,
-  type StepStatus,
+  doneLive, formatDuration, stageSeconds, STAGE_ORDER, stepLine, stepStatus, type RunState,
 } from '../session/state'
-import { Icon, type IconName } from './Icon'
 import type { OutlineItem } from './NotesView'
-
-const STEP_ICON: Record<StepStatus, IconName> = {
-  pending: 'pending',
-  running: 'spinner',
-  done: 'check',
-  failed: 'alert',
-  stopped: 'stopped',
-}
-
-const STEP_WORD: Record<StepStatus, string> = {
-  pending: 'Not started',
-  running: 'In progress',
-  done: 'Done',
-  failed: 'Failed',
-  stopped: 'Stopped',
-}
+import { StepList } from './StepList'
 
 /**
- * The session rail: plain-language progress, the notes outline, the cost slot and on-demand
- * details. Below 1120px it collapses into a one-line summary that expands.
+ * The session rail: plain-language progress (once the notes are finished; until then the progress
+ * view shows it), the notes outline, the cost slot and on-demand details. Below 1120px it
+ * collapses into a one-line summary that expands.
  */
 export function ProgressRail(props: {
   run: RunState
@@ -41,21 +25,16 @@ export function ProgressRail(props: {
 }) {
   const [expanded, setExpanded] = useState(false)
   const { run } = props
+  const stored = { finished: props.finished, hasEvents: props.hasEvents, currentStage: props.currentStage }
 
-  function status(stage: Stage): StepStatus {
-    const s = run.stages[stage].status
-    if (s !== 'pending' || props.hasEvents) return s
-    // No events: infer from the stored session.
-    if (props.finished) return 'done'
-    const current = props.currentStage ? STAGE_ORDER.indexOf(props.currentStage) : -1
-    const i = STAGE_ORDER.indexOf(stage)
-    return i < current ? 'done' : 'pending'
-  }
-
-  const running = STAGE_ORDER.filter((s) => status(s) === 'running')
-  const summary = running.length
-    ? running.map((s) => [STAGE_LABELS[s], stageDetail(s, run)].filter(Boolean).join(' ')).join(' · ')
-    : props.finished ? 'All steps finished' : 'Progress'
+  // Without the progress list (it is in the main column until the notes are finished), the
+  // rail holds only the outline and details.
+  const running = STAGE_ORDER.filter((s) => stepStatus(s, run, stored) === 'running')
+  const summary = !props.showProgress
+    ? 'Run details'
+    : running.length
+      ? running.map((s) => stepLine(s, run)).join(' · ')
+      : props.finished ? 'All steps finished' : 'Progress'
   const timed = STAGE_ORDER.filter(
     (s) => doneLive(run.stages[s]) || stageSeconds(run.stages[s]) !== undefined,
   )
@@ -79,19 +58,7 @@ export function ProgressRail(props: {
         {props.showProgress && (
           <>
             <h2>Progress</h2>
-            <ol className="steps">
-              {STAGE_ORDER.map((stage) => {
-                const s = status(stage)
-                const detail = stageDetail(stage, run)
-                return (
-                  <li key={stage} className={`step step-${s}`}>
-                    <Icon name={STEP_ICON[s]} label={STEP_WORD[s]} />
-                    <span>{STAGE_LABELS[stage]}</span>
-                    {detail && <span className="step-detail num">{detail}</span>}
-                  </li>
-                )
-              })}
-            </ol>
+            <StepList run={run} {...stored} />
           </>
         )}
 

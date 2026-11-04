@@ -1,15 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useBlocker, useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import { LiveCapture } from '../capture/liveCapture'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { HealthBanner } from '../components/HealthBanner'
 import { Icon } from '../components/Icon'
-import { NotesView } from '../components/NotesView'
-import { TranscriptList } from '../components/TranscriptList'
-import { draftRefreshKey, fetchDraft, type NotesDraft } from '../session/draft'
 import { act } from '../session/request'
-import { formatClock, transcriptSegments } from '../session/state'
+import { formatClock, liveProgress } from '../session/state'
 import { useSessionStream } from '../session/useSessionStream'
 import { useTitle } from '../session/useTitle'
 
@@ -50,25 +47,9 @@ export function LivePage() {
 
   useTitle(recording ? `● Recording ${formatClock(elapsed)}` : 'Record live')
 
-  const stream = useSessionStream(recording ? sessionId ?? undefined : undefined)
-  const segments = useMemo(() => transcriptSegments(stream.run, null), [stream.run])
-  // Disclosure contents mount only while open, so an opened transcript starts at the latest line.
-  const [showTranscript, setShowTranscript] = useState(false)
-  const [showNotes, setShowNotes] = useState(false)
-
-  // The notes so far, refetched on every `notes_updated` from the live draft.
-  const [draft, setDraft] = useState<NotesDraft | null>(null)
-  const draftKey = recording && sessionId ? draftRefreshKey('recording', stream.run) : null
-  useEffect(() => {
-    if (draftKey === null || !sessionId) return
-    let live = true
-    void fetchDraft(sessionId).then((d) => {
-      if (live && d !== undefined) setDraft(d)
-    })
-    return () => {
-      live = false
-    }
-  }, [sessionId, draftKey])
+  // What live processing has done so far, as one quiet line (not announced: it changes often).
+  const stream = useSessionStream(recording || phase === 'stopping' ? sessionId ?? undefined : undefined)
+  const progress = liveProgress(stream.run)
 
   // Leaving ends the recording: the browser asks before closing the tab, the app before navigating.
   const blocker = useBlocker(recording)
@@ -322,42 +303,11 @@ export function LivePage() {
           playsInline
           aria-label="Preview of the shared screen"
         />
+        <p className="live-progress num">{progress || 'Iris processes the session as you record.'}</p>
         <p className="after">
-          When you stop (or stop sharing from the browser), Iris finishes uploading and starts
-          writing the notes. You can close this window afterwards and find the session in the
-          library.
+          When you stop (or stop sharing from the browser), Iris uploads the rest and finishes the
+          notes. You can close this window afterwards and find the session in the library.
         </p>
-        <details className="disclosure" onToggle={(e) => setShowTranscript(e.currentTarget.open)}>
-          <summary>
-            <Icon name="chevron" /> Show live transcript
-          </summary>
-          {showTranscript && (
-            <div className="disclosure-body live-panel">
-              {segments.length ? (
-                <TranscriptList segments={segments} follow />
-              ) : (
-                <p className="placeholder">Nothing transcribed yet. Lines appear here as they're processed.</p>
-              )}
-            </div>
-          )}
-        </details>
-        <details className="disclosure" onToggle={(e) => setShowNotes(e.currentTarget.open)}>
-          <summary>
-            <Icon name="chevron" /> Show notes so far
-          </summary>
-          {showNotes && (
-            <div className="disclosure-body live-panel live-notes">
-              {draft ? (
-                <NotesView sessionId={sessionId ?? ''} title={draft.title} markdown={draft.markdown} />
-              ) : (
-                <p className="placeholder">
-                  No notes yet. A draft appears here once enough has been said and shown, and it's
-                  refreshed every few minutes. Figures show the original crop until they're redrawn.
-                </p>
-              )}
-            </div>
-          )}
-        </details>
       </div>
 
       <ConfirmDialog

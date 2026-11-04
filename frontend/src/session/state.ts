@@ -64,10 +64,11 @@ export interface RunState {
   /** Figure ids in the order they were selected. */
   figureOrder: string[]
   /**
-   * Notes progress from `notes_updated`. `updatedAt` is the latest such event's time: it changes
-   * whenever the draft does (a section added or the live tail rewritten), so pages refetch on it.
+   * Notes progress from `notes_updated`: sections written (by the write stage, or ahead of stop
+   * by the live draft lane while recording) and whether the notes are assembled (`final`). Only
+   * counts: no notes are shown before the session is done.
    */
-  notes: { final: boolean; completed: number; total: number; updatedAt?: number } | null
+  notes: { final: boolean; completed: number; total: number } | null
   error?: string
   /** When the current run started (its `status: processing` event), in ms since the epoch. */
   runStart?: number
@@ -201,7 +202,6 @@ export function applyEvent(state: RunState, event: IrisEvent): RunState {
           final: final || state.notes?.final === true,
           completed: Math.max(completed, state.notes?.completed ?? 0),
           total: Math.max(total, state.notes?.total ?? 0),
-          updatedAt: timed ? Math.max(at, state.notes?.updatedAt ?? at) : state.notes?.updatedAt,
         },
       }
     }
@@ -294,7 +294,6 @@ export type UiStateKind =
   | 'recording-orphan'
   | 'starting'
   | 'processing'
-  | 'draft'
   | 'polishing'
   | 'stalled'
   | 'finished'
@@ -306,6 +305,8 @@ export interface UiState {
   label: string
   /** The step a retry or resume starts from. */
   fromStage?: Stage
+  /** While processing: the running step the label names. */
+  stage?: Stage
 }
 
 /** Combine the stored status with what the page knows (docs/frontend.md §3). */
@@ -344,22 +345,118 @@ export function uiState(
           fromStage: session.current_stage ?? undefined,
         }
       }
-      const notes = run.notes
-      // This run's notes are assembled and readable; the synthesis pass will replace them.
-      if (notes?.final || run.stages.synthesize.status === 'running') {
-        return { kind: 'polishing', label: STAGE_LABELS.synthesize }
+      // Notes are assembled (shown only once done), or the synthesis pass is polishing them.
+      const steps = currentSteps(session, run)
+      if (run.notes?.final || steps.includes('synthesize')) {
+        return { kind: 'polishing', label: STAGE_LABELS.synthesize, stage: 'synthesize' }
       }
-      if (notes && !notes.final && notes.completed > 0) {
-        return {
-          kind: 'draft',
-          label: notes.total ? `Draft · ${notes.completed} of ${notes.total} sections` : 'Draft',
-        }
-      }
-      const running = STAGE_ORDER.filter((s) => run.stages[s].status === 'running')
-      const stage = running[running.length - 1] ?? session.current_stage ?? undefined
-      return { kind: 'processing', label: stage ? `Processing · ${STAGE_LABELS[stage]}` : 'Processing' }
+      const stage = steps[steps.length - 1]
+      return stage
+        ? { kind: 'processing', label: stepLine(stage, run), stage }
+        : { kind: 'processing', label: 'Processing' }
     }
   }
+}
+
+/**
+ * What a screen reader is told when the state changes: the state and the step, never the
+ * counts, so advancing counts aren't announced one by one.
+ */
+export function announcement(ui: UiState): string {
+  if (ui.kind === 'processing') return ui.stage ? `Processing · ${STAGE_LABELS[ui.stage]}` : 'Processing'
+  return ui.label
+}
+
+/**
+ * The steps running now, in pipeline order (write and render run side by side). Without events
+ * for one (after a backend restart, or between two steps) the stored current step stands in.
+ */
+export function currentSteps(session: Session, run: RunState): Stage[] {
+  const running = STAGE_ORDER.filter((s) => run.stages[s].status === 'running')
+  if (running.length) return running
+  return session.current_stage ? [session.current_stage] : []
+}
+
+/** A step with its count, e.g. "Redrawing figures · 2 of 3". */
+export function stepLine(stage: Stage, run: RunState): string {
+  return [STAGE_LABELS[stage], stageDetail(stage, run)].filter(Boolean).join(' · ')
+}
+
+/**
+ * A step's status in the progress list. Without any events (the backend restarted, so its
+ * history is gone) it is inferred from the stored session: all done once finished, otherwise
+ * the steps before the stored current one.
+ */
+export function stepStatus(
+  stage: Stage,
+  run: RunState,
+  stored: { finished: boolean; hasEvents: boolean; currentStage?: Stage | null },
+): StepStatus {
+  const s = run.stages[stage].status
+  if (s !== 'pending' || stored.hasEvents) return s
+  if (stored.finished) return 'done'
+  const current = stored.currentStage ? STAGE_ORDER.indexOf(stored.currentStage) : -1
+  return STAGE_ORDER.indexOf(stage) < current ? 'done' : 'pending'
+}
+
+export interface ProgressView {
+  heading: string
+  /**
+   * The notes are being made: show the current step, how long processing has run and that it's
+   * fine to leave the page. Otherwise (failed, stalled, never finished recording) the page's
+   * banner says what happened and what to do.
+   */
+  active: boolean
+}
+
+/**
+ * What the session page shows in place of the notes until they're finished (docs/frontend.md
+ * §2, Session). Null once finished: then the notes are shown.
+ */
+export function progressView(kind: UiStateKind): ProgressView | null {
+  switch (kind) {
+    case 'finished':
+      return null
+    case 'starting':
+      return { heading: 'Getting ready to make your notes', active: true }
+    case 'processing':
+      return { heading: 'Making your notes', active: true }
+    case 'polishing':
+      return { heading: 'Polishing your notes', active: true }
+    case 'failed':
+    case 'stalled':
+      return { heading: "Your notes aren't finished", active: false }
+    case 'recording':
+    case 'recording-orphan':
+      return { heading: 'No notes yet', active: false }
+  }
+}
+
+/** Seconds since the current run started, when its start is known. */
+export function runSeconds(run: RunState, now: number): number | undefined {
+  return run.runStart === undefined ? undefined : Math.max(0, (now - run.runStart) / 1000)
+}
+
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
+
+/**
+ * The Live page's progress line, e.g. "Transcribed to 4:30 · 3 screens · 2 figures read ·
+ * 1 section written", from the recording's events. Only the parts that are non-zero; an empty
+ * string until something is processed.
+ */
+export function liveProgress(run: RunState): string {
+  const to = transcriptSegments(run, null).reduce((max, s) => Math.max(max, s.end), 0)
+  const screens = Object.keys(run.moments).length
+  const figures = run.figureOrder.length
+  const sections = run.notes?.completed ?? 0
+  return [
+    to > 0 && `Transcribed to ${formatClock(to)}`,
+    screens > 0 && plural(screens, 'screen', 'screens'),
+    figures > 0 && `${plural(figures, 'figure', 'figures')} read`,
+    sections > 0 && `${plural(sections, 'section', 'sections')} written`,
+  ]
+    .filter(Boolean)
+    .join(' · ')
 }
 
 /** Label for a library row, where only the stored session is known. */

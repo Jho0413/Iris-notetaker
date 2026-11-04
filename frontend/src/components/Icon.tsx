@@ -18,7 +18,6 @@ const PATHS = {
   trash: 'M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3',
   chevron: 'M9 6l6 6-6 6',
   file: 'M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5zM14 3v5h5',
-  arrowDown: 'M12 5v14M6 13l6 6 6-6',
   stopped: 'M8 12h8',
 } as const
 
