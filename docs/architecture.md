@@ -220,8 +220,7 @@ Late data is never lost: everything captured stays on disk and the final run use
    moment, `visual_selected` per figure), so the UI's progress and counts look as for a run; the
    transcript is fetched whole once transcribe finishes, and transcribe's `stage_finished` carries
    its size (`segments`) because the live windows' `transcript_chunk` events came before the run
-   started. A re-run (`POST /sessions/{id}/run`) has
-   no processor and runs its plan as before.
+   started. A re-run (`POST /sessions/{id}/run`) has no processor and runs its plan as before.
 4. **Synthesis**, as for uploads: see "Final synthesis" below.
 
 A lane whose upstream lane failed (`upstream_failed`) stops making model calls for the rest of the
