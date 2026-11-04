@@ -10,6 +10,11 @@ const http = require('node:http')
 const { Readable } = require('node:stream')
 const routes = require('./routes.cjs')
 
+// Sent with every API response. fetch, XHR and EventSource ignore it; it only applies when a
+// response is shown as a document, such as a figure opened full size in its own window: no
+// script, and an opaque origin (sandbox), so even a hostile SVG couldn't call the API.
+const API_CSP = "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; sandbox"
+
 // Responses that carry no body; a Response with one would throw.
 const NO_BODY = new Set([101, 204, 205, 304])
 
@@ -34,6 +39,7 @@ function forward(request, apiPath, target) {
       for (const [name, value] of Object.entries(res.headers)) {
         for (const v of [].concat(value ?? [])) out.append(name, v)
       }
+      out.set('content-security-policy', API_CSP)
       const location = out.get('location')
       if (location) {
         const rewritten = routes.rewriteLocation(location, target.port)
@@ -58,4 +64,4 @@ function forward(request, apiPath, target) {
   })
 }
 
-module.exports = { forward }
+module.exports = { forward, API_CSP }

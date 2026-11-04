@@ -129,6 +129,8 @@ test('API requests reach the backend with the token, the page’s own token repl
   assert.equal(seen[0].headers['x-iris-token'], TOKEN)
   assert.equal(seen[0].headers.host, `127.0.0.1:${port}`)
   assert.deepEqual(res.headers.getSetCookie(), ['a=1', 'b=2'])
+  // Shown as a document (a figure opened in its own window), an API response runs no script.
+  assert.match(res.headers.get('content-security-policy'), /default-src 'none'.*sandbox/)
 })
 
 test('request bodies are streamed through', async () => {

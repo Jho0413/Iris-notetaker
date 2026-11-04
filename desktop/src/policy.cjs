@@ -37,6 +37,16 @@ function externalUrl(url) {
   }
 }
 
+/**
+ * A session file the UI opens in a new window ("Open full size" on a figure):
+ * app://iris/api/sessions/<id>/files/<dir>/<name>, nothing else.
+ */
+function isSessionFileUrl(url) {
+  if (!isIrisUrl(url)) return false
+  const { pathname, search, hash } = new URL(url)
+  return !search && !hash && /^\/api\/sessions\/[A-Za-z0-9_-]+\/files\/[A-Za-z0-9_-]+\/[A-Za-z0-9_.-]+$/.test(pathname) && !pathname.includes('/.')
+}
+
 // Microphone and screen capture, for the live recorder. Nothing else (notifications,
 // geolocation, clipboard reads, ...) is ever granted.
 const GRANTED = new Set(['media', 'display-capture'])
@@ -61,4 +71,4 @@ function permissionCheckAllowed(permission, requestingOrigin) {
   return GRANTED.has(permission) && isIrisUrl(requestingOrigin)
 }
 
-module.exports = { isIrisUrl, isDesktopPage, externalUrl, permissionAllowed, permissionCheckAllowed }
+module.exports = { isIrisUrl, isDesktopPage, isSessionFileUrl, externalUrl, permissionAllowed, permissionCheckAllowed }

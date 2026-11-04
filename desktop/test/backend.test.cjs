@@ -109,8 +109,12 @@ test('each start gets a new port and token', async () => {
 
 test('a crash while starting rejects; a crash later is reported as unexpected', async () => {
   const { backend } = fakeBackend('crash')
+  const startExit = exitEvent(backend)
   await assert.rejects(backend.start(), /exited while starting \(code 3\)/)
   assert.equal(backend.running, false)
+  const e0 = await startExit
+  assert.equal(e0.expected, false)
+  assert.equal(e0.duringStart, true, 'reported by the rejection, not as a crash')
 
   const ok = fakeBackend('ok').backend
   const ready = await ok.start()
@@ -118,6 +122,7 @@ test('a crash while starting rejects; a crash later is reported as unexpected', 
   process.kill(ok.child.pid, 'SIGKILL')
   const e = await exit
   assert.equal(e.expected, false)
+  assert.equal(e.duringStart, false) // a real crash
   assert.equal(e.signal, 'SIGKILL')
   assert.equal(ok.info(), null)
   assert.ok(ready.port)
@@ -147,5 +152,62 @@ test('a command that cannot run rejects with the reason', async () => {
     startTimeoutMs: 2000,
   })
   await assert.rejects(backend.start(), /could not start: .*ENOENT/)
+  assert.equal(backend.running, false)
+})
+
+function alive(pid) {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
+test('concurrent starts share one process, and stop leaves none', async () => {
+  let spawned = 0
+  const { backend } = fakeBackend('ok')
+  const realSpawn = backend.spawn
+  const pids = []
+  backend.spawn = (...args) => {
+    spawned++
+    const child = realSpawn(...args)
+    pids.push(child.pid)
+    return child
+  }
+  const [a, b] = await Promise.all([backend.start(), backend.start()])
+  assert.deepEqual(a, b)
+  assert.equal(spawned, 1)
+  await backend.stop()
+  assert.ok(!alive(pids[0]))
+})
+
+test('stop during a slow start cancels it: start rejects as stopped, no process is left', async () => {
+  const { backend } = fakeBackend('slow', { startTimeoutMs: 10_000 })
+  const exit = exitEvent(backend)
+  const starting = backend.start()
+  await new Promise((r) => setTimeout(r, 300)) // spawned, not healthy
+  const pid = backend.child.pid
+  await backend.stop()
+  await assert.rejects(starting, (err) => err.stopped === true)
+  assert.equal((await exit).expected, true)
+  assert.ok(!alive(pid))
+  assert.equal(backend.running, false)
+  // And it can start again afterwards.
+  backend.command = fakeBackend('ok').backend.command
+  await backend.start()
+  await backend.stop()
+})
+
+test('stop before the process is spawned cancels the start too', async () => {
+  let spawned = 0
+  const { backend } = fakeBackend('ok')
+  const realSpawn = backend.spawn
+  backend.spawn = (...args) => (spawned++, realSpawn(...args))
+  const starting = backend.start()
+  const stopping = backend.stop() // while start awaits a free port
+  await assert.rejects(starting, (err) => err.stopped === true)
+  await stopping
+  assert.equal(spawned, 0)
   assert.equal(backend.running, false)
 })

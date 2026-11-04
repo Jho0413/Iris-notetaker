@@ -131,9 +131,25 @@ function showMainWindow() {
     })
     if (choice === 0) event.preventDefault()
   })
-  win.webContents.on('render-process-gone', (_e, details) => {
+  const crashes = []
+  win.webContents.on('render-process-gone', async (_e, details) => {
     log(`[window] renderer gone: ${details.reason}`)
-    if (details.reason !== 'clean-exit' && mainWindow === win) loadUi(win)
+    if (details.reason === 'clean-exit' || mainWindow !== win) return
+    const now = Date.now()
+    crashes.push(now)
+    while (crashes.length && now - crashes[0] > 60_000) crashes.shift()
+    if (crashes.length <= 2) return loadUi(win) // reload at once, twice a minute at most
+    const { response } = await dialog.showMessageBox(win, {
+      type: 'error',
+      buttons: ['Reload', 'Quit'],
+      defaultId: 0,
+      cancelId: 1,
+      message: 'The Iris window keeps stopping.',
+      detail: `It stopped ${crashes.length} times in a minute (${details.reason}). Your sessions are kept.\n\nLogs: ${LOGS}`,
+    })
+    if (response === 1) return app.quit()
+    crashes.length = 0
+    if (!win.isDestroyed()) loadUi(win)
   })
   loadUi(win)
   return win
@@ -226,15 +242,25 @@ async function changeKey() {
 
 // ---- backend ---------------------------------------------------------------------------------
 
+let startCount = 0 // which startBackend() call is the latest
+
+/** Start the engine unless it is up (a start under way is joined, never doubled). */
 async function startBackend() {
+  if (backend.info()) return showUiWhenReady()
+  const mine = ++startCount
   try {
     await backend.start()
   } catch (err) {
-    if (quitting) return
+    // Stopped on purpose (quit, restart) or superseded by a newer start: nothing to report.
+    if (quitting || err.stopped || mine !== startCount) return
     log(`[backend] failed to start: ${err.message}`)
     return offerRestart("Iris's engine didn't start.", err.message)
   }
-  if (mainWindow && !showingUi(mainWindow)) mainWindow.loadURL(UI_URL)
+  showUiWhenReady()
+}
+
+function showUiWhenReady() {
+  if (mainWindow && backend.info() && !showingUi(mainWindow)) mainWindow.loadURL(UI_URL)
 }
 
 async function restartBackend() {
@@ -242,11 +268,21 @@ async function restartBackend() {
   await startBackend()
 }
 
-backend.on('exit', ({ expected }) => {
-  if (!expected && !quitting) offerRestart("Iris's engine stopped unexpectedly.", 'What you recorded so far is kept.')
+backend.on('exit', ({ expected, duringStart }) => {
+  // A start that fails is reported by startBackend() instead.
+  if (!expected && !duringStart && !quitting) {
+    offerRestart("Iris's engine stopped unexpectedly.", 'What you recorded so far is kept.')
+  }
 })
 
-async function offerRestart(message, detail) {
+let restartDialog = null // at most one "engine stopped" dialog at a time
+
+function offerRestart(message, detail) {
+  restartDialog ??= askToRestart(message, detail).finally(() => (restartDialog = null))
+  return restartDialog
+}
+
+async function askToRestart(message, detail) {
   for (;;) {
     const { response } = await dialog.showMessageBox(mainWindow ?? undefined, {
       type: 'error',
@@ -256,7 +292,10 @@ async function offerRestart(message, detail) {
       message,
       detail: `${detail}\n\nLogs: ${LOGS}`,
     })
-    if (response === 0) return startBackend()
+    if (response === 0) {
+      restartDialog = null // a failure of this restart may ask again
+      return startBackend()
+    }
     if (response === 2) return app.quit()
     shell.openPath(LOGS)
   }
@@ -289,6 +328,18 @@ async function confirmBusy(message, detail, button = 'Continue') {
 
 // ---- security --------------------------------------------------------------------------------
 
+/** "Open full size" on a figure: the file in its own window (no preload; the guards apply). */
+function openFigure(url) {
+  const win = new BrowserWindow({
+    width: 1200,
+    height: 900,
+    title: 'Iris figure',
+    backgroundColor: background(),
+    webPreferences: WEB_PREFERENCES,
+  })
+  win.loadURL(url)
+}
+
 function openOutside(url) {
   const external = policy.externalUrl(url)
   if (external) shell.openExternal(external)
@@ -298,7 +349,8 @@ function openOutside(url) {
 // open in the browser.
 app.on('web-contents-created', (_event, contents) => {
   contents.setWindowOpenHandler(({ url }) => {
-    openOutside(url)
+    if (policy.isSessionFileUrl(url)) openFigure(url)
+    else openOutside(url)
     return { action: 'deny' }
   })
   const guard = (event, url) => {
@@ -429,14 +481,18 @@ if (!app.requestSingleInstanceLock()) {
     if (app.isReady() && !keyWindow) showMainWindow()
   })
 
+  let quitAsk = null // the pending "Quit Iris?" check: another Cmd-Q waits for it
   app.on('before-quit', (event) => {
     if (quitConfirmed) return
     event.preventDefault()
-    confirmBusy('Quit Iris?', 'Quitting stops Iris’s engine.', 'Quit').then((ok) => {
-      if (!ok) return
-      quitConfirmed = true
-      app.quit()
-    })
+    if (quitAsk) return
+    quitAsk = confirmBusy('Quit Iris?', 'Quitting stops Iris’s engine.', 'Quit')
+      .then((ok) => {
+        if (!ok) return
+        quitConfirmed = true
+        app.quit()
+      })
+      .finally(() => (quitAsk = null))
   })
 
   // Windows are closed by now: stop the engine, then quit for real.

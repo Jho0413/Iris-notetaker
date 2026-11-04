@@ -46,3 +46,22 @@ test('permission checks follow the same rule', () => {
   assert.ok(!policy.permissionCheckAllowed('media', 'https://evil.example'))
   assert.ok(!policy.permissionCheckAllowed('notifications', 'app://iris'))
 })
+
+test('figures open in an Iris window; other app:// URLs do not', () => {
+  assert.ok(policy.isSessionFileUrl('app://iris/api/sessions/ab12cd/files/visuals/v1.jpg'))
+  assert.ok(policy.isSessionFileUrl('app://iris/api/sessions/ab12cd/files/frames/000000001.jpg'))
+  for (const u of [
+    'app://iris/',
+    'app://iris/sessions/ab12cd',
+    'app://iris/api/sessions/ab12cd/export',
+    'app://iris/api/sessions/ab12cd/files/visuals/../../x',
+    'app://iris/api/sessions/ab12cd/files/visuals/.hidden',
+    'app://iris/api/sessions/ab12cd/files/visuals/v1.jpg?x=1',
+    'app://other/api/sessions/ab12cd/files/visuals/v1.jpg',
+    'https://evil.example/api/sessions/ab12cd/files/visuals/v1.jpg',
+  ]) {
+    assert.ok(!policy.isSessionFileUrl(u), u)
+  }
+  // And such a URL is never handed to the system browser.
+  assert.equal(policy.externalUrl('app://iris/api/sessions/ab12cd/files/visuals/v1.jpg'), null)
+})

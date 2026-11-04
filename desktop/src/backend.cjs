@@ -28,6 +28,10 @@ function freePort() {
   })
 }
 
+function stoppedError() {
+  return Object.assign(new Error('the backend was stopped while starting'), { stopped: true })
+}
+
 function newToken() {
   return crypto.randomBytes(32).toString('base64url')
 }
@@ -89,8 +93,9 @@ function rotateLog(file) {
 }
 
 /**
- * The backend process. Emits 'exit' ({code, signal, expected}) when it stops: `expected` is false
- * when it stopped on its own (a crash), so the app can offer a restart.
+ * The backend process. Emits 'exit' ({code, signal, expected, duringStart}) when it stops:
+ * `expected` is false when it stopped on its own; `duringStart` is true when it never became
+ * healthy (start() rejects for that). A crash is `!expected && !duringStart`.
  */
 class Backend extends EventEmitter {
   /**
@@ -113,6 +118,7 @@ class Backend extends EventEmitter {
     this.child = null
     this.ready = null // {port, token} once healthy
     this.stopping = false
+    this.starting = null // the start() under way
   }
 
   /** Where the page's API requests go, or null while the backend isn't up. */
@@ -124,11 +130,22 @@ class Backend extends EventEmitter {
     return this.child !== null
   }
 
-  /** Start and wait until healthy. Rejects if it exits or doesn't answer in time. */
-  async start() {
-    if (this.child) throw new Error('backend already running')
-    this.stopping = false
+  /**
+   * Start and wait until healthy. Rejects if it exits or doesn't answer in time; the error has
+   * `stopped: true` when stop() ended the start. One start at a time: calling start() again while
+   * one is under way returns the same promise, so there is never a second backend process.
+   */
+  start() {
+    if (this.starting) return this.starting
+    if (this.child) return Promise.reject(new Error('backend already running'))
+    this.stopping = false // set before the first await, so stop() from here on cancels this start
+    this.starting = this._start().finally(() => (this.starting = null))
+    return this.starting
+  }
+
+  async _start() {
     const port = await freePort()
+    if (this.stopping) throw stoppedError()
     const token = newToken()
     const { cmd, args, cwd, env } = this.command(port, token)
     fs.mkdirSync(path.dirname(this.logFile), { recursive: true })
@@ -141,6 +158,7 @@ class Backend extends EventEmitter {
     child.stdout.pipe(out, { end: false })
     child.stderr.pipe(out, { end: false })
 
+    let healthy = false
     const exited = new Promise((resolve) => {
       child.once('error', (err) => {
         out.write(`--- could not start: ${err.message}\n`)
@@ -156,7 +174,9 @@ class Backend extends EventEmitter {
       }
       const expected = this.stopping
       this.log(`[backend] exited (code ${code}, signal ${signal}${expected ? '' : ', unexpected'})`)
-      this.emit('exit', { code, signal, expected, error })
+      // A backend that dies before it was ever healthy is reported by start()'s rejection, so
+      // the app shows one "didn't start" message, not that and a crash.
+      this.emit('exit', { code, signal, expected, duringStart: !healthy, error })
     })
 
     const started = Date.now()
@@ -164,29 +184,40 @@ class Backend extends EventEmitter {
     let gone = null
     exited.then((e) => (gone = e))
     while (!gone) {
+      if (this.stopping) break
       if (await checkHealth(port, token)) {
+        if (this.stopping || gone) break
+        healthy = true
         this.ready = { port, token }
         this.log(`[backend] up on port ${port} after ${((Date.now() - started) / 1000).toFixed(1)} s`)
         return this.ready
       }
       if (Date.now() > deadline) {
-        await this.stop()
+        this.stopping = true
+        await this._terminate(child)
         throw new Error(`the backend did not start within ${Math.round(this.startTimeoutMs / 1000)} s`)
       }
       await new Promise((r) => setTimeout(r, 200))
     }
+    if (this.stopping) throw stoppedError()
     throw new Error(
       gone.error ? `the backend could not start: ${gone.error.message}` : `the backend exited while starting (code ${gone.code})`,
     )
   }
 
-  /** Stop it: SIGTERM (it finishes cleanly), then SIGKILL after stopTimeoutMs. */
+  /**
+   * Stop it: SIGTERM (it finishes cleanly), then SIGKILL after stopTimeoutMs. A start under way
+   * is cancelled (it rejects with `stopped: true`), and stop() returns once no process is left.
+   */
   async stop() {
-    const child = this.child
-    if (!child) return
     this.stopping = true
     this.ready = null
-    if (child.exitCode !== null || child.signalCode !== null) return
+    await this._terminate(this.child)
+    await this.starting?.catch(() => {})
+  }
+
+  async _terminate(child) {
+    if (!child || child.pid === undefined || child.exitCode !== null || child.signalCode !== null) return
     const exited = new Promise((resolve) => child.once('exit', resolve))
     child.kill('SIGTERM')
     const timer = setTimeout(() => {
