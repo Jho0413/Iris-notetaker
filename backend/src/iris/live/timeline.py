@@ -20,7 +20,7 @@ A lane that has finished (flushed everything after stop) or failed counts as thr
 
 A failed lane is not a finished one, though: everything downstream of it is working on
 incomplete evidence. ``upstream_failed(lane)`` tells a lane so; it then stops making paid model
-calls and only waits for stop (the session is processed like an upload at stop anyway).
+calls and only waits for stop (stop redoes that work in the pipeline anyway).
 
 ``complete`` decides whether stop may promote the live outputs. It covers the lanes whose outputs
 are promoted (audio, screen, select); the draft lane only fills caches, so its failure costs
