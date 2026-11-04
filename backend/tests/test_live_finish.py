@@ -238,7 +238,7 @@ def draft_seen_at(monkeypatch, at: Stage) -> list[bool]:
     async def promoting(ctx, tl, stage):
         if stage == at:
             seen.append(ctx.paths.notes_draft.exists())
-        await real_promote(ctx, tl, stage)
+        return await real_promote(ctx, tl, stage)
 
     async def running(ctx):
         seen.append(ctx.paths.notes_draft.exists())
@@ -306,6 +306,17 @@ def test_a_live_session_is_finished_at_stop_with_only_the_open_work_left(
     items = read_model(root / "alignment.json", Alignment).items
     assert [i.moment for i in items] == timeline.moments
     assert not (root / "transcript_chunks").exists()  # the transcribe stage never ran
+    # The UI resets its counts when processing starts, after the live windows' events: the
+    # promoted transcribe step reports the whole transcript's size itself.
+    finished = [
+        e.data
+        for e in events(client, sid)[len(live) :]
+        if e.type == "stage_finished" and e.data["stage"] == "transcribe"
+    ]
+    assert len(timeline.segments) > 1
+    assert finished == [
+        {"stage": "transcribe", "promoted": True, "segments": len(timeline.segments)}
+    ]
 
     # After stop: the last window(s), the last select batch, the sections still open at stop,
     # the last figure's render (live renders don't start after stop) and synthesis. Nothing live
@@ -511,8 +522,9 @@ async def test_promotion_writes_the_timeline_as_it_is(tmp_path: Path):
     emitted: list[tuple[str, dict]] = []
     c.emit = lambda t, d: emitted.append((t, d))
     tl = await timeline_with_work(c)
-    for stage in promote.EVERYTHING:
-        await promote.promote(c, tl, stage)
+    extras = [await promote.promote(c, tl, stage) for stage in promote.EVERYTHING]
+    # Only transcribe reports extra data: its size, as the UI can't count it from events.
+    assert extras == [{"segments": len(tl.segments)}, {}, {}, {}]
     transcript = read_model(c.paths.transcript, Transcript)
     # Order and language as the timeline holds them (not re-sorted, not re-voted).
     assert [s.text for s in transcript.segments] == ["b", "a"]

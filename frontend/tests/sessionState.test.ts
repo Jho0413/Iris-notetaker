@@ -61,6 +61,32 @@ test('stages promoted at stop are done, marked live and not timed', () => {
   assert.equal(next.stages.transcribe.promoted, undefined)
 })
 
+test('a promoted transcript is counted from the backend, not from the parts seen since stop', () => {
+  const chunk = (i: number) => ev('transcript_chunk', { chunk: i, segments: [{ start: i, end: i + 1, text: 'x' }] })
+  const events = [
+    // Recording: the live audio lane's windows.
+    ...[0, 1, 2, 3].map(chunk),
+    // Stop: this run's counts reset, then the window cut at stop arrives.
+    ev('status', { status: 'processing' }),
+    chunk(4),
+    ev('stage_started', { stage: 'transcribe', promoted: true }),
+    ev('stage_finished', { stage: 'transcribe', promoted: true, segments: 412 }),
+  ]
+  const run = reduceEvents(events)
+  assert.equal(stageDetail('transcribe', run), '412 segments · live')
+  // One segment, none (said nothing) and a malformed count.
+  const one = reduceEvents([...events.slice(0, -1), ev('stage_finished', { stage: 'transcribe', promoted: true, segments: 1 })])
+  assert.equal(stageDetail('transcribe', one), '1 segment · live')
+  const none = reduceEvents([...events.slice(0, -1), ev('stage_finished', { stage: 'transcribe', promoted: true, segments: 0 })])
+  assert.equal(stageDetail('transcribe', none), 'live')
+  const bad = reduceEvents([...events.slice(0, -1), ev('stage_finished', { stage: 'transcribe', promoted: true, segments: 'many' })])
+  assert.equal(stageDetail('transcribe', bad), '1 part · live')
+  // A later run that transcribes for real counts its parts again.
+  const rerun = reduceEvents([...events, ev('status', { status: 'processing' }),
+    ev('stage_started', { stage: 'transcribe' }), chunk(0), chunk(1), ev('stage_finished', { stage: 'transcribe' })])
+  assert.equal(stageDetail('transcribe', rerun), '2 parts')
+})
+
 test('a promotion that fails is shown as failed, not as done live', () => {
   const run = reduceEvents([
     ev('status', { status: 'processing' }),
