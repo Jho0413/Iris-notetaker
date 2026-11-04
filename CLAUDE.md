@@ -1,7 +1,7 @@
 # Iris: working agreement
 
 Read `README.md` and `docs/architecture/overview.md` first (the rest of `docs/architecture/` covers
-the pipeline, live sessions and errors). This file covers how we work.
+the pipeline, live sessions, errors and the desktop app). This file covers how we work.
 
 ## Conventions
 

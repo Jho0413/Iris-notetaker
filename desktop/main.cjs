@@ -1,4 +1,4 @@
-// Iris desktop app: the main process (docs/plans/desktop-app.md).
+// Iris desktop app: the main process (docs/architecture/desktop.md).
 //
 //   npm start      development: the UI from frontend/dist (build it first: `npm run build` in
 //                  frontend/, or `npm run start:fresh` here), the backend from the repo with uv

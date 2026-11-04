@@ -2,9 +2,9 @@
 //
 // node:http rather than Electron's net.fetch: piping honours backpressure, so a 500 MB upload
 // costs the main process about 90 MB of memory instead of about 1.6 GB (net.fetch reads the
-// whole request body ahead of the socket). Measured in the step 1 check of
-// docs/plans/desktop-app.md. The target is always 127.0.0.1, so Chromium's network stack adds
-// nothing here.
+// whole request body ahead of the socket), measured with a real upload
+// (docs/architecture/desktop.md, "The app:// handler"). The target is always 127.0.0.1, so
+// Chromium's network stack adds nothing here.
 
 const http = require('node:http')
 const { Readable } = require('node:stream')

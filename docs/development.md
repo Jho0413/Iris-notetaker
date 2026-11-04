@@ -41,7 +41,7 @@ uv run iris replay-live <file>              # play a recording into the live API
 ## Desktop app
 
 `desktop/` is the macOS app (Electron): the same UI, served from `app://iris`, and the backend as
-its child process ([`architecture/overview.md`](architecture/overview.md), "The desktop app").
+its child process. How it works: [`architecture/desktop.md`](architecture/desktop.md).
 
 ```sh
 make desktop                      # desktop/dist/mac-arm64/Iris.app and Iris-<version>-arm64.dmg

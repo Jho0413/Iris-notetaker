@@ -6,6 +6,8 @@ architecture docs go deeper:
 - [`pipeline.md`](pipeline.md): the life of an upload and how each stage works
 - [`live.md`](live.md): live capture, and processing a session while it records
 - [`errors.md`](errors.md): how failures are classified, retried and shown
+- [`desktop.md`](desktop.md): the macOS app: the `app://` handler, the token, the backend's
+  lifecycle, security and packaging
 
 ## What Iris does
 
@@ -87,6 +89,8 @@ Iris.app
   force-quit, exits on its own once the app's process is gone (`IRIS_PARENT_PID`).
 - **Capture** goes through the UI's own `getDisplayMedia` call, answered by the macOS system picker
   (any screen or window) with system audio.
+
+Details, decisions and measurements: [`desktop.md`](desktop.md).
 
 ## Components
 

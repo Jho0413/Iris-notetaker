@@ -73,5 +73,5 @@ desktop/          the macOS app (Electron): app:// handler, backend lifecycle, k
 docs/
   roadmap.md      what is done, what is next
   development.md  commands, cost tracking, troubleshooting
-  architecture/   overview, pipeline, live sessions, errors and retries
+  architecture/   overview, pipeline, live sessions, errors and retries, the desktop app
 ```

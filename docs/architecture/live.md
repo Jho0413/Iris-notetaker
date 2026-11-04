@@ -16,12 +16,15 @@ with `uv run iris run <session_id>`.
 | Chrome, Edge | Yes | Tab audio when sharing a tab (keep "Also share tab audio" on). System audio when sharing the entire screen on Windows and ChromeOS. On macOS, tab audio only | Supported. A live session with a real mic and screen share works in Chrome |
 | Firefox | Yes | None (Firefox can't share audio) | Expected to work; not checked yet |
 | Safari | Yes | None | Untested; Iris says so if the browser can't record WebM audio |
+| Iris for macOS ([`desktop.md`](desktop.md)) | Yes | System audio with any screen or window, from the macOS picker | Supported. Live recordings of a window with sound work end to end |
 
 Shared-audio modes:
 
 - **Mic only:** sharing a window or screen without audio. Only the microphone is recorded.
 - **Mic plus shared audio:** sharing a tab (or a screen, where supported) with audio. Both are mixed
   into one track. Use headphones, or the mic also picks up the shared audio from your speakers.
+  Shared audio is recorded without echo cancellation, noise suppression or gain control (it is
+  what plays, not a voice in a room); the microphone keeps them.
 
 What happens when capture is interrupted:
 
@@ -37,8 +40,10 @@ What happens when capture is interrupted:
   the session. Audio is never discarded while the tab stays open. Screen frames are queued up to
   120 (about 2 minutes); during a longer outage the oldest queued frames are dropped to bound
   memory, so the notes may miss what was on screen then.
-- **Closing the tab while recording:** the browser asks for confirmation. If you leave, the session
-  is processed with what arrived. If the browser crashes instead, the session stays `recording`;
+- **Closing the tab while recording:** the browser asks for confirmation (the desktop app shows its
+  own "Stop recording?" dialog). If you leave, the session is processed with what arrived: the page
+  ends it with a beacon, or a keepalive request where beacons aren't allowed (the app's `app://`
+  pages). If the browser crashes instead, the session stays `recording`;
   finish it with `curl -X POST http://127.0.0.1:8000/api/live/<session_id>/end`.
 
 ## Processing while recording
