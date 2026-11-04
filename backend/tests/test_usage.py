@@ -355,7 +355,7 @@ def test_deleting_a_session_forgets_its_running_total(api):
         usage.append_record(paths.usage_log, call(0.25))
     assert listed(client, sid)["cost_usd"] == pytest.approx(0.75)
     assert client.delete(f"/api/sessions/{sid}").status_code == 204
-    # A new log at the same path (even one as long, on a reused inode) is counted from zero.
+    # A new session folder's log at the same path is counted from zero, not added to the old one.
     paths.ensure()
     for _ in range(3):
         usage.append_record(paths.usage_log, call(0.1))
@@ -375,6 +375,20 @@ def test_one_unreadable_log_does_not_break_the_session_list(api, caplog):
     assert rows[broken]["cost_usd"] is None
     assert rows[fine]["cost_usd"] == pytest.approx(0.25)
     assert "could not read" in caplog.text
+
+
+def test_a_read_error_after_opening_the_log_does_not_break_the_session_list(api, monkeypatch):
+    client, settings = api
+    sid, paths = new_session(client, settings)
+    usage.append_record(paths.usage_log, call(0.25))
+
+    def failing_read(*_args):
+        raise OSError(5, "Input/output error")
+
+    monkeypatch.setattr(usage.os, "fstat", failing_read)
+    assert listed(client, sid)["cost_usd"] is None  # the list still loads
+    monkeypatch.undo()
+    assert listed(client, sid)["cost_usd"] == pytest.approx(0.25)  # counted once readable
 
 
 def test_list_and_usage_agree_on_records_with_unicode_line_separators(api):

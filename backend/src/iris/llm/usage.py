@@ -405,34 +405,39 @@ def running_total(log_path: Path) -> UsageTotals:
     """
     with _tally_lock:
         try:
-            f = log_path.open("rb")
+            with log_path.open("rb") as f:
+                return _advance(log_path, f)
         except FileNotFoundError:
             _tallies.pop(log_path, None)
             return UsageTotals()
         except OSError:
             # One unreadable log must not break the session list: that session shows no cost.
+            # Its tally is dropped, so it is counted from the start once it can be read.
             log.warning("could not read %s", log_path, exc_info=True)
             _tallies.pop(log_path, None)
             return UsageTotals()
-        with f:
-            st = os.fstat(f.fileno())
-            file = (st.st_dev, st.st_ino)
-            tally = _tallies.get(log_path)
-            if tally is None or tally.file != file or st.st_size < tally.offset:
-                tally = _tallies[log_path] = _Tally(file, 0, UsageTotals())
-            if st.st_size > tally.offset:
-                f.seek(tally.offset)
-                data = f.read(st.st_size - tally.offset)
-                complete = data.rfind(b"\n") + 1  # 0: no complete line yet
-                for line in data[:complete].split(b"\n"):
-                    if not line.strip():
-                        continue
-                    try:
-                        _add(tally.totals, UsageRecord.model_validate_json(line))
-                    except ValueError:
-                        log.warning("skipping unreadable line in %s", log_path)
-                tally.offset += complete
-            return tally.totals.model_copy()
+
+
+def _advance(log_path: Path, f: io.BufferedReader) -> UsageTotals:
+    """Count the complete lines appended to the open log since its tally was last advanced."""
+    st = os.fstat(f.fileno())
+    file = (st.st_dev, st.st_ino)
+    tally = _tallies.get(log_path)
+    if tally is None or tally.file != file or st.st_size < tally.offset:
+        tally = _tallies[log_path] = _Tally(file, 0, UsageTotals())
+    if st.st_size > tally.offset:
+        f.seek(tally.offset)
+        data = f.read(st.st_size - tally.offset)  # read in full before anything is counted
+        complete = data.rfind(b"\n") + 1  # 0: no complete line yet
+        for line in data[:complete].split(b"\n"):
+            if not line.strip():
+                continue
+            try:
+                _add(tally.totals, UsageRecord.model_validate_json(line))
+            except ValueError:
+                log.warning("skipping unreadable line in %s", log_path)
+        tally.offset += complete
+    return tally.totals.model_copy()
 
 
 def with_cost(session: Session, log_path: Path) -> Session:
