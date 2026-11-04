@@ -272,8 +272,8 @@ tested function (`src/session/state.ts`).
 | Event | Data used | UI effect |
 |---|---|---|
 | `status` | `status` | Updates the chip and actions; `processing` starts a new run (clears run state); `done` fetches the final notes; `failed` fetches the session for its error |
-| `stage_started` | `stage`, `at` | Step becomes running; records its start time for Details; the header names it |
-| `stage_finished` | `stage`, `at` | Step becomes done; duration shown in Details; after `transcribe`, fetch the full transcript; around `synthesize`, refetch the notes (the polished notes replace the assembled ones) |
+| `stage_started` | `stage`, `promoted`, `at` | Step becomes running; records its start time for Details; the header names it |
+| `stage_finished` | `stage`, `promoted`, `at` | Step becomes done; duration shown in Details; after `transcribe`, fetch the full transcript; around `synthesize`, refetch the notes (the polished notes replace the assembled ones). `promoted: true` (a live session's stage done while recording and kept at stop): the step's detail says "live" ("2 moments · live") and Details shows "while recording" instead of a duration |
 | `transcript_chunk` | `chunk`, `segments` | Segments stored by chunk index and shown in time order; ribbon shows how much is transcribed |
 | `moment_found` | `id`, `start`, `end` | Count shown in the Finding-what-was-shown step; tick on the ribbon |
 | `visual_selected` | `id`, `caption`, `frame.t`, `render_as` | Figure placeholder added; ribbon marker (hollow); render total updated |
@@ -281,6 +281,11 @@ tested function (`src/session/state.ts`).
 | `notes_updated` | `final`, `completed_parts`, `total_parts`, event time | `final: false` → Draft, "2 of 4 sections", draft refetched (§7; every such event, also a live tail rewrite with the same counts; `live: true` marks the live draft lane's); `final: true` → fetch notes, which stay readable while they are polished (Polishing) |
 | `error` | `message` | Failed banner text (the session's `error` is the source of truth) |
 | unknown type or malformed | none | Ignored (`decodeSessionEvent`) |
+
+A live session's run at stop reports the stages whose work was kept from recording (transcribe,
+detect, align, select, or only transcribe) as started and finished with `promoted: true`, with the
+`moment_found` and `visual_selected` events those stages would emit replayed between them, so the
+progress list and counts look as for any run (architecture section 1, "Life of a session: live").
 
 **When there are no events.** Event history lives in backend memory and is lost on restart. A
 finished session opened later gets everything over REST instead: `GET /notes`, `GET /transcript`,

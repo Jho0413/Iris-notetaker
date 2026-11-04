@@ -1,6 +1,6 @@
 # Iris roadmap
 
-Updated: 3 November 2026.
+Updated: 4 November 2026.
 
 The first milestone is a complete live MVP: someone can record a session, watch useful notes with
 professional visuals appear, and leave with a finished, downloadable document in a well-designed UI.
@@ -31,7 +31,10 @@ fixed release dates; revisit their scope after the MVP is in use.
 - Long transcripts are processed in sections and joined, then a final synthesis pass consolidates
   them (merges split worked examples, applies later corrections, drops repeats, deduplicates
   figures). Its quality on real long sessions is untested.
-- Live ingestion and incremental processing are not implemented; ending a live session fails.
+- Live capture records mic and screen from the browser, and live sessions are processed while
+  they record: the transcript, moments, screen reading, figure redraws and a draft of the notes
+  arrive during the session, and at stop the live work is kept (promoted), so only the tail is new
+  work. First real measurements are below; long live sessions are untested.
 - Library, upload, live and session screens are basic; the intended UI design is not done.
 
 ## Milestone 1 — Complete live MVP
@@ -116,12 +119,51 @@ capture. Live functionality and a well-designed UI are part of this milestone.
 
 ### Process sessions while they happen
 
-- [ ] Extend the transcript as audio arrives.
-- [ ] Detect and close visual moments incrementally, then align and select relevant visuals.
-- [ ] Update a running draft with text and images during recording.
-- [ ] Bound concurrent work and update frequency so processing keeps up without excessive costs.
-- [ ] Finalize the last audio and visual moment when recording stops and produce finished notes.
-- [ ] Recover from transient model/API failures using saved inputs and completed work.
+- [x] Extend the transcript as audio arrives.
+- [x] Detect and close visual moments incrementally, then align and select relevant visuals.
+- [x] Update a running draft with text and images during recording.
+- [x] Bound concurrent work and update frequency so processing keeps up without excessive costs.
+      (Concurrency and refresh settings; on the two real recordings live work cost about the same
+      as an upload. Not yet measured on long sessions.)
+- [x] Finalize the last audio and visual moment when recording stops and produce finished notes.
+      The live transcript, moments, alignment and selection are promoted at stop; the run
+      continues from write (or from detect if only the transcript is usable).
+- [ ] Recover from transient model/API failures using saved inputs and completed work. Live
+      windows are retried and every lane's work is cached for a restart, but a transient API error
+      in the render stage still fails the run (resumable with `POST /run?from_stage=render`).
+
+#### First real live measurements (4 November 2026)
+
+Each recording was replayed into the live API in real time with `iris replay-live` (audio as
+~5 s WebM chunks, frames once a second) on a scratch backend, then uploaded to the same backend.
+Default settings except the window lengths noted. Times are seconds of session time from the
+start of recording; costs are from `/usage`.
+
+| | 22446 (78 s, worked algebra) | 22446 again, windows 5–15 s | 22450 (53 s, sketched physics) |
+|---|---|---|---|
+| First transcript | 37.8 s | 21.6 s | 36.9 s |
+| First draft | 45.6 s | 26.5 s | 40.6 s |
+| First moment / figure | 78.1 s / none (math only) | 78.1 s / none | 53.4 s / 73.6 s (both at stop) |
+| Live draft refreshes | 1 | 1 | 1 |
+| Promoted at stop | transcribe, detect, align, select | same | same |
+| Stop to done | 25.4 s (select of the one moment 15.9 s, write 6.9 s) | 30.9 s (select 23.4 s) | 241.6 s (select 17.6 s, render of 3 figures 221 s) |
+| Cost: total / after stop | $0.114 / $0.084 (6 calls) | $0.121 / $0.098 (9 calls) | $0.892 / $0.874 (15 calls) |
+| Upload of the same file | 25.4 s, $0.087 (3 calls) | | 188 s then failed on a transient render API error; resumed from render: $1.155 in all |
+
+- **Notes:** the same as the uploads and `sample-notes/`: the algebra notes have the same three
+  steps, callouts and answer $3(x+3)^2-28$; the physics notes have the same four steps with three
+  figures placed in steps 1, 2 and 4. No regressions found. One live figure (the orbiting black
+  holes) is an SVG fallback after the image redraw failed its check, plainer than the upload's
+  image; that is render variance, not a live effect.
+- **Both recordings are one moment each** (one continuous worked example or sketch), which only
+  closes at stop. So nothing could be read or redrawn while recording, and stop-to-done is about
+  an upload's processing time minus transcription. Promotion still saved re-transcribing and
+  re-reading. Sessions with several screens should finish much faster after stop; a long session
+  with screen changes is the next thing to measure.
+- **Transcript latency** was about 37 s with 10–30 s windows: a cut is decided once the maximum
+  window plus 1 s is decoded, and audio arrives in 5 s chunks. With 5–15 s windows (now the
+  default) the first transcript and draft came about 16–19 s sooner, the transcript text was the
+  same, and whisper cost $0.0081 instead of $0.0079 (billing rounds up per window).
 
 ### Document and verify the MVP
 
@@ -208,5 +250,6 @@ hosting, access-control and data-handling requirements.
    - `feat/live-draft`: the draft lane, `GET /sessions/{id}/notes/draft` and the live UI.
    - `feat/synthesis`: the final synthesis pass (also for long uploads).
    Then `feat/live-finish`: promote the live outputs at stop, end-to-end checks on real
-   recordings. `feat/live-processing` merges to `main` once that is done.
+   recordings (built; first measurements above). `feat/live-processing` merges to `main` once
+   that is done.
 5. Run end-to-end real-session checks, fix the gaps and document the MVP's supported behavior.

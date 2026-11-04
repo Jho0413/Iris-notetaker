@@ -118,9 +118,13 @@ moments as they are found, figures as they are rendered, and the notes as they a
 ### Life of a session: live
 
 The same work as an upload, done while the session is happening. What is done live *is* the final
-work: at stop, only the last few seconds are new, so finished notes arrive about a minute after stop
-however long the session was. Live processing is best effort: the captured chunks stay the
-recording, and if anything live fails the session is processed like an upload.
+work: at stop, only what was still open is new (the last transcription window, the screen shown at
+the end and the tail of the notes), so the time from stop to finished notes depends on that, not on
+how long the session was. A screen that stays open the whole session (one long worked example or
+sketch) is only read at stop, with its figures rendered then, so such a session finishes about as
+fast as an upload of it would (measured in `docs/roadmap.md`). Live processing is best effort: the
+captured chunks stay the recording, and if anything live fails the session is processed like an
+upload.
 
 ```
 Browser                    API routes                 LiveProcessor (one per recording, asyncio tasks)
@@ -131,7 +135,7 @@ Frame ticker 1 fps ───────▶ POST /live/{id}/frame ─wake─▶ 
                                                                                                                        │
                                                           select lane: gate ▸ align ▸ select ▸ render (background) ◀──┤
                                                           draft lane:  horizon ▸ frozen sections + tail ▸ notes_draft ◀┘
-Stop ─────────────────────▶ POST /live/{id}/end ───────▶ job: finish lanes ▸ ingest ▸ promote live outputs ▸ PLAN from write
+Stop ─────────────────────▶ POST /live/{id}/end ───────▶ job: finish lanes ▸ ingest ▸ promote live outputs ▸ rest of PLAN
 Live + Session pages ◀──── SSE events, GET /sessions/{id}/notes/draft
 ```
 
@@ -188,17 +192,31 @@ Late data is never lost: everything captured stays on disk and the final run use
 1. **Finish the lanes.** Each lane flushes: the last audio window is cut wherever the audio ends,
    the detector closes the last moment (`finish`), the last moments are read and figures still
    rendering complete (figures not yet started are left to the render stage, which renders every
-   figure at stop; once the live selection is promoted, the live renders are its cache hits). The draft lane just stops; the write stage writes the tail. A lane still
-   flushing after `IRIS_LIVE_FINISH_TIMEOUT_S` is cancelled and counts as failed.
+   figure at stop; once the live selection is promoted, the live renders are its cache hits). The
+   draft lane just stops; the write stage writes the tail. A lane still flushing after
+   `IRIS_LIVE_FINISH_TIMEOUT_S` is cancelled and counts as failed.
 2. **Ingest** as before: `audio.wav` and `frames.json` from the captured chunks.
-3. **Promote.** If the audio, screen and select lanes finished without failing and none skipped
-   captured input (a late chunk or frame), the live transcript, moments, alignment and selection
-   are written as
-   `transcript.json`, `moments.json`, `alignment.json` and `selection.json`, and the pipeline runs
-   from write: frozen sections and live renders hit their caches, so only the tail is new work.
-   Otherwise the full pipeline runs, as for an upload (with model caches still reused where inputs
-   match); skipped input is recorded per lane, so a later version can re-run less. The draft
-   lane's failure doesn't block promotion: its sections are only a cache.
+3. **Promote** (`iris/live/promote.py`). What the live lanes finished replaces the stages that
+   would redo it; what is written is exactly what the timeline holds (segments in its order, its
+   `language`, the first window with speech's; moments in closing order; contents and visuals in
+   reading order), since the frozen sections' cache keys depend on it:
+
+   | Lanes at stop | Written from the timeline | The run continues with |
+   |---|---|---|
+   | `timeline.complete`: audio, screen and select finished, none failed, none skipped captured input | `transcript.json`, `moments.json`, `alignment.json` (align over those two), `selection.json` | write ∥ render, assemble, synthesize. Frozen sections and live renders hit their caches: only the tail section and figures not rendered live are new work |
+   | Audio finished cleanly; screen or select failed or skipped input | `transcript.json` | detect, align, select, … (transcription isn't paid twice) |
+   | Audio failed, skipped input or didn't run | nothing | the full plan, as for an upload (model caches still reused where inputs match) |
+
+   Promotion also falls back to the transcript only if the live screen work doesn't hold together
+   on disk after ingest (duplicate moment ids, a selection naming an unknown moment, a frame or
+   source crop missing): the stages it would skip check those. The draft lane's failure doesn't
+   block promotion: its sections are only a cache. `notes_draft.json` is deleted only if select
+   runs again, so a promoted run keeps the live draft on screen until write replaces it.
+   Promoted stages make no model calls. Each is reported as `stage_started`/`stage_finished` with
+   `promoted: true`, and the events the stage itself would emit are replayed (`moment_found` per
+   moment, `visual_selected` per figure), so the UI's progress and counts look as for a run; the
+   transcript is fetched whole once transcribe finishes. A re-run (`POST /sessions/{id}/run`) has
+   no processor and runs its plan as before.
 4. **Synthesis**, as for uploads: see "Final synthesis" below.
 
 A lane whose upstream lane failed (`upstream_failed`) stops making model calls for the rest of the
@@ -206,6 +224,15 @@ recording: nothing it makes can be promoted.
 
 Live processing can be turned off with `IRIS_LIVE_PROCESSING=false`; a live session is then
 processed after stop like an upload, as before.
+
+**Replaying a recording.** `uv run iris replay-live <file>... [--url URL] [--speed X]`
+(`iris/live/replay.py`) plays a recorded file into a running backend's live API as the browser
+would: audio re-encoded with PyAV to one WebM/Opus stream posted as ~5 s byte ranges with `seq`,
+screen frames as JPEG once a second with `t`, paced in real time (or X times faster), then
+`POST /end`. It reports when the first transcript, moment, figure and draft events arrived, the
+number of live draft refreshes, what was promoted, the time from stop to `done` and the cost (total
+and after stop) from `/usage`. It makes paid calls through the backend; point the backend at a
+scratch `IRIS_DATA_DIR`.
 
 ### Final synthesis
 
