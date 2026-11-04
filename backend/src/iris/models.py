@@ -55,6 +55,11 @@ class Session(BaseModel):
     duration_s: float | None = None
     created_at: datetime
     updated_at: datetime
+    # Model cost so far, across all runs, from the call log (``iris.llm.usage.running_total``).
+    # None: no model calls recorded yet. Partial: some calls are unpriced (missing from the price
+    # table), so ``cost_usd`` is the priced part only, a lower bound.
+    cost_usd: float | None = None
+    cost_partial: bool = False
 
 
 # --- Ingest output -----------------------------------------------------------------------------
