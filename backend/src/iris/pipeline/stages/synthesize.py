@@ -426,9 +426,33 @@ class Group:
         return all(e.kind == "dedupe_figure" for e in self.edits)
 
     @property
-    def may_empty(self) -> bool:
-        """A repeat may be dropped entirely when another section keeps the point."""
-        return any(e.kind == "drop_repeat" and e.context_sections for e in self.edits)
+    def repeats(self) -> set[int]:
+        """Sections only dropped as repeats of a context section: they may shrink or empty.
+
+        A section another edit also rewrites (a merge target, a correction) keeps the usual
+        limits, so one repeat in a group can't excuse deleting the rest of it.
+        """
+        dropped = {
+            i
+            for e in self.edits
+            if e.kind == "drop_repeat" and e.context_sections
+            for i in e.sections
+        }
+        rewritten = {
+            i
+            for e in self.edits
+            if e.kind not in {"drop_repeat", "dedupe_figure"}
+            for i in e.sections
+        }
+        return dropped - rewritten
+
+    def repeat_context(self, index: int) -> set[int]:
+        return {
+            i
+            for e in self.edits
+            if e.kind == "drop_repeat" and index in e.sections
+            for i in e.context_sections
+        }
 
 
 def group_edits(edits: list[SynthesisEdit], sections: list[str]) -> list[Group]:
@@ -455,7 +479,17 @@ def validate_rewrite(rewrite: Rewrite, group: Group, sections: list[str]) -> dic
     new = {s.index: s.markdown.strip() for s in rewrite.sections}
     old_text = "\n\n".join(sections[i] for i in sorted(group.indexes))
     new_text = "\n\n".join(new[i] for i in sorted(group.indexes) if new[i])
-    if not new_text and not group.may_empty:
+    # Repeats may shrink, but by no more than the text that keeps the point elsewhere.
+    for i in group.repeats:
+        removed = _text_length(sections[i]) - _text_length(new[i])
+        kept = sum(_text_length(sections[c]) for c in group.repeat_context(i))
+        if removed > kept:
+            raise ValueError("rewrite removed more from a repeat than the section it repeats")
+    # Every other section keeps the usual limits, together.
+    others = sorted(group.indexes - group.repeats)
+    old_others = "\n\n".join(sections[i] for i in others)
+    new_others = "\n\n".join(new[i] for i in others if new[i])
+    if others and not new_others:
         raise ValueError("rewrite removed all of its sections")
     found: list[str] = []
     for markdown in new.values():
@@ -469,8 +503,10 @@ def validate_rewrite(rewrite: Rewrite, group: Group, sections: list[str]) -> dic
     if Counter(found) != Counter(expected):
         raise ValueError("rewrite must keep each visual marker exactly once, minus dropped ones")
     old_len, new_len = _text_length(old_text), _text_length(new_text)
-    floor = 0 if group.may_empty else MIN_KEPT_RATIO * old_len  # the point is kept elsewhere
-    if new_len < floor or new_len > MAX_GROWTH_RATIO * old_len + MAX_GROWTH_CHARS:
+    if (
+        _text_length(new_others) < MIN_KEPT_RATIO * _text_length(old_others)
+        or new_len > MAX_GROWTH_RATIO * old_len + MAX_GROWTH_CHARS
+    ):
         raise ValueError("rewrite changed the length of its sections too much")
     if _protected(new_text) < _protected(old_text):
         raise ValueError("rewrite dropped a decision, action item or uncertainty")
@@ -614,7 +650,9 @@ async def synthesize(ctx: StageContext) -> tuple[SynthesisReport, SynthesizedDra
     # Written in one pass, the notes have nothing to merge or reconcile. A draft that doesn't say
     # (an older version) counts as one part only if it has a single section.
     one_part = draft.parts == 1 if draft.parts is not None else len(sections) <= 1
-    if one_part and not any(r.kind == "figure" for r in repeats):
+    placed = set(placements(sections))
+    look_alikes = any(r.kind == "figure" and len(placed & set(r.ids)) > 1 for r in repeats)
+    if one_part and not look_alikes:
         report.status, report.reason = "skipped", "written in one part, no look-alike figures"
         return report, None
     if len(draft.markdown) > MAX_NOTES_CHARS:

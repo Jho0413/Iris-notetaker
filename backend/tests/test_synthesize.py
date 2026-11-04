@@ -776,3 +776,55 @@ async def test_generate_uses_strict_structured_output(tmp_path, monkeypatch, mod
         else:
             with pytest.raises(ValueError):
                 await synthesize.generate(ctx, "p", "{}", synthesize.EditPlan, "low")
+
+
+def _group(*edits: dict) -> synthesize.Group:
+    parsed = [SynthesisEdit.model_validate(e) for e in edits]
+    return synthesize.Group({i for e in parsed for i in e.sections}, parsed)
+
+
+def test_a_repeat_in_a_group_does_not_excuse_deleting_other_sections():
+    topic = "## Topic A\n\n" + "Distinct explanation of topic A. " * 35
+    sections = [
+        "## Intro\n\nShort intro.",
+        topic,
+        "## Topic A cont.\n\n" + "More on A. " * 20,
+        "## Recap",
+    ]
+    group = _group(edit("merge", [1, 2]), edit("drop_repeat", [2], context=[0]))
+    assert group.repeats == set()  # section 2 is also a merge target
+    emptied = synthesize.Rewrite(
+        sections=[
+            synthesize.RewrittenSection(index=1, markdown=""),
+            synthesize.RewrittenSection(index=2, markdown=""),
+        ]
+    )
+    with pytest.raises(ValueError):
+        synthesize.validate_rewrite(emptied, group, sections)
+
+
+def test_a_repeat_can_only_lose_as_much_as_the_section_it_repeats():
+    sections = ["## Intro\n\nRevenue grew.", "## Long\n\n" + "A long distinct section. " * 40]
+    group = _group(edit("drop_repeat", [1], context=[0]))
+    assert group.repeats == {1}
+    gutted = synthesize.Rewrite(
+        sections=[synthesize.RewrittenSection(index=1, markdown="## Long\n\nSee the intro.")]
+    )
+    with pytest.raises(ValueError, match="repeat"):
+        synthesize.validate_rewrite(gutted, group, sections)
+    trimmed = synthesize.Rewrite(
+        sections=[
+            synthesize.RewrittenSection(
+                index=1, markdown=sections[1].replace("## Long\n\n", "## L\n\n")
+            )
+        ]
+    )
+    assert synthesize.validate_rewrite(trimmed, group, sections)[1].startswith("## L")
+
+
+async def test_one_part_notes_with_only_one_look_alike_placed_make_no_call(ctx, monkeypatch):
+    setup_session(ctx, "## Chart\n\nText.\n\n[visual:v1]\n\n## More\n\n[visual:v2]", parts=1)
+    fake = use(monkeypatch, FakeModel())
+    await finish(ctx)
+    assert fake.calls == [] and report(ctx).status == "skipped"
+    assert Repeat(kind="figure", ids=["v1", "v3"]) in report(ctx).repeats

@@ -342,7 +342,8 @@ synthesis. A re-run from `synthesize` re-polishes without rewriting anything els
   (the markers are removed), with no call. A rewrite is accepted only if each of its visual markers
   is still there exactly once on a line of its own (minus the dropped duplicates), no images or
   HTML appear, its length stays between 40% and 150% (+2,000 characters) of the original (a
-  `drop_repeat` with a section that keeps the point may shrink or empty a section), it has no
+  section only dropped as a repeat, with a section that keeps the point and no other edit
+  rewriting it, may shrink or empty, losing no more text than that section holds), it has no
   fewer decision, action-item, open-question or uncertainty words and task items, and any math it
   drops still appears elsewhere. A rejected group keeps its sections as written; the others are
   applied. Across groups, every equation in the notes must survive, and every marker must resolve
