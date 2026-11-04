@@ -143,11 +143,13 @@ export function UploadPage() {
               aria-label="Upload progress"
               aria-valuemin={0}
               aria-valuemax={100}
-              aria-valuenow={Math.round(progress * 100)}
+              // No progress events yet (or none at all: the desktop app's app:// requests
+              // don't report upload progress): indeterminate.
+              aria-valuenow={progress > 0 ? Math.round(progress * 100) : undefined}
             >
               <span style={{ width: `${progress * 100}%` }} />
             </div>
-            <span className="num">{progress >= 1 ? 'Starting…' : `${Math.round(progress * 100)}%`}</span>
+            <span className="num">{progress >= 1 ? 'Starting…' : progress === 0 ? 'Uploading…' : `${Math.round(progress * 100)}%`}</span>
             {/* Once every byte is sent the backend creates the session regardless, so cancelling
                 would only hide a session that is already processing. */}
             {progress < 1 && (

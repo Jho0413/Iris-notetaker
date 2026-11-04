@@ -60,7 +60,7 @@ export function browserEnv(): CaptureEnv {
     mediaDevices: navigator.mediaDevices,
     MediaRecorder: typeof MediaRecorder === 'undefined' ? undefined : MediaRecorder,
     fetch: (input, init) => fetch(input, init),
-    sendBeacon: (url, body) => navigator.sendBeacon(url, body),
+    sendBeacon: (url, body) => sendBeaconOrKeepalive(url, body, navigator.sendBeacon.bind(navigator), fetch),
     page: window,
     mixAudio,
     captureFrames,
@@ -338,9 +338,39 @@ async function settledWithin(p: Promise<unknown> | undefined, ms: number): Promi
   }
 }
 
+/**
+ * Shared (system or tab) audio is a recording of what plays, not a voice in a room: echo
+ * cancellation, noise suppression and gain control would only distort it. The microphone keeps
+ * them (getUserMedia's defaults).
+ */
+export const SHARED_AUDIO: MediaTrackConstraints = {
+  echoCancellation: false,
+  noiseSuppression: false,
+  autoGainControl: false,
+}
+
+/**
+ * `navigator.sendBeacon`, or a keepalive fetch where beacons aren't allowed: they throw for
+ * non-HTTP(S) pages such as the desktop app's app://iris. Both outlive the page.
+ */
+export function sendBeaconOrKeepalive(
+  url: string,
+  body: Blob,
+  sendBeacon: (url: string, body: Blob) => boolean,
+  fetchFn: (url: string, init: RequestInit) => Promise<unknown>,
+): boolean {
+  try {
+    return sendBeacon(url, body)
+  } catch {
+    const headers = body.type ? { 'content-type': body.type } : undefined
+    void fetchFn(url, { method: 'POST', body, headers, keepalive: true }).catch(() => {})
+    return true
+  }
+}
+
 async function getDisplay(devices: Pick<MediaDevices, 'getDisplayMedia'>): Promise<MediaStream> {
   try {
-    return await devices.getDisplayMedia({ video: true, audio: true })
+    return await devices.getDisplayMedia({ video: true, audio: SHARED_AUDIO })
   } catch (err) {
     // Browsers that can't share audio may reject the request (before showing a picker).
     const name = err instanceof Error || err instanceof DOMException ? err.name : ''
