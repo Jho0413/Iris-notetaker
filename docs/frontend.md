@@ -38,7 +38,8 @@ step that failed and reuses the work already done (and paid for)
 ([architecture principle 4](architecture.md#principles)).
 
 The pipeline's internal stage names (ingest, transcribe, detect, align, select, write, render,
-assemble, synthesize) appear only in the **Details** panel. Everywhere else the UI uses these labels:
+assemble, synthesize) never appear in the UI; they stay in the CLI (`iris cost`, `make usage`).
+Everywhere, including the rail's **Details**, the UI uses these labels:
 
 | Stage | Plain label |
 |---|---|
@@ -80,9 +81,8 @@ a live recording runs, the top bar is replaced by the recording bar (see Live).
 attention.
 
 - A dense list, newest first. Each row shows the title with its source (Upload or Live) beneath, a
-  status chip in plain words (Processing · Writing notes, Finished, Failed, …) and the date. A
-  **Length** column joins once the backend records it, and a **Cost** column once the cost API
-  exists (§7).
+  status chip in plain words (Processing · Writing notes, Finished, Failed, …), the date and the
+  **Cost** (see *Cost* below). A **Length** column joins once the backend records it (§7).
 - Row actions: open (the whole row is a link), **Export** (finished), **Try again** (failed) and
   **Delete** (any session not processing; asks for confirmation in a dialog).
 - While any session is processing, the list refreshes every few seconds so chips stay current.
@@ -93,6 +93,23 @@ attention.
 | Empty | A short explanation of what Iris does and two large choices: **Upload a recording** and **Record live** |
 | Error (backend unreachable) | "Can't reach the Iris backend", the command to start it (`make dev`) and **Retry** |
 | Warning (no OpenAI key) | A banner: processing needs `OPENAI_API_KEY` in `backend/.env`; existing notes still open |
+
+**Cost** (library column and the session rail). The model cost of a session so far, across all of
+its runs (a re-run adds only the calls it makes; cached work is free).
+
+- **Format:** US dollars with two decimals and grouped thousands ("$0.89", "$1,234.50"), "< $0.01"
+  for anything under a cent, in tabular numerals, the same in both places. Screen readers hear
+  words ("less than 1 cent", "at least $0.89, some calls unpriced").
+- **Unpriced calls:** a call to a model missing from the price table is never guessed. The priced
+  part is shown as a lower bound, rounded down and marked "≥" ("≥ $0.89"), and the rail's Details
+  explains it.
+- **No model calls yet:** nothing is shown until the first call; a session that finished without
+  any shows "$0.00".
+- **While processing:** the running total. The library's list refresh carries it (the session
+  list returns `cost_usd` and `cost_partial` per session); the rail fetches `GET /usage` when a
+  step finishes and when the session's status changes, not on every event.
+- **No provider details:** costs are shown per step with the plain labels above, never per model;
+  model-level detail stays in `iris cost` / `make usage`.
 
 ### Upload (`/upload`)
 
@@ -167,8 +184,8 @@ finished.
 │ Library › Algebra lecture                                                [Try again] │
 │ Upload · 12:31 · Today 14:02                     ● Redrawing figures · 3 of 5        │
 ├───────────────────────────────────────────────────┬──────────────────────────────────┤
-│  Making your notes                                │  Details ▸ stages, times, errors │
-│  Writing notes · 2 of 4 · Redrawing figures · 3/5 │                                  │
+│  Making your notes                                │  Cost                      $0.21 │
+│  Writing notes · 2 of 4 · Redrawing figures · 3/5 │  Details ▸ steps, cost, times    │
 │  Running for 1:42                                 │                                  │
 │  ┌──────────────────────────────────────┐         │                                  │
 │  │ ✓ Preparing the recording            │         │                                  │
@@ -210,9 +227,11 @@ finished.
     content mounted, so switching never refetches or loses scroll position.
   - The Notes tab is the session type, title, then the notes at a 68-character measure.
 - **Rail (right, 300px):** **Progress** (once finished, if this backend saw the run; until then the
-  steps are in the main column), **On this page** (the notes' section headings), **Cost** (slot)
-  and **Details** (closed by default: stage names, start and finish times, durations, the raw
-  error, event stream status).
+  steps are in the main column), **On this page** (the notes' section headings), **Cost** ("Cost
+  $0.89"; its line is laid out even while empty, so nothing moves when the first cost arrives) and
+  **Details** (closed by default: each step with its cost and duration, e.g. "Redrawing figures
+  $0.74 · 3 min 41 s", either alone when only one is known; why a cost is marked ≥; the raw error;
+  event stream status). Costs cover all runs; durations are the latest run's, from events.
 - **Below 1120px** the rail moves above the main column as a one-line summary, with **Details**
   expanding it.
 
@@ -454,6 +473,6 @@ All of the above uses the existing API and event types, except:
 |---|---|---|
 | `visual_rendered` in the client's event list (`src/api/eventMessage.ts`) | Frontend fix in this work: it is in the schema but was missing from the list, so rendered figures were dropped | n/a |
 | Ending a crashed live session with gaps (`endLiveSession` with `allow_gaps`) | Done in the live-capture PR. Without a body, `POST /api/live/{id}/end` skips the chunk check and ends with what arrived (missing audio becomes silence) | **Finish and make notes** calls `POST /api/live/{id}/end` without a body, which is already correct for a crashed session; `endLiveSession` is only needed to check the chunk count |
-| Per-session cost and time per stage | Cost-tracking work in progress | The rail's **Cost** slot and the library's **Cost** column are designed but not built; stage times come from events |
+| Per-session cost and time per stage | Done: `Session.cost_usd` and `cost_partial` in the session list (running totals, read incrementally from the call log) and `GET /usage` per step | n/a; stage times come from events |
 | Verified status for finished sessions without events (`renders.json` via the API) | Not requested yet | Badges show only when known from this run's events |
 | `session.duration_s` set at ingest | Not set by the backend today | The session page takes the length from the transcript's last segment; the library has no Length column |
