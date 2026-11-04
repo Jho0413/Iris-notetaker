@@ -7,12 +7,14 @@ import asyncio
 import json
 import math
 import random
+import threading
 import time
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
+from iris import pipeline
 from iris.config import Settings
 from iris.live import Lane, LiveTimeline, draft
 from iris.live.draft import DraftLane
@@ -27,6 +29,7 @@ from iris.models import (
     Selection,
     SessionType,
     SourceKind,
+    Stage,
     Transcript,
     TranscriptSegment,
     Visual,
@@ -665,3 +668,59 @@ def test_draft_endpoint_serves_the_draft_with_figures_resolved(
     )
     write_model(paths.renders, Renders(visuals=[rendered]))
     assert "](visuals/v1.svg)" in client.get(url).json()["markdown"]
+
+
+def test_a_run_that_selects_again_never_serves_a_draft_of_the_old_selection(
+    client: TestClient, settings: Settings, monkeypatch
+):
+    session = client.app.state.store.create("Algebra", SourceKind.UPLOAD)
+    paths = session_paths(settings.sessions_dir, session.id).ensure()
+    old = NotesDraft(session_type="lecture", title="Algebra", markdown="Groups.\n\n[visual:v1]")
+    write_model(paths.notes_draft, old)
+    write_model(paths.selection, Selection(visuals=[visual(1, 3)]))
+    url = f"/api/sessions/{session.id}/notes/draft"
+    assert client.get(url).status_code == 200
+
+    selecting, release = threading.Event(), threading.Event()
+    drafts_seen_by_write: list[bool] = []
+
+    async def nothing(ctx: StageContext) -> None:
+        pass
+
+    async def select(ctx: StageContext) -> None:
+        selecting.set()
+        await asyncio.to_thread(release.wait, 5)
+        # Selected again: the figure that was v1 now has another id.
+        write_model(ctx.paths.selection, Selection(visuals=[visual(2, 3)]))
+
+    async def write_stage(ctx: StageContext) -> None:
+        drafts_seen_by_write.append(ctx.paths.notes_draft.exists())
+
+    for stage in list(pipeline.STAGES):
+        monkeypatch.setitem(pipeline.STAGES, stage, nothing)
+    monkeypatch.setitem(pipeline.STAGES, Stage.SELECT, select)
+    monkeypatch.setitem(pipeline.STAGES, Stage.WRITE, write_stage)
+    runner = client.app.state.runner
+
+    def finish() -> None:
+        deadline = time.monotonic() + 5
+        while runner.is_running(session.id):
+            assert time.monotonic() < deadline, "the run never finished"
+            time.sleep(0.02)
+
+    # A full run selects again: the old draft is gone before select starts.
+    assert client.post(f"/api/sessions/{session.id}/run").status_code == 200
+    try:
+        assert selecting.wait(5)
+        assert client.get(url).status_code == 404
+    finally:
+        release.set()
+    finish()
+    assert drafts_seen_by_write == [False]
+
+    # A run that starts at write (as one promoted from live will) keeps the draft.
+    write_model(paths.notes_draft, old)
+    assert client.post(f"/api/sessions/{session.id}/run?from_stage=write").status_code == 200
+    finish()
+    assert drafts_seen_by_write == [False, True]
+    assert client.get(url).status_code == 200
