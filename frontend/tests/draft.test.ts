@@ -53,6 +53,27 @@ test('the draft is refetched on every notes update while recording or processing
   assert.equal(draftRefreshKey('recording', reduceEvents([first, rewrite, first, rewrite])), b)
 })
 
+test('the draft is refetched when the run selects figures again, so a dropped draft clears', () => {
+  // After stop: the live draft is shown, then the backend drops it before selecting again.
+  const live = ev('notes_updated', { final: false, completed_parts: 1, total_parts: 2, live: true })
+  const processing = ev('status', { status: 'processing' })
+  const ingest = [ev('stage_started', { stage: 'ingest' }), ev('stage_finished', { stage: 'ingest' })]
+  const select = ev('stage_started', { stage: 'select' })
+  const figure = ev('visual_selected', { id: 'v000001', caption: 'x' })
+  const selected = ev('stage_finished', { stage: 'select' })
+  const section = ev('notes_updated', { final: false, completed_parts: 1, total_parts: 3 })
+
+  const before = draftRefreshKey('processing', reduceEvents([live, processing, ...ingest]))
+  const after = draftRefreshKey('processing', reduceEvents([live, processing, ...ingest, select]))
+  assert.ok(before !== null && after !== null && after > before)
+  // Figure events and the end of select don't refetch again.
+  const busy = reduceEvents([live, processing, ...ingest, select, figure, selected])
+  assert.equal(draftRefreshKey('processing', busy), after)
+  // The write stage's first section is newer still.
+  const written = reduceEvents([live, processing, ...ingest, select, figure, selected, section])
+  assert.ok((draftRefreshKey('processing', written) ?? 0) > (after ?? 0))
+})
+
 test('no draft is wanted before recording, once finished or after the final notes', () => {
   assert.equal(draftRefreshKey(undefined, emptyRun()), null)
   assert.equal(draftRefreshKey('created', emptyRun()), null)

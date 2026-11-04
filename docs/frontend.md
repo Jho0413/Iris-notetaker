@@ -299,8 +299,10 @@ Details then says "Step times are only available for runs since the backend star
   (backend unreachable or erroring) keeps the draft already shown. A 404 clears it: there is no
   draft, or the backend dropped it because the run is selecting figures again and its figure ids
   no longer apply.
-- The draft is fetched once when the page loads (recording or processing) and then on each
-  `notes_updated` (`draftRefreshKey` in `src/session/draft.ts`); replayed events don't refetch.
+- The draft is fetched once when the page loads (recording or processing), then on each
+  `notes_updated` and when the run's select stage starts (`draftRefreshKey` in
+  `src/session/draft.ts`), so a draft the backend dropped before selecting again is cleared;
+  replayed events don't refetch.
 - Status changes are announced politely to screen readers; transcript chunks are not.
 
 ## 5. Visual design
