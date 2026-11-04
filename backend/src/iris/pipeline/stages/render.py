@@ -9,11 +9,11 @@ A failed check, a refusal or unusable output is retried with the problems as fee
 other renderer is tried. If nothing passes, the source crop is used and the failure is recorded, so
 notes are never blocked and never show an unverified redraw.
 
-An API error while redrawing (architecture section 1, "Errors and retries") gives the source crop at
-once, with no retries of our own: it is marked unverified, the reason goes to the log and to
-``problems`` in renders.json, and it is not cached, so a later run tries the redraw again. A
-blocking error (a rejected key, exhausted credit, a missing model) fails the stage, and the figures
-still rendering are cancelled.
+An API error while redrawing (architecture section 1, "Errors and retries"), or any other error
+that isn't unusable output, gives the source crop at once, with no retries of our own: it is marked
+unverified, the reason goes to the log and to ``problems`` in renders.json, and it is not cached,
+so a later run tries the redraw again. A blocking error (a rejected key, exhausted credit, a
+missing model) fails the stage, and the figures still rendering are cancelled.
 
 Reads:  selection.json, visuals/<id>.source.jpg
 Writes: visuals/<id>.<svg|png|jpg>, renders.json (Renders), render_cache/<hash>.json + files
@@ -30,6 +30,7 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Literal
 
+import openai
 from pydantic import BaseModel
 
 from iris.llm import usage
@@ -89,7 +90,7 @@ fails if it:
 List each problem concretely, as an instruction to fix it.
 """
 
-MAX_PROBLEM_CHARS = 500  # an API error's description in renders.json
+MAX_PROBLEM_CHARS = 500  # an error's description in renders.json
 
 RENDERERS: dict[RenderAs, tuple[RenderAs, ...]] = {
     "svg": ("svg", "image"),
@@ -291,7 +292,7 @@ async def render_visual(ctx: StageContext, visual: Visual) -> RenderedVisual:
                     continue
                 if kind is ErrorKind.BLOCKING:
                     raise
-                return _api_fallback(ctx, visual, source_rel, attempts, exc)
+                return _error_fallback(ctx, visual, source_rel, attempts, exc)
             if verdict.matches:
                 result, problems = (renderer, data, ext), []
                 break
@@ -319,16 +320,19 @@ async def render_visual(ctx: StageContext, visual: Visual) -> RenderedVisual:
     return rendered
 
 
-def _api_fallback(
+def _error_fallback(
     ctx: StageContext, visual: Visual, source_rel: str, attempts: int, exc: Exception
 ) -> RenderedVisual:
-    """The source crop, unverified and not cached, after an API error while redrawing."""
+    """The source crop, unverified and not cached, after an error while redrawing that isn't
+    unusable output: an API error, or (``INTERNAL``) anything else, such as a bug, whose
+    traceback is logged so it isn't mistaken for an outage."""
     reason = describe(exc)
     log.warning(
         "session %s: redrawing %s failed (%s); using the source crop",
         ctx.session_id,
         visual.id,
         reason,
+        exc_info=not isinstance(exc, openai.APIError),
     )
     path = _publish(ctx, ctx.paths.root / source_rel, visual.id, "jpg")
     return RenderedVisual(
@@ -337,7 +341,7 @@ def _api_fallback(
         render_as="screenshot",
         verified=False,
         attempts=attempts,
-        problems=[f"API error: {reason}"[:MAX_PROBLEM_CHARS]],
+        problems=[f"Redraw failed: {reason}"[:MAX_PROBLEM_CHARS]],
     )
 
 

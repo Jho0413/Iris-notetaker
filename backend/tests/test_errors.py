@@ -307,7 +307,7 @@ async def test_an_api_error_gives_the_source_crop_unverified_and_uncached(
     renders = {r.id: r for r in read_model(ctx.paths.renders, Renders).visuals}
     v1 = renders["v1"]
     assert (v1.verified, v1.render_as, v1.path) == (False, "screenshot", "visuals/v1.jpg")
-    assert v1.problems and v1.problems[0].startswith("API error:")
+    assert v1.problems and v1.problems[0].startswith("Redraw failed: ")
     source = (ctx.paths.root / "visuals/v1.source.jpg").read_bytes()
     assert (ctx.paths.root / v1.path).read_bytes() == source
     assert renders["v2"].verified and renders["v2"].render_as == "svg"

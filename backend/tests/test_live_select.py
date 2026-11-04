@@ -23,6 +23,7 @@ from iris.models import (
     FrameRef,
     Moment,
     RenderedVisual,
+    Renders,
     Selection,
     SourceKind,
     TranscriptSegment,
@@ -32,6 +33,7 @@ from iris.pipeline.context import StageContext
 from iris.pipeline.stages import align, render, select
 from iris.sources.browser_live import store_frame
 from iris.store.layout import SessionPaths, read_model, write_model
+from tests.api_errors import connection_error
 from tests.test_detect import three_slides
 from tests.test_live_screen import encode
 
@@ -332,6 +334,46 @@ async def test_live_renders_hit_the_render_cache(
     write_model(ctx.paths.selection, timeline.selection())
     await render.run(ctx)
     assert drawn == ["v000001"]  # cached
+
+
+async def test_an_api_error_in_a_live_render_gives_the_source_crop_uncached(
+    ctx: StageContext, vision: FakeVision, monkeypatch, events: list
+):
+    """The real ``render_visual``: the render stage's rule, so stop tries the redraw again."""
+    drawn = []
+
+    async def draw(_ctx, visual, _source, _feedback):
+        drawn.append(visual.id)
+        if len(drawn) == 1:
+            raise connection_error()
+        svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2 1"><rect width="2"/></svg>'
+        return svg.encode(), b"preview"
+
+    async def check(*_args):
+        return render.Check(matches=True, problems=[])
+
+    monkeypatch.setitem(render.DRAWERS, "svg", (draw, "svg"))
+    monkeypatch.setattr(render, "check", check)
+    driver = Driver(ctx).start()
+    await driver.close(0)
+    await driver.transcribe(0, to=100)
+    await driver.selected(10)
+    await until(lambda: any(kind == EventType.VISUAL_RENDERED for kind, _ in events))
+    timeline = await driver.stop()
+    [data] = [d for kind, d in events if kind == EventType.VISUAL_RENDERED]
+    assert data == {
+        "id": "v000001",
+        "path": "visuals/v000001.jpg",
+        "render_as": "screenshot",
+        "verified": False,
+    }
+    assert not list((ctx.paths.root / "render_cache").glob("*.json"))
+
+    write_model(ctx.paths.selection, timeline.selection())
+    await render.run(ctx)
+    assert drawn == ["v000001", "v000001"]  # redrawn at stop
+    [rendered] = read_model(ctx.paths.renders, Renders).visuals
+    assert rendered.verified and rendered.render_as == "svg"
 
 
 # --- Upstream failure and stop ----------------------------------------------------------------
