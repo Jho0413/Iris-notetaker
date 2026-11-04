@@ -2,7 +2,7 @@ import { useState } from 'react'
 import type { Stage } from '../api/client'
 import type { StreamStatus } from '../session/useSessionStream'
 import {
-  formatDuration, STAGE_LABELS, STAGE_ORDER, stageDetail, stageSeconds, type RunState,
+  doneLive, formatDuration, STAGE_LABELS, STAGE_ORDER, stageDetail, stageSeconds, type RunState,
   type StepStatus,
 } from '../session/state'
 import { Icon, type IconName } from './Icon'
@@ -57,7 +57,7 @@ export function ProgressRail(props: {
     ? running.map((s) => [STAGE_LABELS[s], stageDetail(s, run)].filter(Boolean).join(' ')).join(' · ')
     : props.finished ? 'All steps finished' : 'Progress'
   const timed = STAGE_ORDER.filter(
-    (s) => run.stages[s].promoted || stageSeconds(run.stages[s]) !== undefined,
+    (s) => doneLive(run.stages[s]) || stageSeconds(run.stages[s]) !== undefined,
   )
 
   return (
@@ -121,7 +121,7 @@ export function ProgressRail(props: {
                       <code>{s}</code>
                     </td>
                     <td className="num">
-                      {run.stages[s].promoted
+                      {doneLive(run.stages[s])
                         ? 'while recording'
                         : formatDuration(stageSeconds(run.stages[s])!)}
                     </td>

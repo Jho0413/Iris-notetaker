@@ -34,8 +34,13 @@ export interface StageRun {
   status: StepStatus
   startedAt?: string
   finishedAt?: string
-  /** Done while recording: the live work was promoted at stop instead of running the stage. */
+  /** Reported as promoted: its live work is being kept at stop instead of running the stage. */
   promoted?: boolean
+}
+
+/** Done while recording: promoted at stop, and the promotion finished. */
+export function doneLive(step: StageRun): boolean {
+  return step.promoted === true && step.status === 'done'
 }
 
 export interface FigureState {
@@ -368,7 +373,7 @@ export function libraryState(session: Session): UiState {
  */
 export function stageDetail(stage: Stage, run: RunState): string | undefined {
   const count = stageCount(stage, run)
-  if (!run.stages[stage].promoted) return count
+  if (!doneLive(run.stages[stage])) return count
   return count ? `${count} · live` : 'live'
 }
 
@@ -398,9 +403,9 @@ function stageCount(stage: Stage, run: RunState): string | undefined {
   }
 }
 
-/** Seconds a step took, when both of its events are known (not for a step done live). */
+/** Seconds a step took, when both of its events are known (not for a step done while recording). */
 export function stageSeconds(step: StageRun): number | undefined {
-  if (step.promoted || !step.startedAt || !step.finishedAt) return undefined
+  if (doneLive(step) || !step.startedAt || !step.finishedAt) return undefined
   const ms = Date.parse(step.finishedAt) - Date.parse(step.startedAt)
   return Number.isFinite(ms) && ms >= 0 ? ms / 1000 : undefined
 }

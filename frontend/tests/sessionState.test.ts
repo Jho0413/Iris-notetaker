@@ -60,6 +60,18 @@ test('stages promoted at stop are done, marked live and not timed', () => {
   assert.equal(next.stages.transcribe.promoted, undefined)
 })
 
+test('a promotion that fails is shown as failed, not as done live', () => {
+  const run = reduceEvents([
+    ev('status', { status: 'processing' }),
+    ev('stage_started', { stage: 'select', promoted: true }),
+    ev('visual_selected', { id: 'v1', caption: 'Graph', frame: { t: 4 } }),
+    ev('error', { message: 'select failed: OSError: disk full' }),
+  ])
+  assert.equal(run.stages.select.status, 'failed')
+  assert.equal(stageDetail('select', run), '1 figure')
+  assert.equal(stageSeconds(run.stages.select), undefined)
+})
+
 test('replayed history changes nothing', () => {
   const events = [
     ev('status', { status: 'processing' }),
