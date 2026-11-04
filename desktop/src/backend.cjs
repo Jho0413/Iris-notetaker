@@ -14,6 +14,7 @@ const path = require('node:path')
 
 const TOKEN_HEADER = 'x-iris-token'
 const LOG_ROTATE_BYTES = 10 * 1024 * 1024
+const LOG_DRAIN_MS = 2000 // after exit, how long the log waits for the rest of the output
 
 /** A port nothing is listening on right now, on 127.0.0.1. */
 function freePort() {
@@ -168,15 +169,19 @@ class Backend extends EventEmitter {
       child.once('exit', (code, signal) => resolve({ code, signal }))
     })
     // The log ends once the process has exited and its output has been read to the end ('close'
-    // follows 'exit' once stdout and stderr are drained); stop() waits for that last write.
+    // follows 'exit' once stdout and stderr are drained), and stop() waits for that last write.
+    // A grandchild holding the pipes (in development, uv runs Python as its own child) could keep
+    // them open indefinitely, so the wait for 'close' is bounded.
     const closed = new Promise((resolve) => {
       child.once('close', resolve)
       child.once('error', resolve)
     })
-    this.logClosed = Promise.all([exited, closed]).then(
-      ([{ code, signal }]) =>
-        new Promise((resolve) => out.end(`--- backend exited (code ${code}, signal ${signal})\n`, resolve)),
-    )
+    this.logClosed = exited.then(async ({ code, signal }) => {
+      let timer
+      await Promise.race([closed, new Promise((r) => (timer = setTimeout(r, LOG_DRAIN_MS)))])
+      clearTimeout(timer)
+      await new Promise((resolve) => out.end(`--- backend exited (code ${code}, signal ${signal})\n`, resolve))
+    })
     exited.then(({ code, signal, error }) => {
       if (this.child === child) {
         this.child = null

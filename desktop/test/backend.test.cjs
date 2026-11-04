@@ -211,3 +211,24 @@ test('stop before the process is spawned cancels the start too', async () => {
   assert.equal(spawned, 0)
   assert.equal(backend.running, false)
 })
+
+test('stop is bounded even when a grandchild keeps the output pipes open', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'iris-backend-'))
+  const backend = new Backend({
+    command: (port, token) => ({
+      cmd: process.execPath,
+      args: [path.join(__dirname, 'fake-wrapper.cjs'), String(port)],
+      cwd: dir,
+      env: { PATH: process.env.PATH, IRIS_API_TOKEN: token, EXIT_AFTER_MS: '5000' },
+    }),
+    logFile: path.join(dir, 'backend.log'),
+    startTimeoutMs: 3000,
+    stopTimeoutMs: 300,
+  })
+  await backend.start()
+  const t0 = Date.now()
+  await backend.stop() // SIGTERM ignored → SIGKILL after 300 ms; the grandchild still holds the pipes
+  const took = Date.now() - t0
+  assert.ok(took < 4000, `stop took ${took} ms`)
+  assert.match(fs.readFileSync(path.join(dir, 'backend.log'), 'utf8'), /backend exited \(code null, signal SIGKILL\)/)
+})
