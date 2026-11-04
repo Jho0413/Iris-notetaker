@@ -9,6 +9,12 @@ live"):
 - ``selected_to`` (T_s): every closed moment that ends by here has been read. Select lane.
 - ``horizon``: ``min(T_a, T_s)``. Evidence before it is final, so the draft may freeze it.
 
+Selection is published in time order and never reaches back: every moment read after
+``selected_to`` advanced starts at or after it, and so does every record made from it (its
+elements and figures are timed within the moment). ``publish_selection`` rejects content that
+breaks this. It is what makes evidence before the horizon final: a moment read later can neither
+add a record before the horizon nor span a time before it.
+
 A lane that has finished (flushed everything after stop) or failed counts as through any time
 (``through``), so a lane waiting on it never waits forever. Watermarks only move forward.
 
@@ -172,7 +178,14 @@ class LiveTimeline:
         rejected_moment_ids: Sequence[str],
         selected_to: float,
     ) -> None:
-        """Select lane: the result of reading one batch of moments."""
+        """Select lane: the result of reading one batch of moments, which all start at or after
+        the previous ``selected_to`` (see the module docstring)."""
+        early = [c.moment_id for c in contents if c.start < self.selected_to]
+        if early:
+            raise ValueError(
+                f"selection must be published in time order: {', '.join(early)} start before "
+                f"{self.selected_to:g} s, which is already selected"
+            )
         self.contents.extend(contents)
         self.visuals.extend(visuals)
         self.rejected_moment_ids.extend(rejected_moment_ids)
