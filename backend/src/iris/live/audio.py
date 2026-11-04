@@ -377,7 +377,9 @@ class AudioLane(LiveLane):
         self._client = None
 
     async def run(self) -> None:
-        if (self.max_len + self.confirm) * 2 + 1024 > transcribe.API_MAX_UPLOAD_BYTES:
+        # The longest window: the maximum, plus a short final tail joined to it.
+        longest = self.max_len + max(self.confirm, self.min_tail)
+        if longest * 2 + 1024 > transcribe.API_MAX_UPLOAD_BYTES:
             raise ValueError("live_window_max_s exceeds the transcription API's upload limit")
         paths = self.ctx.paths
         paths.live_transcript_windows_dir.mkdir(parents=True, exist_ok=True)
@@ -463,7 +465,7 @@ class AudioLane(LiveLane):
             )
             cut = cut_at + rel
             if final and decoded - cut < self.min_tail:
-                return decoded  # only possible when decoded < cut_at + max_len + confirm
+                return decoded  # at most max_len + max(confirm, min_tail) long
             return cut
         return decoded if final else None
 

@@ -40,7 +40,7 @@ from iris.sources.browser_live import (
     finalize_audio,
     store_audio_chunk,
 )
-from iris.store.layout import SessionPaths, read_model
+from iris.store.layout import SessionPaths, read_model, write_model
 from tests.test_live import split
 
 RATE = 16_000
@@ -725,3 +725,40 @@ async def test_at_stop_a_very_short_tail_joins_the_last_window(
     longer = int(2.5 * RATE) + int(1.5 * RATE)
     assert await lane._next_cut(0, longer, final=False) == int(2.5 * RATE)
     assert await lane._next_cut(0, longer, final=True) == int(2.5 * RATE)
+
+
+async def test_a_cached_window_just_past_its_bounds_still_commits(
+    tmp_path: Path, paths: SessionPaths, webm: bytes, monkeypatch
+):
+    fake = FakeTranscriber()
+    original = fake.create
+
+    async def create(**kwargs):  # two segments, so each window has one at its start
+        result = await original(**kwargs)
+        d = result["segments"][0]["end"]
+        result["segments"] = [
+            {"start": 0.0, "end": d / 2, "text": "first half"},
+            {"start": d / 2, "end": d, "text": "second half"},
+        ]
+        return result
+
+    fake.client.audio.transcriptions.create = create
+    chunks = split(webm, 2000)
+    s = settings(tmp_path)
+    run = Run(paths, s, fake, monkeypatch)
+    run.store(chunks, range(len(chunks)))
+    await run.stop()
+    # Each cached window's segment moved a hair past its end (within the reuse tolerance, same
+    # text), as an older run without clamping could have written it.
+    for path in paths.live_transcript_windows_dir.iterdir():
+        window = read_model(path, audio_lane.CachedWindow)
+        last = window.segments[-1]
+        nudged = last.model_copy(update={"start": window.end + 1e-7, "end": window.end + 1e-7})
+        write_model(path, window.model_copy(update={"segments": [*window.segments[:-1], nudged]}))
+
+    again = FakeTranscriber()
+    rerun = Run(paths, s, again, monkeypatch)
+    await rerun.stop()
+    assert again.calls == []
+    starts = [seg.start for seg in rerun.timeline.segments]
+    assert starts == sorted(starts)
