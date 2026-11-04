@@ -184,7 +184,7 @@ Late data is never lost: everything captured stays on disk and the final run use
 1. **Finish the lanes.** Each lane flushes: the last audio window is cut wherever the audio ends,
    the detector closes the last moment (`finish`), the last moments are read and figures still
    rendering complete (figures not yet started are left to the render stage, which renders every
-   figure at stop and reuses the live renders from its cache). The draft lane just stops; the write stage writes the tail. A lane still
+   figure at stop; once the live selection is promoted, the live renders are its cache hits). The draft lane just stops; the write stage writes the tail. A lane still
    flushing after `IRIS_LIVE_FINISH_TIMEOUT_S` is cancelled and counts as failed.
 2. **Ingest** as before: `audio.wav` and `frames.json` from the captured chunks.
 3. **Promote.** If the audio, screen and select lanes finished without failing and none skipped
