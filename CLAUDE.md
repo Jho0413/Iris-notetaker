@@ -25,6 +25,28 @@ behaviour choice in it) goes through these steps, in order:
 A **small fix** (a bug with an obvious fix, a typo, a one-line change) can go straight to step 3,
 but it is still proven to work (step 4).
 
+## Engineering practices
+
+- **Keep it simple.** Build the smallest thing that does the job. No options, layers or
+  abstractions "for later": add them when a second real use appears. Between two designs, pick the
+  one with fewer moving parts.
+- **Reuse, don't rebuild.** Before writing something new, look for what Iris already has
+  (components, CSS classes and tokens in `index.css`, helpers like `act()`, `write_model`,
+  `ConfirmDialog`) and then for a well-kept library. Extend what exists instead of making a
+  near-copy.
+- **Change only what the task needs.** No drive-by refactors, renames or reformatting; note them
+  and do them separately, unless the user asks. Remove code a change leaves unused.
+- **One source of truth.** Settings, file names, wording and constants live in one place
+  (`Settings`, `store/layout.py`, `session/messages.ts`) and are imported, never copied.
+- **Pure logic, thin edges.** Keep decisions in small pure functions (no I/O) that plain
+  `pytest` / `node --test` can cover; keep routes, components and the Electron main process thin.
+- **Check at the boundary, trust inside.** Validate what comes in (API requests, files on disk,
+  model output) once, where it enters; code behind that works with typed, valid data.
+- **Fail clearly.** Developers get the full error in the log; the user gets plain words and a way
+  to recover. Never swallow an error silently.
+- **Names and comments explain why.** Name things for what they mean to the user or the domain;
+  comment the reason behind non-obvious code, not what it does.
+
 ## Conventions
 
 - **Stage contract.** A pipeline stage is `async def run(ctx: StageContext) -> None`. It reads files from
