@@ -296,15 +296,23 @@ async def generate_section(ctx: StageContext, payload: str) -> WrittenSection:
 
 
 def section_payload(
-    part: WritingPart, *, language: str | None, first: WrittenSection | None, later: bool
+    part: WritingPart,
+    *,
+    language: str | None,
+    first: WrittenSection | None,
+    later: bool,
+    earlier: bool | None = None,
 ) -> str:
     """The model input for one part. ``first`` is the session's first section (``None`` for the
     first part); ``later`` says whether parts follow. Nothing here depends on how many parts the
-    session has, so a part written live has the payload, and the cache key, it has at stop."""
+    session has, so a part written live has the payload, and the cache key, it has at stop.
+
+    ``earlier`` defaults to ``first is not None``. The live draft sets it for a later part when the
+    first part could not be written, so that part is still written as a continuation."""
     return _json(
         {
             "records": part.records,
-            "earlier_parts": first is not None,
+            "earlier_parts": first is not None if earlier is None else earlier,
             "later_parts": later,
             "language": language,
             "title": first.title if first else None,
@@ -337,10 +345,11 @@ async def write_section(
     language: str | None,
     first: WrittenSection | None,
     later: bool,
+    earlier: bool | None = None,
 ) -> WrittenSection:
     """The validated section for ``part``, from the cache (``notes_sections/``) or one model
     call. Used by this stage and by the live draft lane, so both share the cache."""
-    payload = section_payload(part, language=language, first=first, later=later)
+    payload = section_payload(part, language=language, first=first, later=later, earlier=earlier)
     cache = section_cache_path(ctx, payload)
     try:
         section = read_model(cache, WrittenSection)
