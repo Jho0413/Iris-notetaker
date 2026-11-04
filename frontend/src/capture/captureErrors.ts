@@ -15,10 +15,27 @@ function errorName(err: unknown): string {
   return err instanceof Error || err instanceof DOMException ? err.name : ''
 }
 
-export function describeCaptureError(err: unknown, device: CaptureDevice): string {
+/** Running in the macOS desktop app, which serves the UI from app://iris. */
+export function inDesktopApp(): boolean {
+  return typeof location !== 'undefined' && location.protocol === 'app:'
+}
+
+export function describeCaptureError(
+  err: unknown,
+  device: CaptureDevice,
+  desktopApp: boolean = inDesktopApp(),
+): string {
   switch (errorName(err)) {
     case 'NotAllowedError':
     case 'PermissionDeniedError':
+      if (desktopApp) {
+        return device === 'screen'
+          ? 'Screen recording was cancelled or blocked. Choose a screen or window to record. If ' +
+              'macOS blocked it, allow Iris in System Settings → Privacy & Security → Screen & ' +
+              'System Audio Recording, then quit and reopen Iris.'
+          : 'Microphone access was blocked. Allow Iris in System Settings → Privacy & Security → ' +
+              'Microphone, then try again.'
+      }
       return device === 'screen'
         ? 'Screen sharing was cancelled or blocked. Choose a screen, window or tab to share. ' +
             'On macOS, also allow screen recording for your browser in System Settings.'
