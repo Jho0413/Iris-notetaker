@@ -360,12 +360,18 @@ def validate_plan(
     figures the sweep grouped as looking the same, and the sections it rewrites are the ones
     holding the dropped markers (computed here, not taken from the model). A figure kept by one
     edit can't be dropped by another, and vice versa. One-part notes accept only dedupes.
+
+    A section a ``drop_repeat`` relies on to keep the point is never rewritten by another edit
+    (other than dropping a duplicate figure), so two repeats can't each lean on the other's copy
+    and lose the point from both.
     """
     n = len(sections)
     where = placements(sections)
     placed = set(where) & known
     kept: set[str] = set()
     dropped: set[str] = set()
+    rewritten: set[int] = set()  # sections rewritten by accepted edits (other than dedupes)
+    keeps_point: set[int] = set()  # context sections of accepted drop_repeats
     edits: list[SynthesisEdit] = []
     for edit in plan.edits[:MAX_EDITS]:
         instruction = edit.instruction.strip()
@@ -393,6 +399,13 @@ def validate_plan(
             dropped.update(drops)
         elif len(rewrite) < (2 if edit.kind == "merge" else 1):
             continue
+        else:
+            context -= rewrite
+            relies = context if edit.kind == "drop_repeat" else set()
+            if rewrite & keeps_point or relies & rewritten:
+                continue
+            rewritten |= rewrite
+            keeps_point |= relies
         edits.append(
             SynthesisEdit(
                 kind=edit.kind,

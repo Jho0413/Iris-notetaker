@@ -828,3 +828,43 @@ async def test_one_part_notes_with_only_one_look_alike_placed_make_no_call(ctx, 
     await finish(ctx)
     assert fake.calls == [] and report(ctx).status == "skipped"
     assert Repeat(kind="figure", ids=["v1", "v3"]) in report(ctx).repeats
+
+
+def test_two_repeats_cannot_each_rely_on_the_other():
+    plan = synthesize.EditPlan.model_validate(
+        {
+            "edits": [
+                edit("drop_repeat", [3], context=[0]),
+                edit("drop_repeat", [0], context=[3]),  # relies on the section just dropped
+                edit("correct", [0]),  # would rewrite the section the first repeat keeps
+                edit("merge", [1, 2]),
+                edit("drop_repeat", [3], context=[1]),  # its context is rewritten by the merge
+                edit("dedupe_figure", [0], keep="v1", drops=["v3"]),  # markers only: allowed
+            ]
+        }
+    )
+    repeats = [Repeat(kind="figure", ids=["v1", "v3"])]
+    edits = synthesize.validate_plan(
+        plan, synthesize.split_sections(NOTES), {"v1", "v2", "v3"}, repeats
+    )
+    assert [(e.kind, e.sections) for e in edits] == [
+        ("drop_repeat", [3]),
+        ("merge", [1, 2]),
+        ("dedupe_figure", [3]),
+    ]
+
+
+async def test_mutual_repeats_keep_the_point_in_the_notes(ctx, monkeypatch):
+    setup_session(ctx, NOTES)
+
+    def rewrite(payload):
+        (section,) = payload["sections"]
+        return synthesize.Rewrite(
+            sections=[synthesize.RewrittenSection(index=section["index"], markdown="")]
+        )
+
+    plan = [edit("drop_repeat", [3], context=[0]), edit("drop_repeat", [0], context=[3])]
+    fake = use(monkeypatch, FakeModel(plan, rewrite))
+    notes = await finish(ctx)
+    assert [name for name, _ in fake.calls] == ["EditPlan", "Rewrite"]
+    assert "Revenue grew 12% in Q1, and the formula" in notes.markdown

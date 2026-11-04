@@ -335,7 +335,8 @@ synthesis. A re-run from `synthesize` re-polishes without rewriting anything els
   needs two sections, only `dedupe_figure` may remove markers, only among figures the sweep
   grouped (so image similarity alone never removes a figure, and neither does the model alone),
   the sections it changes are the ones holding the markers (computed locally), and a figure can't
-  be both kept and dropped.
+  be both kept and dropped. A section a `drop_repeat` relies on to keep the point is never
+  rewritten by another edit, so two repeats can't each lean on the other's copy.
 - **Rewrite:** edits that touch overlapping sections are grouped, and each group is rewritten in
   one call (up to 4 at once, effort `IRIS_SYNTHESIS_REASONING_EFFORT`, unset: the notes effort),
   with read-only context sections. A group that only drops duplicate figures is applied locally
