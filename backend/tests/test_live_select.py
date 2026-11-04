@@ -300,7 +300,8 @@ async def test_figures_render_in_the_background_and_a_failure_is_not_fatal(
     assert Lane.SELECT not in timeline.failed
     rendered = [data["id"] for kind, data in events if kind == EventType.VISUAL_RENDERED]
     assert sorted(rendered) == ["v000001", "v000003"]
-    assert events[-1][1] == rendered_visual(rendered[-1]).model_dump(mode="json")
+    assert events[-1][1] == render.rendered_event(rendered_visual(rendered[-1]))
+    assert "problems" not in events[-1][1]
 
 
 async def test_live_renders_hit_the_render_cache(

@@ -10,9 +10,11 @@ Steps (architecture section 1, step 3):
      boundary so words are not cut in half. Chunk length depends on the model
      (``chunk_lengths_for``): ~5 min for whisper-1, which returns segment timestamps, and ~15 s
      for text-only models, where each chunk becomes one segment.
-  2. Chunks are transcribed concurrently. Each finished chunk is cached on disk, so a crash or a
-     re-run never re-pays for it (principle 4). A cached chunk is reused only if its boundaries,
-     audio and model match.
+  2. Chunks are transcribed concurrently, each retried after a temporary API error
+     (``retry_temporary``). Each finished chunk is cached on disk, so a crash or a re-run never
+     re-pays for it (principle 4). A cached chunk is reused only if its boundaries, audio and
+     model match. A chunk that still fails fails the stage once the others have finished; a
+     blocking error (``classify``) cancels them at once.
   3. Each chunk's timestamps are offset by its start time, then everything is merged and sorted.
 
 Model-specific request and response handling lives in ``transcribe_chunk`` and
@@ -33,6 +35,7 @@ import numpy as np
 from pydantic import BaseModel
 
 from iris.llm.client import get_openai
+from iris.llm.errors import gather_units, retry_temporary
 from iris.models import EventType, Transcript, TranscriptSegment
 from iris.pipeline.context import StageContext
 from iris.store.layout import read_model, write_model
@@ -352,8 +355,11 @@ async def run(
         async def one(i: int, s: int, e: int, digest: str) -> None:
             async with sem:
                 offset = s / rate
-                result = await transcribe_chunk(
-                    client, model, encode_wav(samples[s:e], rate), (e - s) / rate
+                wav = encode_wav(samples[s:e], rate)
+                result = await retry_temporary(
+                    lambda: transcribe_chunk(client, model, wav, (e - s) / rate),
+                    ctx.settings.api_retry_delays_s,
+                    what=f"session {ctx.session_id}: transcription chunk {i}",
                 )
             chunk = CachedChunk(
                 index=i,
@@ -370,8 +376,9 @@ async def run(
             write_model(cache_path(i, s, e), chunk)
             finish(chunk)
 
-        # Let every chunk run to completion (no cancelling paid-for work), then report failures.
-        outcomes = await asyncio.gather(*(one(*t) for t in todo), return_exceptions=True)
+        # Let every chunk run to completion (no cancelling paid-for work), then report failures;
+        # a blocking error (e.g. a rejected key) cancels the rest at once and is raised as is.
+        outcomes = await gather_units(one(*t) for t in todo)
         failures = [(t, o) for t, o in zip(todo, outcomes, strict=True) if isinstance(o, Exception)]
         if failures:
             details = "; ".join(

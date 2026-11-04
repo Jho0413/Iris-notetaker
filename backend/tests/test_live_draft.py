@@ -35,6 +35,7 @@ from iris.models import (
 from iris.pipeline.context import StageContext
 from iris.pipeline.stages import write
 from iris.store.layout import SessionPaths, read_model, session_paths, write_model
+from tests.api_errors import connection_error, status_error
 
 BUDGET = 2000
 WORDS = "the derivative measures how fast the function changes at a point "
@@ -72,6 +73,7 @@ class FakeNotes:
         self.horizons: list[float] = []
         self.timeline: LiveTimeline | None = None
         self.fail_next = 0
+        self.error: Exception = RuntimeError("model unavailable")  # what fail_next raises
         self.invalid = lambda data: False  # payloads answered with a section that fails validation
         self.gate: asyncio.Event | None = None  # when set, calls wait for it
         self.cancelled = 0
@@ -89,7 +91,7 @@ class FakeNotes:
                 raise
         if self.fail_next:
             self.fail_next -= 1
-            raise RuntimeError("model unavailable")
+            raise self.error
         ids = [r["id"] for r in data["records"] if r["kind"] == "visual"]
         first = data["records"][0]["start"]
         if self.invalid(data):
@@ -441,6 +443,37 @@ async def test_a_failed_call_is_retried_after_the_retry_delay(tmp_path, notes, m
     assert notes.payloads[1] == notes.payloads[0]  # the same payload, tried again
     assert live_counts(events)[-1] == len(closed)
     assert not task.done()  # the failure didn't end the lane
+    await stop(tl, task)
+
+
+async def test_a_temporary_error_is_retried_within_the_call(tmp_path, notes, monkeypatch):
+    monkeypatch.setattr(draft, "RETRY_DELAY_S", 60.0)  # the lane's own retry never comes
+    ctx, events = make_ctx(tmp_path)
+    tl = audio_only()
+    notes.fail_next, notes.error = 2, connection_error()
+    task = start_lane(ctx, tl, notes)
+    await publish_speech(tl, 12)
+    closed = draft.plan(tl.transcript(), tl.selection(), BUDGET, tl.horizon)
+    await eventually(lambda: notes.calls == len(closed) + 2)
+    assert notes.payloads[0] == notes.payloads[1] == notes.payloads[2]
+    assert live_counts(events)[-1] == len(closed)
+    await stop(tl, task)
+
+
+async def test_a_blocking_error_gives_the_payload_up_at_once(tmp_path, notes, monkeypatch):
+    monkeypatch.setattr(draft, "RETRY_DELAY_S", 0.02)
+    ctx, events = make_ctx(tmp_path)
+    tl = audio_only()
+    notes.fail_next, notes.error = 1, status_error(401)
+    task = start_lane(ctx, tl, notes)
+    await publish_speech(tl, 12)
+    closed = draft.plan(tl.transcript(), tl.selection(), BUDGET, tl.horizon)
+    assert len(closed) >= 2
+    # The first part is given up after one call; the later ones are written as continuations.
+    await eventually(lambda: notes.calls == len(closed))
+    await idle(0.3)
+    assert notes.calls == len(closed)
+    assert sum(p == notes.payloads[0] for p in notes.payloads) == 1
     await stop(tl, task)
 
 

@@ -4,7 +4,9 @@ from unittest.mock import AsyncMock
 import pytest
 
 from iris.config import Settings
+from iris.llm.errors import UserFacingError
 from iris.models import (
+    NOTHING_TO_WRITE,
     EventType,
     FrameRef,
     Notes,
@@ -170,8 +172,9 @@ async def test_visual_only_and_empty_input(setup):
     await write.run(ctx)
     assert json.loads(generate.call_args.args[1])["records"][0]["kind"] == "visual"
     write_model(ctx.paths.selection, Selection(visuals=[]))
-    with pytest.raises(ValueError, match="no transcript"):
+    with pytest.raises(UserFacingError, match="no transcript") as raised:
         await write.run(ctx)
+    assert raised.value.message == NOTHING_TO_WRITE
     assert generate.await_count == 1
 
 

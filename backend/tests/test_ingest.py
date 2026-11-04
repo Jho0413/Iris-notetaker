@@ -10,7 +10,8 @@ import numpy as np
 import pytest
 
 from iris.config import Settings
-from iris.models import FrameIndex, SourceKind
+from iris.llm.errors import UserFacingError
+from iris.models import UNREADABLE_UPLOAD, UPLOAD_WITHOUT_AUDIO, FrameIndex, SourceKind
 from iris.pipeline.context import StageContext
 from iris.sources.upload import UploadSource, extract_audio, extract_frames
 from iris.store.layout import SessionPaths, read_model
@@ -171,15 +172,17 @@ def test_audio_starting_late_is_padded_with_silence(tmp_path: Path):
 
 def test_no_audio_raises(tmp_path: Path):
     src = make_media(tmp_path / "silent.mp4", audio=False, seconds=1)
-    with pytest.raises(ValueError, match="no audio"):
+    with pytest.raises(UserFacingError, match="no audio") as raised:
         extract_audio(src, tmp_path / "audio.wav", rate=16_000)
+    assert raised.value.message == UPLOAD_WITHOUT_AUDIO
 
 
 def test_unreadable_file_raises(tmp_path: Path):
     src = tmp_path / "junk.mp4"
     src.write_bytes(b"not really a video")
-    with pytest.raises(ValueError, match="not a readable"):
+    with pytest.raises(UserFacingError, match="not a readable") as raised:
         extract_audio(src, tmp_path / "audio.wav", rate=16_000)
+    assert raised.value.message == UNREADABLE_UPLOAD
 
 
 # --- Ingest stage -----------------------------------------------------------------------------
@@ -214,7 +217,7 @@ async def test_ingest_audio_only(tmp_path: Path):
 async def test_ingest_video_without_audio_fails_before_decoding(tmp_path: Path):
     src = make_media(tmp_path / "silent.mp4", audio=False, seconds=1)
     ctx = make_ctx(tmp_path / "s1", src)
-    with pytest.raises(ValueError, match="no audio track"):
+    with pytest.raises(UserFacingError, match="no audio track"):
         await UploadSource().ingest(ctx)
     assert not ctx.paths.frame_index.exists()
     assert not ctx.paths.audio.exists()

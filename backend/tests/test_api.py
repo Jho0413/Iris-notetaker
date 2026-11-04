@@ -5,7 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from iris.config import Settings
-from iris.models import Notes, SessionType, SourceKind
+from iris.models import UNREADABLE_UPLOAD, Notes, SessionType, SourceKind
 from iris.store.layout import session_paths, write_model
 
 
@@ -35,9 +35,11 @@ def test_upload_creates_session_and_runs_pipeline(client: TestClient):
     session = wait_for_status(client, sid, {"done", "failed"})
     assert session["status"] == "failed"
     assert session["current_stage"] == "ingest"
-    assert session["error"] == (
-        "ingest failed: ValueError: source.mp4 is not a readable audio or video file"
-    )
+    assert session["failure_kind"] == "input"
+    assert session["failure_message"] == UNREADABLE_UPLOAD
+    assert "error" not in session and "error_detail" not in session
+    detail = client.app.state.store.failure_detail(sid)  # the raw error, for developers only
+    assert detail.error.startswith("ingest failed: UserFacingError: source.mp4 is not a readable")
 
     assert [s["id"] for s in client.get("/api/sessions").json()] == [sid]
     assert client.get(f"/api/sessions/{sid}/notes").status_code == 404

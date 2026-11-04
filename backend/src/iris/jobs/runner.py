@@ -1,4 +1,10 @@
-"""Runs a session's pipeline as an in-process asyncio task. Single user, so no queue server."""
+"""Runs a session's pipeline as an in-process asyncio task. Single user, so no queue server.
+
+A failed run is recorded twice (architecture section 1, "Errors and retries"): for the user, one of
+our own messages (``UserFacingError``'s for a known input problem, else ``GENERIC_FAILURE``) and its
+kind, published in the ``error`` event; for developers, the raw error in the log and the session
+record (``iris show``). Exception text never reaches the API.
+"""
 
 import asyncio
 import logging
@@ -7,7 +13,8 @@ from iris.config import Settings
 from iris.events import EventBus
 from iris.live import LiveRegistry, LiveTimeline, promote
 from iris.llm import usage
-from iris.models import EventType, SessionStatus, SourceKind, Stage
+from iris.llm.errors import StageError, UserFacingError, first_error
+from iris.models import GENERIC_FAILURE, EventType, FailureKind, SessionStatus, SourceKind, Stage
 from iris.pipeline import STAGES, plan_from
 from iris.pipeline.context import StageContext
 from iris.store.db import SessionStore
@@ -63,12 +70,25 @@ class JobRunner:
                 await self._run_plan(ctx, plan_from(from_stage))
         except Exception as exc:
             log.exception("session %s failed", session_id)
-            message = str(exc) if isinstance(exc, StageError) else f"{type(exc).__name__}: {exc}"
-            self.store.update(session_id, status=SessionStatus.FAILED, error=message)
-            self.bus.publish(session_id, EventType.ERROR, {"message": message})
-            self.bus.publish(session_id, EventType.STATUS, {"status": SessionStatus.FAILED})
+            self._fail(session_id, exc)
             return
         self._set_status(session_id, SessionStatus.DONE)
+
+    def _fail(self, session_id: str, exc: BaseException) -> None:
+        exc = first_error(exc)
+        stage = exc.stage if isinstance(exc, StageError) else None
+        cause = exc.cause if isinstance(exc, StageError) else exc
+        if isinstance(cause, UserFacingError):
+            message, kind = cause.message, FailureKind.INPUT
+        else:
+            message, kind = GENERIC_FAILURE, FailureKind.GENERAL
+        detail = str(exc) if isinstance(exc, StageError) else f"{type(exc).__name__}: {exc}"
+        self.store.fail(session_id, message=message, kind=kind, detail=detail, stage=stage)
+        data: dict[str, object] = {"message": message, "kind": kind}
+        if stage is not None:
+            data["stage"] = stage
+        self.bus.publish(session_id, EventType.ERROR, data)
+        self.bus.publish(session_id, EventType.STATUS, {"status": SessionStatus.FAILED})
 
     async def _run_plan(self, ctx: StageContext, plan: list[list[Stage]]) -> None:
         if any(Stage.SELECT in group for group in plan):
@@ -77,7 +97,14 @@ class JobRunner:
             # starts from assemble). Write rewrites it whole.
             ctx.paths.notes_draft.unlink(missing_ok=True)
         for group in plan:
-            await asyncio.gather(*(self.run_stage(ctx, s) for s in group))
+            # Stages of a group run together. If one fails the run has failed, so the others
+            # are cancelled at once (their finished units are cached for a re-run).
+            try:
+                async with asyncio.TaskGroup() as tasks:
+                    for stage in group:
+                        tasks.create_task(self.run_stage(ctx, stage))
+            except BaseExceptionGroup as error:
+                raise first_error(error) from None
 
     async def _run_live(self, ctx: StageContext, timeline: LiveTimeline) -> None:
         """A live session at stop: ingest, promote what the live lanes finished, run the rest.
@@ -131,9 +158,3 @@ class JobRunner:
         for task in self._tasks.values():
             task.cancel()
         await asyncio.gather(*self._tasks.values(), return_exceptions=True)
-
-
-class StageError(Exception):
-    def __init__(self, stage: Stage, cause: Exception):
-        super().__init__(f"{stage} failed: {type(cause).__name__}: {cause}")
-        self.stage = stage

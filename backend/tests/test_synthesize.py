@@ -37,6 +37,7 @@ from iris.pipeline.context import StageContext
 from iris.pipeline.stages import assemble, synthesize
 from iris.store.db import SessionStore
 from iris.store.layout import SessionPaths, read_model, session_paths, write_model
+from tests.api_errors import connection_error, status_error
 
 # --- Synthetic frames and crops -------------------------------------------------------------------
 
@@ -611,12 +612,46 @@ async def test_a_failing_synthesis_still_finishes_the_session(tmp_path, monkeypa
     use(monkeypatch, FakeModel(fail=RuntimeError("boom")))
     await runner.run(session.id, Stage.SYNTHESIZE)
     stored = store.get(session.id)
-    assert stored.status == SessionStatus.DONE and stored.error is None
+    assert stored.status == SessionStatus.DONE and stored.failure_message is None
     assert stored.current_stage == Stage.SYNTHESIZE
     assert read_model(ctx.paths.notes, Notes) == assembled
     assert report(ctx).status == "failed"
     assert session_paths(settings.sessions_dir, session.id).synthesis_report.exists()
     store.close()
+
+
+class Flaky(FakeModel):
+    """Fails the first ``failures`` calls with ``error``, then answers."""
+
+    def __init__(self, *args, error: Exception, failures: int, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.error, self.failures = error, failures
+
+    async def parse(self, **kwargs):
+        if self.failures:
+            self.failures -= 1
+            self.calls.append(("failed", {}))
+            raise self.error
+        return await super().parse(**kwargs)
+
+
+async def test_a_temporary_error_in_a_synthesis_call_is_retried(ctx, monkeypatch):
+    setup_session(ctx, NOTES)
+    fake = use(
+        monkeypatch,
+        Flaky([edit("merge", [1, 2])], merge_rewrite, error=connection_error(), failures=2),
+    )
+    await finish(ctx)
+    assert report(ctx).status == "applied"
+    assert [name for name, _ in fake.calls] == ["failed", "failed", "EditPlan", "Rewrite"]
+
+
+async def test_a_blocking_error_in_synthesis_is_not_retried_and_not_fatal(ctx, monkeypatch):
+    setup_session(ctx, NOTES)
+    fake = use(monkeypatch, Flaky(error=status_error(401), failures=5))
+    await finish(ctx)
+    assert len(fake.calls) == 1
+    assert report(ctx).status == "failed" and "blocking" in report(ctx).reason
 
 
 async def test_a_rerun_hits_the_cache_and_a_damaged_entry_is_regenerated(ctx, monkeypatch):

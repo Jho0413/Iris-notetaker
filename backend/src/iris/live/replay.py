@@ -344,7 +344,8 @@ async def replay(
             await asyncio.gather(follower, return_exceptions=True)
 
         session = (await client.get(f"{api}/sessions/{sid}")).json()
-        report.error = session.get("error")
+        # Only our own message: the raw error is in the backend log and `iris show <id>`.
+        report.error = session.get("failure_message")
         usage = (await client.get(f"{api}/sessions/{sid}/usage")).json()
         records = usage.get("records", [])
         report.cost_usd = usage.get("total", {}).get("cost_usd")

@@ -1,13 +1,19 @@
 """SQLite index of sessions. The files under sessions/<id>/ are the source of truth for content;
-this table only tracks what sessions exist and their status."""
+this table only tracks what sessions exist and their status.
+
+A failed run stores what the user is told (``failure_message``, ``failure_kind``) apart from what
+it failed on (``error_detail``, ``failed_at``), which is for developers only: it is never part of
+the API's ``Session`` and is read with ``failure_detail`` (``iris show``).
+"""
 
 import sqlite3
 import threading
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from iris.models import Session, SessionStatus, SourceKind, Stage
+from iris.models import GENERIC_FAILURE, FailureKind, Session, SessionStatus, SourceKind, Stage
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS sessions (
@@ -16,13 +22,30 @@ CREATE TABLE IF NOT EXISTS sessions (
     source        TEXT NOT NULL,
     status        TEXT NOT NULL,
     current_stage TEXT,
-    error         TEXT,
+    error         TEXT,  -- older versions' raw error; migrated to error_detail on open
     duration_s    REAL,
     created_at    TEXT NOT NULL,
     updated_at    TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS sessions_created_at ON sessions (created_at DESC);
 """
+
+# Columns added since the first schema, created on open if missing.
+ADDED_COLUMNS = {
+    "failure_message": "TEXT",
+    "failure_kind": "TEXT",
+    "error_detail": "TEXT",
+    "failed_at": "TEXT",
+}
+SESSION_FIELDS = tuple(Session.model_fields)
+
+
+@dataclass(frozen=True)
+class FailureDetail:
+    """What a failed run failed on, for developers (never served by the API)."""
+
+    error: str | None
+    at: str | None  # ISO time of the failure; None for sessions failed before it was recorded
 
 
 def _now() -> str:
@@ -46,6 +69,27 @@ class SessionStore:
         with self._lock:
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.executescript(SCHEMA)
+            self._migrate()
+
+    def _migrate(self) -> None:
+        """Add new columns, and move older versions' raw ``error`` text out of what is served:
+        it becomes the developer-only ``error_detail``, and the user sees the generic message."""
+        existing = {row["name"] for row in self._conn.execute("PRAGMA table_info(sessions)")}
+        with self._conn:
+            for column, kind in ADDED_COLUMNS.items():
+                if column not in existing:
+                    self._conn.execute(f"ALTER TABLE sessions ADD COLUMN {column} {kind}")
+            self._conn.execute(
+                "UPDATE sessions SET error_detail = COALESCE(error_detail, error),"
+                " failure_message = COALESCE(failure_message, ?),"
+                " failure_kind = COALESCE(failure_kind, ?), error = NULL"
+                " WHERE error IS NOT NULL",
+                (GENERIC_FAILURE, FailureKind.GENERAL.value),
+            )
+
+    @staticmethod
+    def _session(row: sqlite3.Row) -> Session:
+        return Session(**{k: row[k] for k in SESSION_FIELDS})
 
     def close(self) -> None:
         with self._lock:
@@ -67,12 +111,12 @@ class SessionStore:
             row = self._conn.execute(
                 "SELECT * FROM sessions WHERE id = ?", (session_id,)
             ).fetchone()
-        return Session(**dict(row)) if row else None
+        return self._session(row) if row else None
 
     def list(self) -> list[Session]:
         with self._lock:
             rows = self._conn.execute("SELECT * FROM sessions ORDER BY created_at DESC").fetchall()
-        return [Session(**dict(r)) for r in rows]
+        return [self._session(r) for r in rows]
 
     def update(
         self,
@@ -80,7 +124,6 @@ class SessionStore:
         *,
         status: SessionStatus | None = None,
         current_stage: Stage | None = None,
-        error: str | None = None,
         duration_s: float | None = None,
         title: str | None = None,
     ) -> None:
@@ -89,8 +132,6 @@ class SessionStore:
             fields["status"] = status.value
         if current_stage is not None:
             fields["current_stage"] = current_stage.value
-        if error is not None:
-            fields["error"] = error
         if duration_s is not None:
             fields["duration_s"] = duration_s
         if title is not None:
@@ -101,9 +142,52 @@ class SessionStore:
                 f"UPDATE sessions SET {cols} WHERE id = ?", (*fields.values(), session_id)
             )
 
-    def clear_error(self, session_id: str) -> None:
+    def fail(
+        self,
+        session_id: str,
+        *,
+        message: str,
+        kind: FailureKind,
+        detail: str,
+        stage: Stage | None = None,
+    ) -> None:
+        """Mark the session failed: ``message`` and ``kind`` for the user, ``detail`` (the raw
+        error) for developers, and the stage it stopped at, if known."""
+        now = _now()
+        fields: dict[str, object] = {
+            "status": SessionStatus.FAILED.value,
+            "failure_message": message,
+            "failure_kind": kind.value,
+            "error_detail": detail,
+            "failed_at": now,
+            "updated_at": now,
+        }
+        if stage is not None:
+            fields["current_stage"] = stage.value
+        cols = ", ".join(f"{k} = ?" for k in fields)
         with self._lock, self._conn:
-            self._conn.execute("UPDATE sessions SET error = NULL WHERE id = ?", (session_id,))
+            self._conn.execute(
+                f"UPDATE sessions SET {cols} WHERE id = ?", (*fields.values(), session_id)
+            )
+
+    def clear_error(self, session_id: str) -> None:
+        """Forget a previous failure (a new run is starting)."""
+        with self._lock, self._conn:
+            self._conn.execute(
+                "UPDATE sessions SET failure_message = NULL, failure_kind = NULL,"
+                " error_detail = NULL, failed_at = NULL, error = NULL WHERE id = ?",
+                (session_id,),
+            )
+
+    def failure_detail(self, session_id: str) -> FailureDetail | None:
+        """The raw error of the session's last failed run (developers only), or None."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT error_detail, failed_at FROM sessions WHERE id = ?", (session_id,)
+            ).fetchone()
+        if row is None or row["error_detail"] is None:
+            return None
+        return FailureDetail(error=row["error_detail"], at=row["failed_at"])
 
     def delete(self, session_id: str) -> None:
         with self._lock, self._conn:

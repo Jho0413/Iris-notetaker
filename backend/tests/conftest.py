@@ -16,3 +16,10 @@ def settings(tmp_path: Path) -> Settings:
 def client(settings: Settings):
     with TestClient(create_app(settings)) as c:
         yield c
+
+
+@pytest.fixture(autouse=True)
+def no_retry_waits(monkeypatch):
+    """Iris's retries of temporary API errors wait no time in tests (three retries, as by
+    default). Tests that need other delays pass ``api_retry_delays_s`` to ``Settings``."""
+    monkeypatch.setenv("IRIS_API_RETRY_DELAYS_S", "[0, 0, 0]")

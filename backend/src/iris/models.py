@@ -45,13 +45,42 @@ class SessionType(StrEnum):
     DEMO = "demo"
 
 
+# What the user is told when a session fails: only these messages, which we wrote (architecture
+# section 1, "Errors and retries"). Exception text, provider and model names, status codes and
+# model output never reach the API; the raw error is kept for developers (``iris show``).
+GENERIC_FAILURE = "Iris couldn't finish making the notes. Try again; finished steps are kept."
+UNREADABLE_UPLOAD = "Iris couldn't read this file. Upload an audio or video recording."
+UPLOAD_WITHOUT_AUDIO = "This recording has no sound. Upload a recording with speech."
+LIVE_WITHOUT_AUDIO = "No audio was recorded. Check that the microphone works, then record again."
+UNREADABLE_LIVE_AUDIO = "The recorded audio couldn't be read. Record the session again."
+NOTHING_TO_WRITE = "Iris found no speech or screen content in this recording to make notes from."
+
+FailureMessage = Literal[
+    "Iris couldn't finish making the notes. Try again; finished steps are kept.",
+    "Iris couldn't read this file. Upload an audio or video recording.",
+    "This recording has no sound. Upload a recording with speech.",
+    "No audio was recorded. Check that the microphone works, then record again.",
+    "The recorded audio couldn't be read. Record the session again.",
+    "Iris found no speech or screen content in this recording to make notes from.",
+]
+
+
+class FailureKind(StrEnum):
+    INPUT = "input"  # a known problem with the recording: upload or record again
+    GENERAL = "general"  # anything else: try again
+
+
 class Session(BaseModel):
+    """A session as the API shows it. The raw error of a failed run is not part of it: it is
+    stored for developers only (``SessionStore.failure_detail``, ``iris show``)."""
+
     id: str
     title: str
     source: SourceKind
     status: SessionStatus
-    current_stage: Stage | None = None
-    error: str | None = None
+    current_stage: Stage | None = None  # while failed: the stage it stopped at
+    failure_message: FailureMessage | None = None  # while failed: what to tell the user
+    failure_kind: FailureKind | None = None
     duration_s: float | None = None
     created_at: datetime
     updated_at: datetime
@@ -196,7 +225,9 @@ class RenderedVisual(BaseModel):
     render_as: RenderAs  # the renderer that produced it (may differ from the requested one)
     verified: bool  # passed the check against the source; False only for screenshot fallbacks
     attempts: int
-    problems: list[str] = Field(default_factory=list)  # from the last failed check, if any
+    # For debugging, never served: the last failed check's problems, or the API error that made
+    # it fall back to the source crop.
+    problems: list[str] = Field(default_factory=list)
 
 
 class Renders(BaseModel):
@@ -221,12 +252,20 @@ class NotesDraft(BaseModel):
     parts: int | None = None
 
 
+class NotesVisual(Visual):
+    """A visual as the finished notes show it: ``path`` is its render, and ``verified`` says how
+    it was made (``RenderedVisual.verified``): False for the source crop shown because no redraw
+    passed (or the redraw failed); None if it was never rendered."""
+
+    verified: bool | None = None
+
+
 class Notes(BaseModel):
     session_id: str
     session_type: SessionType
     title: str
     markdown: str  # markers resolved to image links
-    visuals: list[Visual]
+    visuals: list[NotesVisual]
 
 
 # --- Synthesize output -------------------------------------------------------------------------
@@ -315,7 +354,7 @@ class Event(BaseModel):
 # --- Usage (cost tracking) ---------------------------------------------------------------------
 
 
-class UsageRecord(BaseModel):
+class UsageRecordBase(BaseModel):
     """One model call. Token counts are as billed; breakdowns are subsets of their totals."""
 
     at: datetime
@@ -335,7 +374,18 @@ class UsageRecord(BaseModel):
     audio_seconds: float = 0  # billed seconds of audio (duration-billed models)
     cost_usd: float | None = None  # None: unpriced (see ``unpriced``)
     unpriced: str | None = None  # why no cost could be computed
-    error: str | None = None  # the call failed (no usage reported)
+
+
+class UsageRecord(UsageRecordBase):
+    """A model call as recorded in usage.json, for developers (``iris cost``)."""
+
+    error: str | None = None  # the call failed (no usage reported): what it failed on
+
+
+class UsageRecordView(UsageRecordBase):
+    """A model call as the API serves it: whether it failed, never the error text."""
+
+    failed: bool = False
 
 
 class UsageTotals(BaseModel):
@@ -355,15 +405,34 @@ class UsageTotals(BaseModel):
     audio_seconds: float = 0
 
 
-class SessionUsage(BaseModel):
+class SessionUsageTotals(BaseModel):
+    prices_checked: str  # date the price table was checked against OpenAI's pricing page
+    total: UsageTotals = UsageTotals()
+    by_stage: dict[str, UsageTotals] = {}
+    by_model: dict[str, UsageTotals] = {}
+    by_purpose: dict[str, UsageTotals] = {}
+
+
+class SessionUsage(SessionUsageTotals):
     """Every model call made for a session, across all runs, with totals (``usage.json``).
 
     Cache hits make no call, so a re-run that reuses cached work adds nothing here.
     """
 
-    prices_checked: str  # date the price table was checked against OpenAI's pricing page
     records: list[UsageRecord] = []
-    total: UsageTotals = UsageTotals()
-    by_stage: dict[str, UsageTotals] = {}
-    by_model: dict[str, UsageTotals] = {}
-    by_purpose: dict[str, UsageTotals] = {}
+
+    def view(self) -> "SessionUsageView":
+        """What the API serves: the same, without failed calls' error text."""
+        return SessionUsageView(
+            **self.model_dump(exclude={"records"}),
+            records=[
+                UsageRecordView(**r.model_dump(exclude={"error"}), failed=r.error is not None)
+                for r in self.records
+            ],
+        )
+
+
+class SessionUsageView(SessionUsageTotals):
+    """``SessionUsage`` as the API serves it (``GET /sessions/{id}/usage``)."""
+
+    records: list[UsageRecordView] = []
