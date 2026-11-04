@@ -1,7 +1,8 @@
 """Screen lane: captured frames -> moments, while recording.
 
 Reads:  live/frames/<t_ms>.jpg
-Writes: frames/<t_ms>.jpg (the same names and bytes ingest writes), live/frames.json,
+Writes: frames/<t_ms>.jpg (the same names and bytes ingest writes), live/frames.json (the
+        frames fed so far, rewritten at most every ``INDEX_SAVE_S`` and at stop),
         live/moments.json
 Publishes: closed moments (and so ``closed_to``); emits MOMENT_FOUND per moment, with the data
         the detect stage emits.
@@ -51,6 +52,9 @@ log = logging.getLogger(__name__)
 # Frames fed per worker-thread call: a backlog (after a restart) is published as it goes, and
 # the lane can be cancelled between calls.
 FEED_BATCH = 30
+# live/frames.json lists every frame so far, so rewriting it per frame would cost disk writes
+# quadratic in the session length. It is rewritten at most this often (session time) and at stop.
+INDEX_SAVE_S = 30.0
 
 
 class ScreenFeed:
@@ -69,6 +73,7 @@ class ScreenFeed:
         self.refs: list[FrameRef] = []
         self.moments: list[Moment] = []
         self._picked: dict[int, float] = {}  # grid cell -> the frame sampled in it
+        self._index_saved_t: float | None = None  # the latest frame in live/frames.json
 
     def would_sample(self, t: float) -> bool:
         """Whether ingest samples a frame at ``t`` earlier than ``fed_t`` that was not fed:
@@ -79,7 +84,6 @@ class ScreenFeed:
     def feed(self, frames: list[tuple[float, Path]]) -> list[Moment]:
         """Feed frames (in time order, all later than ``fed_t``); return the moments closed."""
         closed: list[Moment] = []
-        added = False
         for t, src in frames:
             self.fed_t = t
             if not self.sampler.take(t):
@@ -89,14 +93,15 @@ class ScreenFeed:
             if ref is None:
                 continue
             self.refs.append(ref)
-            added = True
             # Read what ingest wrote, as the detect stage does, so moments match it exactly.
             image = cv2.imread(str(self.paths.root / ref.path), cv2.IMREAD_COLOR)
             if image is None:
                 continue
             if (moment := self.detector.feed(ref.t, ref, image)) is not None:
                 closed.append(moment)
-        self._save(closed, index=added)
+        saved = self._index_saved_t
+        due = bool(self.refs) and (saved is None or self.refs[-1].t - saved >= INDEX_SAVE_S)
+        self._save(closed, index=due)
         return closed
 
     def finish(self) -> list[Moment]:
@@ -114,6 +119,7 @@ class ScreenFeed:
         self.moments.extend(closed)
         self.paths.live_dir.mkdir(parents=True, exist_ok=True)
         if index or final:
+            self._index_saved_t = self.refs[-1].t if self.refs else None
             width, height = self.normaliser.size or (0, 0)
             write_model(
                 self.paths.live_frame_index,

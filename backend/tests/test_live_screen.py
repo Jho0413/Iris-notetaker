@@ -162,6 +162,21 @@ async def test_zero_holdback_feeds_frames_as_they_arrive(tmp_path: Path, events:
     await driver.stop()
 
 
+async def test_the_frame_index_is_saved_periodically_not_per_frame(ctx: StageContext):
+    def saved() -> list[float]:
+        return [f.t for f in read_model(ctx.paths.live_frame_index, FrameIndex).frames]
+
+    driver = await Driver(ctx).start()
+    for t in range(13):
+        await driver.deliver((float(t), jpeg(COLOURS[0])))
+    assert saved() == [0.0]  # written once frames start; not again for INDEX_SAVE_S
+    for t in range(13, 33):
+        await driver.deliver((float(t), jpeg(COLOURS[0])))
+    assert saved() == [float(t) for t in range(31)]  # 30 s of frames since the last save
+    await driver.stop()
+    assert saved() == [float(t) for t in range(33)]
+
+
 async def test_no_frames_gives_empty_outputs(ctx: StageContext, events: list):
     timeline = await (await Driver(ctx).start()).stop()
     assert read_model(ctx.paths.live_frame_index, FrameIndex) == FrameIndex(
