@@ -25,6 +25,7 @@ import io
 import logging
 import wave
 from collections import Counter
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -67,6 +68,45 @@ def _frame_power(samples: np.ndarray, frame: int) -> np.ndarray:
     return power
 
 
+@dataclass(frozen=True)
+class QuietProfile:
+    """How quiet the audio is around each point: the mean power of the ``pause_s`` stretch
+    centred there, sampled every ``frame`` samples. Shared by upload chunking and live windows."""
+
+    quiet: np.ndarray  # quiet[j]: mean power of frames j..j+k-1, centred on sample j*frame+offset
+    frame: int
+    offset: int
+
+    def quietest(self, lo: int, hi: int, target: int) -> int | None:
+        """The sample in ``[lo, hi]`` at the centre of the quietest stretch; among stretches within
+        ``QUIET_RATIO`` of the quietest, the one closest to ``target``. None if no stretch is
+        centred in the range (too little audio)."""
+        j_lo = max(0, -(-(lo - self.offset) // self.frame))  # ceil division
+        j_hi = min(len(self.quiet) - 1, (hi - self.offset) // self.frame)
+        if j_lo > j_hi:
+            return None
+        window = self.quiet[j_lo : j_hi + 1]
+        floor = window.min()
+        candidates = np.flatnonzero(window <= floor * QUIET_RATIO + 1e-12) + j_lo
+        centres = candidates * self.frame + self.offset
+        return int(centres[np.argmin(np.abs(centres - target))])
+
+
+def quiet_profile(
+    samples: np.ndarray, rate: int, window_s: float = 0.05, pause_s: float = 0.3
+) -> QuietProfile:
+    """RMS energy over ``window_s`` frames, smoothed over ``pause_s`` (see ``QuietProfile``)."""
+    frame = max(1, int(window_s * rate))
+    k = max(1, round(pause_s / window_s))  # smoothing width, in frames
+    power = _frame_power(samples, frame)
+    if len(power) >= k:
+        csum = np.concatenate(([0.0], np.cumsum(power)))
+        quiet = (csum[k:] - csum[:-k]) / k
+    else:
+        quiet = np.empty(0)
+    return QuietProfile(quiet, frame, k * frame // 2)
+
+
 def plan_chunks(
     samples: np.ndarray,
     rate: int,
@@ -94,35 +134,19 @@ def plan_chunks(
     target = int(target_s * rate)
     max_len = int(max_s * rate)
     search = int(min(search_s, target_s / 2) * rate)
-    frame = max(1, int(window_s * rate))
-    k = max(1, round(pause_s / window_s))  # smoothing width, in frames
 
     if n <= max_len:
         return [(0, n)]
 
-    power = _frame_power(samples, frame)
-    if len(power) >= k:
-        # quiet[j] = mean power over frames j..j+k-1, centred on sample (j + k/2) * frame
-        csum = np.concatenate(([0.0], np.cumsum(power)))
-        quiet = (csum[k:] - csum[:-k]) / k
-    else:
-        quiet = np.empty(0)
-    offset = k * frame // 2  # sample offset from quiet[j]'s frame start to its centre
-
+    profile = quiet_profile(samples, rate, window_s, pause_s)
     chunks: list[tuple[int, int]] = []
     start = 0
     while n - start > max_len:
         lo = start + max(target - search, 1)
         hi = min(start + target + search, start + max_len, n - search)
-        cut = min(start + target, hi)  # fallback when there is no energy data to search
-        j_lo = max(0, -(-(lo - offset) // frame))  # ceil division
-        j_hi = min(len(quiet) - 1, (hi - offset) // frame)
-        if j_lo <= j_hi:
-            window = quiet[j_lo : j_hi + 1]
-            floor = window.min()
-            candidates = np.flatnonzero(window <= floor * QUIET_RATIO + 1e-12) + j_lo
-            centres = candidates * frame + offset
-            cut = int(centres[np.argmin(np.abs(centres - (start + target)))])
+        cut = profile.quietest(lo, hi, start + target)
+        if cut is None:  # no energy data to search
+            cut = min(start + target, hi)
         chunks.append((start, cut))
         start = cut
     chunks.append((start, n))
@@ -182,8 +206,15 @@ def chunk_lengths_for(model: str) -> tuple[float, float]:
     return TEXT_ONLY_TARGET_CHUNK_S, TEXT_ONLY_MAX_CHUNK_S
 
 
+def supports_prompt(model: str) -> bool:
+    """Whether ``transcribe_chunk`` passes a prompt to the model. Only whisper-1, which reads it as
+    the text that came before the audio. The gpt-4o-* models read a prompt as instructions, and
+    session text is never sent as instructions; diarize models take no prompt."""
+    return returns_segments(model)
+
+
 async def transcribe_chunk(
-    client: Any, model: str, wav_bytes: bytes, duration_s: float
+    client: Any, model: str, wav_bytes: bytes, duration_s: float, prompt: str | None = None
 ) -> ChunkTranscript:
     """Transcribe one chunk. Timestamps in the result are relative to the chunk start.
 
@@ -195,6 +226,9 @@ async def transcribe_chunk(
     used; otherwise its ``text`` becomes one segment spanning the whole chunk. A plain string
     (``response_format="text"``) is treated as text. Language comes from ``language``
     (verbose_json) or the first of ``languages`` (gpt-transcribe).
+
+    ``prompt`` (the transcript just before this audio, for continuity across live windows) is
+    sent only where ``supports_prompt``; uploads send none.
     """
     if "diarize" in model:
         params: dict[str, Any] = {"response_format": "diarized_json", "chunking_strategy": "auto"}
@@ -202,6 +236,8 @@ async def transcribe_chunk(
         params = {"response_format": "verbose_json", "timestamp_granularities": ["segment"]}
     else:
         params = {"response_format": "json"}
+    if prompt and supports_prompt(model):
+        params["prompt"] = prompt
 
     resp = await client.audio.transcriptions.create(
         model=model, file=("chunk.wav", wav_bytes, "audio/wav"), **params

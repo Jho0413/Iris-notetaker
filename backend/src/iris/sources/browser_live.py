@@ -31,6 +31,7 @@ import wave
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import BinaryIO
 
 import av
 import cv2
@@ -74,9 +75,13 @@ def frame_name(t: float) -> str:
     return f"{round(t * 1000):09d}.jpg"
 
 
+def audio_chunk_path(paths: SessionPaths, seq: int) -> Path:
+    return paths.live_audio_dir / f"{seq:06d}.webm"
+
+
 def store_audio_chunk(paths: SessionPaths, seq: int, data: bytes) -> bool:
     """Store audio chunk ``seq``. Returns False if this exact chunk was already stored."""
-    return _store_once(paths.live_audio_dir / f"{seq:06d}.webm", data)
+    return _store_once(audio_chunk_path(paths, seq), data)
 
 
 def store_frame(paths: SessionPaths, t: float, data: bytes) -> bool:
@@ -293,6 +298,26 @@ def finalize_audio(chunks: Sequence[tuple[int, Path]], dest: Path, rate: int) ->
     return wav.samples / rate
 
 
+class RawPcm:
+    """A ``PlacedWav`` destination that writes bare samples (no WAV header) to a binary file: the
+    live audio lane's ``live/audio.pcm``, which grows as chunks are decoded."""
+
+    def __init__(self, file: BinaryIO):
+        self.file = file
+
+    def setnchannels(self, n: int) -> None:
+        pass
+
+    def setsampwidth(self, n: int) -> None:
+        pass
+
+    def setframerate(self, rate: int) -> None:
+        pass
+
+    def writeframes(self, data: bytes) -> None:
+        self.file.write(data)
+
+
 class PlacedWav:
     """Writes decoded audio as mono s16 at ``rate``, placed by timestamp.
 
@@ -300,7 +325,7 @@ class PlacedWav:
     the resampler is flushed, so audio it still holds from before the gap is not played after it.
     """
 
-    def __init__(self, out: wave.Wave_write, rate: int):
+    def __init__(self, out: wave.Wave_write | RawPcm, rate: int):
         out.setnchannels(1)
         out.setsampwidth(2)
         out.setframerate(rate)
