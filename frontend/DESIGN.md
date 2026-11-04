@@ -311,8 +311,9 @@ describes.
 Iris is a quiet working tool around a reading column. The shell (top bar, library, rail, recorder)
 is an Operate surface: dense, neutral, set in a 14px system sans, with hairlines doing the work
 cards and shadows would do elsewhere. The notes are a Read surface: 17px text at 1.7 line height in
-a 68-character column that never moves while results stream in. Progress is told in plain
-sentences in a 300px side rail, never as metrics or stage names stacked above the notes.
+a 68-character column, shown only once the notes are finished. Until then progress is told in
+plain sentences in the reading column's progress view, then in a 300px side rail, never as metrics
+or stage names stacked above the notes.
 
 Colour is cool, lightly indigo-tinted neutral in two layers: a white (or near-black) content
 surface on a slightly darker ground, and a second neutral layer (`surface-2`) for the top bar,
@@ -574,8 +575,8 @@ animation and transition is off and the dot is solid.
 ## Do's and Don'ts
 
 ### Do:
-- **Do** keep the notes column fixed at 68ch and 17px/1.7; partial results fill in place without
-  moving what is already there.
+- **Do** keep the notes column fixed at 68ch and 17px/1.7; the notes appear whole once finished,
+  and progress lines keep their height so nothing moves as steps advance.
 - **Do** say state in words first: every chip, badge and step carries a label, with colour and icon
   as secondary signals.
 - **Do** use the global focus ring (2px `accent`, 2px offset) on every interactive element,

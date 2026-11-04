@@ -32,9 +32,10 @@ fixed release dates; revisit their scope after the MVP is in use.
   them (merges split worked examples, applies later corrections, drops repeats, deduplicates
   figures). Its quality on real long sessions is untested.
 - Live capture records mic and screen from the browser, and live sessions are processed while
-  they record: the transcript, moments, screen reading, figure redraws and a draft of the notes
-  arrive during the session, and at stop the live work is kept (promoted), so only the tail is new
-  work. First real measurements are below; long live sessions are untested.
+  they record: the transcript, moments, screen reading, figure redraws and the notes sections that
+  are final are made during the session, and at stop the live work is kept (promoted), so only
+  what was still open is new work. Only finished notes are shown (the user's decision): progress
+  while recording and processing, the notes once done. First real measurements are below; long live sessions are untested.
 - Library, upload, live and session screens are basic; the intended UI design is not done.
 
 ## Milestone 1 — Complete live MVP
@@ -88,9 +89,12 @@ capture. Live functionality and a well-designed UI are part of this milestone.
 - [ ] Design and implement the library, upload, live session and finished-notes screens with
       consistent typography, spacing, navigation and readable visual placement.
 - [ ] Make recording state, capture status and the stop action clear throughout a live session.
-- [ ] Display transcript and draft updates without disruptive scrolling or layout shifts.
-- [ ] Distinguish recording, processing, draft, finished and failed states.
-- [ ] Show partial results as they arrive: transcript, rendered figures and draft notes.
+- [ ] Show progress while recording and processing without disruptive scrolling or layout shifts;
+      only finished notes are shown (the user's decision: no live draft, no draft while processing
+      and no assembled notes before polishing ends).
+- [ ] Distinguish recording, processing, polishing, finished and failed states.
+- [ ] Show progress as it happens: the current step with counts, every step and the run time
+      while processing; one progress line while recording.
 - [ ] Show each session's model cost and time per stage.
 - [ ] Provide useful empty/loading/error states and clear retry and export actions.
 - [ ] Check keyboard access, focus, contrast and layouts at common laptop widths.
@@ -121,9 +125,11 @@ capture. Live functionality and a well-designed UI are part of this milestone.
 
 - [x] Extend the transcript as audio arrives.
 - [x] Detect and close visual moments incrementally, then align and select relevant visuals.
-- [x] Update a running draft with text and images during recording.
+- [x] Write the final notes sections during recording, so stop only writes what was still open.
+      (A running draft was built first; per the user's decision only finished notes are shown,
+      so no draft is written or shown: progress while recording and processing instead.)
 - [x] Bound concurrent work and update frequency so processing keeps up without excessive costs.
-      (Concurrency and refresh settings; on the two real recordings live work cost about the same
+      (Concurrency settings; on the two real recordings live work cost about the same
       as an upload. Not yet measured on long sessions.)
 - [x] Finalize the last audio and visual moment when recording stops and produce finished notes.
       The live transcript, moments, alignment and selection are promoted at stop; the run
@@ -137,7 +143,9 @@ capture. Live functionality and a well-designed UI are part of this milestone.
 Each recording was replayed into the live API in real time with `iris replay-live` (audio as
 ~5 s WebM chunks, frames once a second) on a scratch backend, then uploaded to the same backend.
 Default settings except the window lengths noted. Times are seconds of session time from the
-start of recording; costs are from `/usage`.
+start of recording; costs are from `/usage`. Measured with the running draft, since removed: the
+"First draft" and "Live draft refreshes" rows no longer apply (the draft lane now writes only the
+sections that are final, so these one-moment recordings write none live).
 
 | | 22446 (78 s, worked algebra) | 22446 again, windows 5–15 s | 22450 (53 s, sketched physics) |
 |---|---|---|---|
@@ -239,15 +247,17 @@ hosting, access-control and data-handling requirements.
    process (PRs #2, #3).
 2. Add cost tracking and controls; confirm where the cost goes and bring sessions within budget.
    Collect the varied recordings alongside, so costs are measured on realistic sessions.
-3. Improve the frontend: write `docs/frontend.md`, then build the designed screens with partial
-   results, clear states and per-session cost.
+3. Improve the frontend: write `docs/frontend.md`, then build the designed screens with progress
+   until the notes are finished, clear states and per-session cost.
 4. Live sessions: final synthesis pass, live ingestion, then processing while recording.
    Processing while recording is designed in architecture section 1 ("Life of a session: live")
    and built on `feat/live-processing`: the foundation (timeline, processor, lane contracts)
    first, then these branches from it, in parallel, each merged back by PR:
    - `feat/live-audio`: the audio lane (decode as chunks arrive, cut at pauses, transcribe).
    - `feat/live-screen`: the screen lane and the select lane (moments, screen reading, renders).
-   - `feat/live-draft`: the draft lane, `GET /sessions/{id}/notes/draft` and the live UI.
+   - `feat/live-draft`: the draft lane, `GET /sessions/{id}/notes/draft` and the live UI (the
+     draft and its endpoint were later removed on `feat/final-notes-only`: only finished notes
+     are shown).
    - `feat/synthesis`: the final synthesis pass (also for long uploads).
    Then `feat/live-finish`: promote the live outputs at stop, end-to-end checks on real
    recordings (built; first measurements above). `feat/live-processing` merges to `main` once

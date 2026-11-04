@@ -35,7 +35,7 @@ the original crop is shown and marked unverified.
 - Runs on a laptop: a FastAPI backend on :8000 and the web UI on :5173. There are no accounts and
   no hosting.
 - Sessions last 30–90 minutes. A one-hour upload should produce notes within a few minutes, with
-  partial results streaming in. Processing costs $0.50–2 per hour of session.
+  progress shown until they're finished; only finished notes are shown. Processing costs $0.50–2 per hour of session.
 - Notes are read in the app and exported as Markdown with the figures embedded.
 
 ## Capabilities and Constraints

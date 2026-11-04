@@ -48,9 +48,9 @@ discussed is placed in the notes next to what was said about it.
 
 ### Performance and cost
 - Typical sessions: 30–90 minutes
-- A 1-hour upload produces notes within a few minutes, with partial results streaming in as they
-  are ready
-- Live sessions update the notes as the session runs
+- A 1-hour upload produces notes within a few minutes, with progress shown step by step until
+  they're finished (only finished notes are shown)
+- Live sessions are processed as they run, so the notes are finished soon after stop
 - Processing cost: $0.50–2 per hour of session
 
 ### Stack
@@ -129,16 +129,19 @@ What happens when capture is interrupted:
 
 While recording, Iris does the pipeline's work as the input arrives: the audio is transcribed in
 windows cut at pauses (the first text shows about 20 seconds in), each screen is read once it has
-been left, its figures are redrawn in the background, and a draft of the notes is written and
-refreshed on the Live and Session pages. At **Stop**, the last window, the screen still showing
-and the end of the notes are finished, and everything done live is kept: the transcript, moments
-and figures become the session's own, so only that tail is new work and model calls. If part of
+been left, its figures are redrawn in the background, and each notes section is written once
+everything it covers is final. No draft is shown: the Live page shows one progress line
+("Transcribed to 4:30 · 3 screens · 2 figures read · 1 section written") and the Session page
+shows progress until the finished notes are ready. At **Stop**, the last window, the screen still
+showing and the notes sections still open are finished, and everything done live is kept: the
+transcript, moments, figures and written sections become the session's own, so only that leftover
+work is new work and model calls. If part of
 the live work failed (or missed a late chunk or frame), stop redoes only what it affects: with a
 good live transcript it is not transcribed again; otherwise the session is processed like an
 upload. A screen left up for the whole session is only read at stop, so such a session takes about
 as long after stop as an upload. Set `IRIS_LIVE_PROCESSING=false` to turn live processing off: the
-session is then processed after stop, like an upload. Window lengths, draft refresh interval and
-concurrency are `IRIS_LIVE_*` settings (`backend/.env.example`; architecture section 1, "Life of a
+session is then processed after stop, like an upload. Window lengths, hold-back and concurrency are
+`IRIS_LIVE_*` settings (`backend/.env.example`; architecture section 1, "Life of a
 session: live").
 
 To try live processing without a browser, replay a recording into a running backend (paid model
@@ -161,7 +164,7 @@ backend/src/iris/
                   session files, write their own)
     __init__.py   stage registry and PLAN (stage order; groups run concurrently)
   live/           processing while a live session records: audio, screen, select and draft
-                  lanes over a shared timeline; promote.py (live work promoted at stop);
+                  (notes sections ahead of stop) lanes over a shared timeline; promote.py (live work promoted at stop);
                   replay.py (`iris replay-live`, a dev tool)
   jobs/runner.py  runs a session's PLAN as an asyncio task, publishes progress
   store/          SQLite session index + on-disk session folder layout (layout.py lists every file)
