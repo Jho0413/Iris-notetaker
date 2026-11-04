@@ -190,6 +190,9 @@ h1, h2, h3 { line-height: 1.2; letter-spacing: -0.01em; text-wrap: balance; }
 .theme-switch button[aria-pressed='true'] { background: var(--surface-3); color: var(--text); }
 
 .main { padding: 32px 24px 64px; }
+/* main takes focus only as the skip link's target (tabIndex -1); a click on empty space focuses it
+   too, and a key press then made Chrome draw the ring as a stray line under the page. */
+.main:focus { outline: none; }
 .page { max-width: 960px; margin: 0 auto; }
 .page-narrow { max-width: 600px; margin: 0 auto; }
 .page-head { display: flex; align-items: flex-end; gap: 16px; margin-bottom: 20px; }
