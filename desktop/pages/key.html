@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'" />
+    <title>OpenAI API key</title>
+    <link rel="stylesheet" href="page.css" />
+    <script src="key.js" defer></script>
+  </head>
+  <body>
+    <main>
+      <img class="mark" src="iris.svg" alt="" />
+      <h1 id="title">Connect Iris to OpenAI</h1>
+      <p>
+        Iris records and processes everything on this Mac, then sends the audio and the moments that
+        matter on screen to OpenAI to write the notes. Calls are billed to your OpenAI account, about
+        $0.50–2 per hour of session.
+      </p>
+      <p class="small">
+        Create a key at <a href="https://platform.openai.com/api-keys">platform.openai.com/api-keys</a>.
+        It is stored encrypted with your macOS Keychain, and only Iris's engine on this Mac uses it.
+      </p>
+      <form id="form" novalidate>
+        <label for="key">OpenAI API key</label>
+        <input id="key" type="password" autocomplete="off" spellcheck="false" placeholder="sk-…" required />
+        <p id="error" class="error" role="alert"></p>
+        <div class="row">
+          <button id="cancel" type="button" hidden>Cancel</button>
+          <button id="save" class="primary" type="submit">Save key</button>
+        </div>
+      </form>
+    </main>
+  </body>
+</html>

@@ -1,12 +1,15 @@
 {
   "name": "iris-desktop",
+  "productName": "Iris",
   "private": true,
-  "version": "0.0.0",
-  "description": "Spike: Electron shell around the Iris UI and backend",
+  "version": "0.1.0",
+  "description": "Iris for macOS: notes that see what was shown",
   "main": "main.cjs",
   "scripts": {
+    "postinstall": "install-electron",
     "start": "open -n -W node_modules/electron/dist/Electron.app --args \"$PWD\"",
-    "probe": "open -n -W node_modules/electron/dist/Electron.app --args \"$PWD\" --probe; cat \"$TMPDIR/iris-desktop.log\""
+    "start:fresh": "npm --prefix ../frontend run build && npm start",
+    "test": "node --test test/*.test.cjs"
   },
   "devDependencies": {
     "electron": "^45.2.2"
