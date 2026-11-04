@@ -350,4 +350,4 @@ async def test_single_frame_stage_writes_and_emits_fallback(ctx, events):
     assert len(moments) == 1
     assert moments[0].frame == ref
     assert (moments[0].start, moments[0].end) == (0, 1)
-    assert events == [(EventType.MOMENT_FOUND, detect._event(moments[0]))]
+    assert events == [(EventType.MOMENT_FOUND, detect.moment_event(moments[0]))]

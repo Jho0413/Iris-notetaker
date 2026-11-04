@@ -13,6 +13,9 @@ sessions/<id>/
     live/frames.json      live: FrameIndex of the normalised frames fed to detection so far
     live/moments.json     live: Moments closed so far
     live/selection.json   live: Selection of the moments read so far
+    live/select_batches.json
+                          live: the moment ids of each batch the select lane read, so a lane
+                          restarted mid-recording reads the same batches (and hits their cache)
     audio.wav             16 kHz mono
     frames/<t_ms>.jpg     sampled frames
     frames.json           FrameIndex
@@ -92,6 +95,10 @@ class SessionPaths:
     @property
     def live_selection(self) -> Path:
         return self.live_dir / "selection.json"
+
+    @property
+    def live_select_batches(self) -> Path:
+        return self.live_dir / "select_batches.json"
 
     @property
     def audio(self) -> Path:
