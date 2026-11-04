@@ -67,8 +67,8 @@ class LiveProcessor:
         """Run one lane; however it ends, it ends finished or failed, never neither."""
         tl = self.timeline
 
-        def stopped() -> bool:  # no more retries: stop was requested, or nothing can be promoted
-            return tl.ending or tl.upstream_failed(lane.lane)
+        def stopped() -> bool:  # no more retries: nothing can be promoted, or (draft) stop
+            return tl.upstream_failed(lane.lane) or (lane.retries_end_at_stop and tl.ending)
 
         async def pause(delay: float) -> bool:
             try:

@@ -297,10 +297,12 @@ renderer, then the other renderer, then the source crop, cached). The live selec
 background renders follow the same rule. In the UI such a figure is labelled "Original image",
 with no reason.
 
-**Live lanes** classify and retry the same way, except that a retry never holds up stop: once stop
-is requested (or an upstream lane has failed, so nothing can be promoted) a retry's wait ends and
-no new attempt starts (`retries_until`, set by the processor); a call already running finishes. A
-lane that fails still falls back silently at stop: the session is processed like an upload (or from detect), which meets a blocking error
+**Live lanes** classify and retry the same way, except that no retry is made once an upstream lane
+has failed (nothing can be promoted), and the draft lane makes none after stop either: such a
+retry's wait ends and no new attempt starts (`retries_until`, set by the processor); a call
+already running finishes. The audio and select lanes keep their retries at stop, since their
+flush (the last windows and moments) is what stop waits for, bounded by
+`IRIS_LIVE_FINISH_TIMEOUT_S`. A lane that fails still falls back silently at stop: the session is processed like an upload (or from detect), which meets a blocking error
 again and fails fast. Nothing user-visible changes while recording.
 
 **What the user sees.** Only messages we wrote, from a fixed list (`FailureMessage` in

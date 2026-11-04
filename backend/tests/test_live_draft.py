@@ -479,6 +479,27 @@ async def test_stop_ends_a_retry_wait_and_starts_no_new_call(tmp_path, notes):
     assert Lane.DRAFT in timeline.finished
 
 
+async def test_an_upstream_failure_ends_a_retry_wait(tmp_path, notes):
+    """Nothing the lane writes can be used once an upstream lane failed: no more retries."""
+    ctx, _ = make_ctx(tmp_path)
+    ctx.settings.api_retry_delays_s = [30.0]
+    notes.fail_next, notes.error = 1000, connection_error()
+    processor = LiveProcessor(ctx, lambda c, t: [DraftLane(c, t)], finish_timeout_s=10)
+    notes.timeline = processor.timeline
+    processor.start()
+    await publish_speech(processor.timeline, 12)
+    await eventually(lambda: notes.calls >= 1)
+    await idle(0.05)
+    started = time.monotonic()
+    await processor.timeline.fail_lane(Lane.AUDIO, "decoder crashed")
+    lane = processor.lanes[Lane.DRAFT]
+    # The wait ended (the call is given up) well before the 30 s delay, with no new attempt.
+    await eventually(lambda: bool(lane._failures), timeout=1)
+    assert time.monotonic() - started < 1
+    assert notes.calls == 1
+    await processor.finish()
+
+
 async def test_a_blocking_error_gives_the_payload_up_at_once(tmp_path, notes, monkeypatch):
     monkeypatch.setattr(draft, "RETRY_DELAY_S", 0.02)
     ctx, events = make_ctx(tmp_path)

@@ -14,9 +14,12 @@ A lane:
   and stop falls back to the full pipeline;
 - when ``timeline.upstream_failed(lane)``, stops making paid model calls (its evidence is
   incomplete and nothing it makes can be promoted) and just waits for stop;
-- retries temporary API errors like the stages (``retry_temporary``), but never once stop is
-  requested or an upstream lane has failed: the processor runs each lane in ``retries_until``, so
-  a retry's wait ends at stop and no new attempt starts (a call already running finishes);
+- retries temporary API errors like the stages (``retry_temporary``), but never once an upstream
+  lane has failed (nothing it makes can be promoted), nor after stop if ``retries_end_at_stop``:
+  the processor runs each lane in ``retries_until``, so such a retry's wait ends and no new
+  attempt starts (a call already running finishes). Lanes whose flush at stop is model calls
+  (audio, select) keep their retries then: stop waits for that flush anyway, bounded by
+  ``live_finish_timeout_s``, and losing it would discard the lane's work;
 - must survive a backend restart mid-recording: a fresh lane starts from the captured files, and
   content-keyed caches (transcript windows, ``selection_batches/``, render and notes caches) mean
   work done before the restart is not paid for again.
@@ -31,6 +34,8 @@ from iris.pipeline.context import StageContext
 
 class LiveLane:
     lane: ClassVar[Lane]
+    # No retries after stop: for a lane that makes no call after stop (see the contract above).
+    retries_end_at_stop: ClassVar[bool] = False
 
     def __init__(self, ctx: StageContext, timeline: LiveTimeline):
         self.ctx = ctx

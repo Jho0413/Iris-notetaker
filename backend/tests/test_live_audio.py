@@ -9,7 +9,6 @@ import asyncio
 import hashlib
 import io
 import random
-import time
 import wave
 from pathlib import Path
 from types import SimpleNamespace
@@ -511,33 +510,32 @@ async def test_failing_lane_is_marked_failed_by_the_processor(
     assert "WindowFailed" in timeline.failed[Lane.AUDIO]
 
 
-async def test_stop_ends_a_window_retry_wait(
+async def test_a_window_transcribed_at_stop_is_still_retried(
     tmp_path: Path, paths: SessionPaths, webm: bytes, monkeypatch
 ):
-    """A window waiting to retry a temporary error doesn't hold up stop: the wait ends, the lane
-    fails and stop falls back (the pipeline transcribes with its own retries)."""
+    """The lane's flush at stop is what stop waits for: a temporary error there is retried, so
+    the live transcript is kept rather than transcribed again by the pipeline."""
+    failed_at_stop: list[int] = []
+    processor: LiveProcessor | None = None
 
     async def gate(n: int) -> None:
-        raise connection_error("API down")
+        if processor is not None and processor.timeline.ending and not failed_at_stop:
+            failed_at_stop.append(n)
+            raise connection_error("blip")
 
     fake = FakeTranscriber(gate)
     monkeypatch.setattr(audio_lane, "get_openai", lambda _: fake.client)
     ctx = StageContext(
-        "s1", SourceKind.BROWSER_LIVE, paths, settings(tmp_path, api_retry_delays_s=[30.0])
+        "s1", SourceKind.BROWSER_LIVE, paths, settings(tmp_path, api_retry_delays_s=[0.01])
     )
     processor = LiveProcessor(ctx, lambda c, t: [AudioLane(c, t)], finish_timeout_s=10)
     processor.start()
     for seq, data in enumerate(split(webm, 2000)):
         store_audio_chunk(paths, seq, data)
         processor.notify_audio()
-    await asyncio.wait_for(_until(lambda: len(fake.calls) >= 1), 10)
-    await asyncio.sleep(0.05)
-    assert len(fake.calls) == 1  # waiting 30 s to retry
-    started = time.monotonic()
     timeline = await processor.finish()
-    assert time.monotonic() - started < 3
-    assert "WindowFailed" in timeline.failed[Lane.AUDIO]
-    assert len(fake.calls) == 1
+    assert failed_at_stop  # a call after stop did fail once
+    assert Lane.AUDIO in timeline.finished and Lane.AUDIO not in timeline.failed
 
 
 async def _until(predicate) -> None:

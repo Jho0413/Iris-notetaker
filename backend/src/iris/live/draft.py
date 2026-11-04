@@ -61,6 +61,7 @@ def plan(
 
 class DraftLane(LiveLane):
     lane = Lane.DRAFT
+    retries_end_at_stop = True  # no call starts after stop, not even a retry
 
     def __init__(self, ctx: StageContext, timeline: LiveTimeline):
         super().__init__(ctx, timeline)
