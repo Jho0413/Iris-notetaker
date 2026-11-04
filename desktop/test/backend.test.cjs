@@ -51,7 +51,7 @@ test('the packaged command: bundled python, isolated, clean environment, data in
     env: { HOME: '/Users/me', PATH: '/opt/homebrew/bin:/usr/bin', PYTHONPATH: '/evil', IRIS_DATA_DIR: '/elsewhere', TMPDIR: '/tmp/x', LANG: 'en_GB.UTF-8' },
   })
   assert.equal(c.cmd, '/Applications/Iris.app/Contents/Resources/backend/python/bin/python3')
-  assert.deepEqual(c.args, ['-I', '-u', '-m', 'iris', 'serve', '--host', '127.0.0.1', '--port', '4321'])
+  assert.deepEqual(c.args, ['-I', '-u', '-B', '-m', 'iris', 'serve', '--host', '127.0.0.1', '--port', '4321'])
   assert.equal(c.cwd, '/Users/me/Library/Application Support/Iris')
   assert.deepEqual(c.env, {
     HOME: '/Users/me',

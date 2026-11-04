@@ -35,7 +35,8 @@ function newToken() {
 /**
  * How to run the backend.
  * Packaged: the bundled Python, isolated (-I: no PYTHON* variables, user site or cwd on the
- * path) and unbuffered (-u, so the log is live), in a clean environment, with userData as both
+ * path), unbuffered (-u, so the log is live) and never writing bytecode into the app (-B; it is
+ * precompiled at build time), in a clean environment, with userData as both
  * its data folder and cwd (a .env there still applies). `python -m iris`, not `bin/iris`: the
  * console script's shebang holds the build machine's path.
  * Development: `uv run` in the repo's backend/, through a login shell so uv is on PATH when the
@@ -50,7 +51,7 @@ function backendCommand({ packaged, resourcesPath, repoDir, userData, port, toke
     const base = Object.fromEntries(keep.filter((k) => env[k]).map((k) => [k, env[k]]))
     return {
       cmd: path.join(resourcesPath, 'backend', 'python', 'bin', 'python3'),
-      args: ['-I', '-u', ...serve],
+      args: ['-I', '-u', '-B', ...serve],
       cwd: userData,
       env: { ...base, PATH: '/usr/bin:/bin:/usr/sbin:/sbin', IRIS_DATA_DIR: userData, ...key, ...iris },
     }

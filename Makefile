@@ -26,6 +26,9 @@ lint:
 	cd backend && uv run ruff check . && uv run ruff format --check .
 	cd frontend && npm run lint
 
+desktop:          ## Build the macOS app: desktop/dist/mac-arm64/Iris.app and a .dmg (Apple Silicon)
+	desktop/scripts/build-app.sh
+
 usage:            ## Model usage and cost for a session: make usage [<session_id>] (default: most recent)
 	cd backend && uv run iris cost $(USAGE_ARGS)
 
