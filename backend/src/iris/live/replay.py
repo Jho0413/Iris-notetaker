@@ -5,9 +5,9 @@
 - **Audio** is re-encoded with PyAV into one WebM/Opus stream (48 kHz mono, short clusters, as
   MediaRecorder writes it) and posted as consecutive byte ranges of about ``CHUNK_S`` of audio
   each, with ``seq`` from 0. Only the first carries the header, as with MediaRecorder timeslices.
-- **Screen frames** are sampled about once a second (the first video frame at or after each
-  second), scaled to at most ``FRAME_MAX_WIDTH`` wide like the browser does, and posted as JPEG
-  with ``t`` (seconds since start, the audio's clock).
+- **Screen frames** are sampled about once a second (at each second, the latest video frame shown
+  by then, as the browser's frame ticker captures it), scaled to at most ``FRAME_MAX_WIDTH`` wide
+  like the browser does, and posted as JPEG with ``t`` (seconds since start, the audio's clock).
 - Everything is **paced in real time** (``speed`` > 1 plays faster: the session clock stays the
   file's), then ``POST /end`` is sent with the chunk count.
 
@@ -23,6 +23,7 @@ synthetic recordings with them. PyAV only: no ``ffmpeg`` CLI.
 import asyncio
 import io
 import json
+import math
 import time
 from collections.abc import Iterable, Iterator
 from concurrent.futures import ThreadPoolExecutor
@@ -33,7 +34,6 @@ from pathlib import Path
 
 import av
 import cv2
-import httpx
 import numpy as np
 
 OPUS_RATE = 48_000
@@ -168,7 +168,8 @@ def file_frames(
     else the last frame), the latest video frame shown by then, as ``(t, JPEG)``.
 
     Screen recordings often store a frame only when the screen changes; the browser still sends
-    one every tick, so a frame is repeated until the next one is shown.
+    one every tick, so a frame is repeated until the next one is shown. Ticks start at the first
+    frame shown: nothing is sent for a time before the video has a picture.
     """
     with av.open(str(path)) as container:
         if not container.streams.video:
@@ -188,6 +189,8 @@ def file_frames(
                 due += interval_s
             if until is not None and t > until:
                 break
+            if latest is None:
+                due = math.ceil(t / interval_s - 1e-6) * interval_s  # the first tick showing it
             latest, last_t = encode_jpeg(frame.to_ndarray(format="bgr24")), t
         end = last_t if until is None else until
         while latest is not None and due <= end + 1e-6:
@@ -252,6 +255,13 @@ async def replay(
     log=print,
 ) -> ReplayReport:
     """Play ``file`` into the live API at ``base_url`` and follow it until done or failed."""
+    try:
+        import httpx  # a dev dependency: this is a dev tool, and the encoding helpers don't need it
+    except ImportError as exc:
+        raise RuntimeError(
+            "iris replay-live needs the dev dependencies: run it with `uv run`"
+        ) from exc
+
     if speed <= 0:
         raise ValueError("speed must be positive")
     webm = await asyncio.to_thread(encode_webm, file_audio(file))
