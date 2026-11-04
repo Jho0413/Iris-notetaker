@@ -17,7 +17,7 @@ export const STAGE_ORDER: readonly Stage[] = [
   'ingest', 'transcribe', 'detect', 'align', 'select', 'write', 'render', 'assemble', 'synthesize',
 ]
 
-/** Plain-language step names (docs/frontend.md §1). Internal names stay in Details. */
+/** Plain-language step names (docs/frontend.md §1), used everywhere in the UI, Details included. */
 export const STAGE_LABELS: Record<Stage, string> = {
   ingest: 'Preparing the recording',
   transcribe: 'Transcribing',

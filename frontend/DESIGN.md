@@ -521,7 +521,7 @@ Compact, quiet, and obvious about the one thing to do.
 
 ### Progress Rail
 A 300px sticky panel on `surface-2`: a "Progress" step list (finished steps green check, running
-step indigo spinner and `text` at 500, failed step red), the "On this page" outline, and a
+step indigo spinner and `text` at 500, failed step red), the "On this page" outline,
 a "Cost" line (13px `text-2` label at 600, the value right-aligned in `text` at 500 with tabular
 numerals; laid out even while empty), and a collapsed Details disclosure holding each step's plain
 label with its cost and timing, and raw errors in mono. Under 1120px it
