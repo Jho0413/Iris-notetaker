@@ -11,9 +11,9 @@
 - Everything is **paced in real time** (``speed`` > 1 plays faster: the session clock stays the
   file's), then ``POST /end`` is sent with the chunk count.
 
-It follows the session's events and reports when the first transcript, moment, figure and draft
-arrived, how long stop took to reach ``done``, how many times the live draft was refreshed,
-whether stop promoted the live work, and the model cost (total and after stop) from
+It follows the session's events and reports when the first transcript, moment, figure and notes
+section arrived, how many notes sections were written before stop, how long stop took to reach
+``done``, whether stop promoted the live work, and the model cost (total and after stop) from
 ``/api/sessions/{id}/usage``.
 
 The encoding helpers (``encode_webm``, ``chunk_webm``) are shared with the tests, which build
@@ -212,7 +212,7 @@ class ReplayReport:
     # Seconds after recording started that each event type first arrived (wall clock, scaled
     # back to session time when sped up).
     first: dict[str, float] = field(default_factory=dict)
-    draft_refreshes: int = 0  # live notes_updated events before stop
+    sections_live: int = 0  # notes sections written before stop (live notes_updated)
     promoted: list[str] = field(default_factory=list)
     stop_to_done_s: float | None = None
     cost_usd: float | None = None
@@ -231,8 +231,8 @@ class ReplayReport:
             f"  replayed {self.duration_s:.1f} s: {self.audio_chunks} audio chunks, "
             f"{self.frames} frames",
             f"  first transcript {at('transcript_chunk')}, moment {at('moment_found')}, "
-            f"figure {at('visual_selected')}, draft {at('notes_updated')}",
-            f"  live draft refreshes: {self.draft_refreshes}",
+            f"figure {at('visual_selected')}, notes section {at('notes_updated')}",
+            f"  notes sections written live: {self.sections_live}",
             f"  promoted at stop: {', '.join(self.promoted) or 'nothing'}",
         ]
         if self.stop_to_done_s is not None:
@@ -320,7 +320,7 @@ async def replay(
                     kind, data = event["type"], event.get("data") or {}
                     report.first.setdefault(kind, now())
                     if kind == "notes_updated" and data.get("live") and not stopped_at:
-                        report.draft_refreshes += 1
+                        report.sections_live = data.get("completed_parts", report.sections_live)
                     if kind == "stage_finished" and data.get("promoted"):
                         report.promoted.append(data["stage"])
                     if kind == "status" and data.get("status") in {"done", "failed"}:

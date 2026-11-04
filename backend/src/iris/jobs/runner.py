@@ -72,8 +72,9 @@ class JobRunner:
 
     async def _run_plan(self, ctx: StageContext, plan: list[list[Stage]]) -> None:
         if any(Stage.SELECT in group for group in plan):
-            # The selection is made again, so visual ids may change: a draft written against
-            # the old one (live, or by an earlier run) must not be served meanwhile.
+            # The selection is made again, so visual ids may change: a draft an earlier run wrote
+            # against the old one must never be assembled (e.g. if write fails and a re-run
+            # starts from assemble). Write rewrites it whole.
             ctx.paths.notes_draft.unlink(missing_ok=True)
         for group in plan:
             await asyncio.gather(*(self.run_stage(ctx, s) for s in group))
@@ -82,11 +83,10 @@ class JobRunner:
         """A live session at stop: ingest, promote what the live lanes finished, run the rest.
 
         What can be promoted is decided after ingest, which leaves the frames the live moments
-        refer to in place (``live/promote.py``). The draft is deleted only if select runs again.
+        refer to in place (``live/promote.py``). The live lanes write no notes draft, only the
+        write stage's section cache, so there is none to keep or drop here: ``_run_plan`` drops an
+        older one if select runs again.
         """
-        if not timeline.complete:
-            # The selection will be made again either way.
-            ctx.paths.notes_draft.unlink(missing_ok=True)
         await self.run_stage(ctx, Stage.INGEST)
         promoted = promote.promotable(ctx, timeline)
         log.info(

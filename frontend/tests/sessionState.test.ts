@@ -2,9 +2,10 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { IrisEvent, Notes, Session } from '../src/api/client.ts'
 import {
-  emptyRun, eventKey, failureHeadline, figureList, formatClock, formatDuration, libraryState, provenance,
-  reduceEvents, sessionLength, STAGE_ORDER, stageDetail, stageFromError, stageSeconds,
-  transcriptSegments, uiState,
+  announcement, currentSteps, emptyRun, eventKey, failureHeadline, figureList, formatClock,
+  formatDuration, libraryState, liveProgress, progressView, provenance, reduceEvents, runSeconds,
+  sessionLength, STAGE_ORDER, stageDetail, stageFromError, stageSeconds, stepLine, stepStatus,
+  transcriptSegments, uiState, type UiStateKind,
 } from '../src/session/state.ts'
 import { STAGES } from '../src/api/client.ts'
 
@@ -29,7 +30,7 @@ test('stages move through running and done, with durations from event times', ()
   assert.equal(stageSeconds(run.stages.ingest), 1)
   assert.equal(run.stages.transcribe.status, 'running')
   assert.equal(run.stages.detect.status, 'pending')
-  assert.equal(uiState(session, run).label, 'Processing · Transcribing')
+  assert.equal(uiState(session, run).label, 'Transcribing')
 })
 
 test('stages promoted at stop are done, marked live and not timed', () => {
@@ -174,16 +175,19 @@ test('a failure in a parallel group marks only the named stage failed', () => {
   assert.equal(unnamed.stages.align.status, 'failed')
 })
 
-test('UI states cover recording, draft, stalled, finished and failed', () => {
-  const draft = reduceEvents([ev('notes_updated', { final: false, completed_parts: 2,
-    total_parts: 4 })])
-  assert.equal(uiState(session, draft).kind, 'draft')
-  assert.equal(uiState(session, draft).label, 'Draft · 2 of 4 sections')
+test('UI states cover recording, processing, polishing, stalled, finished and failed', () => {
+  // Sections written are progress, not a readable draft: the state stays processing.
+  const writing = reduceEvents([ev('status', { status: 'processing' }),
+    ev('stage_started', { stage: 'write' }),
+    ev('notes_updated', { final: false, completed_parts: 2, total_parts: 4 })])
+  assert.deepEqual(uiState(session, writing),
+    { kind: 'processing', label: 'Writing notes · 2 of 4', stage: 'write' })
   const final = reduceEvents([ev('notes_updated', { final: false, completed_parts: 4,
     total_parts: 4 }), ev('notes_updated', { final: true })])
   assert.equal(final.notes?.completed, 4)
-  // Assembled notes are readable while the synthesis pass polishes them.
-  assert.deepEqual(uiState(session, final), { kind: 'polishing', label: 'Polishing notes' })
+  // Assembled, then polished: still not shown until done.
+  assert.deepEqual(uiState(session, final),
+    { kind: 'polishing', label: 'Polishing notes', stage: 'synthesize' })
 
   const rec = { ...session, status: 'recording' as const }
   assert.equal(uiState(rec, emptyRun(), { capturing: true }).kind, 'recording')
@@ -223,8 +227,7 @@ test('the synthesis pass is the last step, after the notes are assembled', () =>
   // A stalled synthesis resumes from synthesis; a library row names the step.
   const stalled = uiState({ ...session, current_stage: 'synthesize' }, emptyRun(), { stalled: true })
   assert.equal(stalled.fromStage, 'synthesize')
-  assert.equal(libraryState({ ...session, current_stage: 'synthesize' }).label,
-    'Processing · Polishing notes')
+  assert.equal(libraryState({ ...session, current_stage: 'synthesize' }).label, 'Polishing notes')
   assert.equal(stageDetail('synthesize', run), undefined)
 })
 
@@ -233,8 +236,97 @@ test('library rows use the stored session only', () => {
     error: 'ingest failed: NotImplementedError: browser live ingest' }
   assert.equal(libraryState(failed).label, 'Failed · Preparing the recording')
   assert.equal(libraryState({ ...failed, error: 'boom' }).fromStage, 'ingest')
-  assert.equal(libraryState({ ...session, current_stage: 'render' }).label,
-    'Processing · Redrawing figures')
+  assert.equal(libraryState({ ...session, current_stage: 'render' }).label, 'Redrawing figures')
+  assert.equal(libraryState({ ...session, current_stage: 'render' }).kind, 'processing')
+  assert.equal(libraryState(session).label, 'Processing')
+  assert.equal(libraryState({ ...session, status: 'done' }).label, 'Finished')
+})
+
+test('while processing, the label is the running step and its count', () => {
+  const run = reduceEvents([
+    ev('status', { status: 'processing' }),
+    ev('stage_started', { stage: 'write' }),
+    ev('stage_started', { stage: 'render' }),
+    ev('visual_selected', { id: 'v1', caption: 'A' }),
+    ev('visual_selected', { id: 'v2', caption: 'B' }),
+    ev('visual_selected', { id: 'v3', caption: 'C' }),
+    ev('visual_rendered', { id: 'v1', path: 'visuals/v1.svg' }),
+    ev('visual_rendered', { id: 'v2', path: 'visuals/v2.svg' }),
+    ev('notes_updated', { final: false, completed_parts: 1, total_parts: 3 }),
+  ])
+  // Write and render run side by side: the chip names the later one, the page shows both.
+  assert.deepEqual(currentSteps(session, run), ['write', 'render'])
+  assert.equal(uiState(session, run).label, 'Redrawing figures · 2 of 3')
+  assert.equal(stepLine('write', run), 'Writing notes · 1 of 3')
+  assert.equal(stepLine('assemble', run), 'Putting the notes together')
+  // Counts are never announced one by one, only the state and step.
+  assert.equal(announcement(uiState(session, run)), 'Processing · Redrawing figures')
+  assert.equal(announcement(uiState({ ...session, status: 'done' }, emptyRun())), 'Finished')
+  // Between two steps (or without events) the stored step stands in.
+  assert.deepEqual(currentSteps({ ...session, current_stage: 'align' }, emptyRun()), ['align'])
+  assert.deepEqual(currentSteps(session, emptyRun()), [])
+})
+
+test('the progress view replaces the notes in every state but finished', () => {
+  const views = Object.fromEntries(
+    (['starting', 'processing', 'polishing', 'stalled', 'failed', 'recording-orphan', 'finished'] as
+      UiStateKind[]).map((k) => [k, progressView(k)]),
+  )
+  assert.equal(views.finished, null)
+  assert.deepEqual(views.processing, { heading: 'Making your notes', active: true })
+  assert.deepEqual(views.polishing, { heading: 'Polishing your notes', active: true })
+  assert.equal(views.starting?.active, true)
+  // Failed, stalled and orphaned: the banner says what to do; no timer or step line.
+  for (const k of ['failed', 'stalled', 'recording-orphan']) {
+    assert.equal(views[k]?.active, false, k)
+    assert.ok(views[k]?.heading, k)
+  }
+  // A re-run of a finished session is processing again, so its old notes are hidden too.
+  const rerun = reduceEvents([ev('status', { status: 'done' }), ev('status', { status: 'processing' })])
+  assert.notEqual(progressView(uiState({ ...session, status: 'done' }, rerun).kind), null)
+})
+
+test('the run time counts from the run start', () => {
+  const run = reduceEvents([ev('status', { status: 'processing' })])
+  assert.equal(runSeconds(run, run.runStart! + 65_000), 65)
+  assert.equal(runSeconds(run, run.runStart! - 5), 0)
+  assert.equal(runSeconds(emptyRun(), Date.now()), undefined)
+})
+
+test('step statuses fall back to the stored session without events', () => {
+  const stored = { finished: false, hasEvents: false, currentStage: 'select' as const }
+  assert.equal(stepStatus('align', emptyRun(), stored), 'done')
+  assert.equal(stepStatus('select', emptyRun(), stored), 'pending')
+  assert.equal(stepStatus('write', emptyRun(), { ...stored, finished: true }), 'done')
+  // Events win, even a pending step.
+  const run = reduceEvents([ev('stage_started', { stage: 'ingest' })])
+  assert.equal(stepStatus('ingest', run, { ...stored, hasEvents: true }), 'running')
+  assert.equal(stepStatus('align', run, { ...stored, hasEvents: true }), 'pending')
+})
+
+test('the live progress line shows only what is non-zero', () => {
+  const events: IrisEvent[] = []
+  const line = () => liveProgress(reduceEvents(events))
+  assert.equal(line(), '')
+  events.push(ev('transcript_chunk', { chunk: 0, segments: [{ start: 0, end: 9.5, text: 'hi' }] }))
+  assert.equal(line(), 'Transcribed to 0:09')
+  events.push(ev('moment_found', { id: 'm1', start: 0, end: 30 }))
+  assert.equal(line(), 'Transcribed to 0:09 · 1 screen')
+  events.push(ev('transcript_chunk', { chunk: 1, segments: [{ start: 9.5, end: 270.2, text: 'x' }] }))
+  events.push(ev('moment_found', { id: 'm2', start: 30, end: 60 }))
+  events.push(ev('moment_found', { id: 'm3', start: 60, end: 90 }))
+  events.push(ev('visual_selected', { id: 'v1', caption: 'A' }))
+  assert.equal(line(), 'Transcribed to 4:30 · 3 screens · 1 figure read')
+  events.push(ev('visual_selected', { id: 'v2', caption: 'B' }))
+  events.push(ev('notes_updated', { final: false, completed_parts: 1, live: true }))
+  assert.equal(line(), 'Transcribed to 4:30 · 3 screens · 2 figures read · 1 section written')
+  events.push(ev('notes_updated', { final: false, completed_parts: 2, live: true }))
+  assert.match(line(), /2 sections written$/)
+  // Replayed history (a reconnect) changes nothing.
+  assert.equal(liveProgress(reduceEvents([...events, ...events])), line())
+  // Sections can be written before anything is on screen.
+  assert.equal(liveProgress(reduceEvents([ev('notes_updated', { final: false, completed_parts: 1,
+    live: true })])), '1 section written')
 })
 
 test('an unparseable timestamp never blocks later runs', () => {

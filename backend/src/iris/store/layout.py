@@ -35,7 +35,8 @@ sessions/<id>/
     renders.json          Renders
     notes_sections/<hash>.json
                           validated writing sections, keyed by model, prompt and inputs
-    notes_draft.json      NotesDraft (written by write, and by the live draft lane while recording)
+    notes_draft.json      NotesDraft (written by write; the live draft lane only fills
+                          notes_sections/)
     synthesis_cache/<hash>.json
                           synthesis edit plans and section rewrites, keyed by model, prompt
                           and inputs

@@ -3,8 +3,8 @@
 Reads transcript.json and selection.json. Writes notes_draft.json after each completed
 section and emits NOTES_UPDATED. Assemble publishes notes.json only after this stage succeeds.
 
-Sections are planned so that the live draft lane (``iris/live/draft.py``) can write them while
-recording and this stage reuses them at stop:
+Sections are planned so that the live draft lane (``iris/live/draft.py``) can write the final ones
+while recording and this stage reuses them at stop:
 
 - *Part boundaries depend only on earlier evidence.* Records are packed in time order and a part
   closes when the next record would exceed the budget, so appending evidence never moves an
@@ -191,7 +191,7 @@ def split_parts(
     when the next record would take it past the budget: at the last moment boundary (a time no
     read moment spans) that keeps it at least half full, otherwise right there. That decision only
     looks at the records up to that point, so evidence added later (or a later ``before``) never
-    moves the boundary of a closed part, and the live draft can write closed parts while
+    moves the boundary of a closed part, and the live draft lane can write closed parts while
     recording. Speech, screen content and visuals are never dropped.
     """
     spans = _moment_spans(selection)
@@ -307,8 +307,8 @@ def section_payload(
     first part); ``later`` says whether parts follow. Nothing here depends on how many parts the
     session has, so a part written live has the payload, and the cache key, it has at stop.
 
-    ``earlier`` defaults to ``first is not None``. The live draft sets it for a later part when the
-    first part could not be written, so that part is still written as a continuation."""
+    ``earlier`` defaults to ``first is not None``. The live draft lane sets it for a later part
+    when the first part could not be written, so that part is still written as a continuation."""
     return _json(
         {
             "records": part.records,
@@ -362,9 +362,8 @@ async def write_section(
     return section
 
 
-def draft_of(sections: list[WrittenSection], parts: int | None = None) -> NotesDraft:
-    """The notes so far; ``parts`` is the number of parts the notes are planned in, when known
-    (not for the live draft, whose evidence is still growing)."""
+def draft_of(sections: list[WrittenSection], parts: int) -> NotesDraft:
+    """The notes so far; ``parts`` is the number of parts the notes are planned in."""
     return NotesDraft(
         session_type=sections[0].session_type,
         title=sections[0].title,

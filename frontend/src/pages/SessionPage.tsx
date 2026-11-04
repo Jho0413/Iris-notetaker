@@ -8,15 +8,17 @@ import { NotesView, type OutlineItem } from '../components/NotesView'
 import { ProgressRail } from '../components/ProgressRail'
 import { SessionRibbon } from '../components/SessionRibbon'
 import { StatusChip } from '../components/StatusChip'
+import { StepList } from '../components/StepList'
 import { TabPanel, Tabs } from '../components/Tabs'
 import { TranscriptList } from '../components/TranscriptList'
-import { draftRefreshKey, fetchDraft, type NotesDraft } from '../session/draft'
 import { act } from '../session/request'
 import { formatWhen, SOURCE_LABEL } from '../session/format'
 import {
-  failureHeadline, figureList, formatClock, provenance, sessionLength, STAGE_LABELS,
-  transcriptSegments, uiState, type FigureState,
+  announcement, currentSteps, failureHeadline, figureList, formatClock, progressView, provenance,
+  runSeconds, sessionLength, STAGE_LABELS, stepLine, transcriptSegments, uiState, type FigureState,
+  type RunState,
 } from '../session/state'
+import type { SessionStream } from '../session/useSessionStream'
 import { useSessionStream } from '../session/useSessionStream'
 import { useTitle } from '../session/useTitle'
 
@@ -64,7 +66,7 @@ function SessionView({ id }: { id: string }) {
   const [session, setSession] = useState<Session | null>(null)
   const [loadError, setLoadError] = useState<LoadError>(null)
   const [notes, setNotes] = useState<Notes | null>(null)
-  const [draft, setDraft] = useState<NotesDraft | null>(null)
+  const [notesLoaded, setNotesLoaded] = useState(false)
   const [transcript, setTranscript] = useState<Transcript | null>(null)
   const [tab, setTab] = useState<TabId>('notes')
   const [outline, setOutline] = useState<OutlineItem[]>([])
@@ -74,7 +76,7 @@ function SessionView({ id }: { id: string }) {
 
   const [reload, setReload] = useState(0)
 
-  // The stored session follows status changes and errors; notes and transcript follow their stages.
+  // The stored session follows status changes and errors.
   useEffect(() => {
     let live = true
     void fetchSession(id).then((result) => {
@@ -90,35 +92,32 @@ function SessionView({ id }: { id: string }) {
     }
   }, [id, run.status, run.error, reload])
 
-  useEffect(() => {
-    let live = true
-    void fetchNotes(id).then((data) => live && data && setNotes(data))
-    return () => {
-      live = false
+  // Only the finished notes are shown, so notes and transcript are fetched once the session is
+  // done. Leaving done (a re-run) drops them: the old run's notes are never shown meanwhile.
+  const done = (run.status ?? session?.status) === 'done'
+  const [wasDone, setWasDone] = useState(done)
+  if (done !== wasDone) {
+    // Reset while rendering (not in an effect), so stale notes never reach the screen.
+    setWasDone(done)
+    if (!done) {
+      setNotes(null)
+      setNotesLoaded(false)
+      setTranscript(null)
     }
-  }, [id, run.notes?.final, run.stages.synthesize.status, run.status, reload])
-
+  }
   useEffect(() => {
+    if (!done) return
     let live = true
+    void fetchNotes(id).then((data) => {
+      if (!live) return
+      setNotes(data ?? null)
+      setNotesLoaded(true)
+    })
     void fetchTranscript(id).then((data) => live && data && setTranscript(data))
     return () => {
       live = false
     }
-  }, [id, run.stages.transcribe.status, reload])
-
-  // The draft while recording or processing: once on load, then on every `notes_updated`. A failed
-  // fetch keeps the draft already shown.
-  const draftKey = draftRefreshKey(run.status ?? session?.status, run)
-  useEffect(() => {
-    if (draftKey === null) return
-    let live = true
-    void fetchDraft(id).then((d) => {
-      if (live && d !== undefined) setDraft(d)
-    })
-    return () => {
-      live = false
-    }
-  }, [id, draftKey])
+  }, [id, done, reload])
 
   const ui = session
     ? uiState(session, run, { stalled: stream.quiet && (run.status ?? session.status) === 'processing' })
@@ -231,16 +230,15 @@ function SessionView({ id }: { id: string }) {
   }
 
   const finished = ui.kind === 'finished'
-  const working =
-    ui.kind === 'processing' || ui.kind === 'draft' || ui.kind === 'starting' || ui.kind === 'polishing'
-  const sessionType = notes?.session_type ?? draft?.session_type
-  const rendered = figures.filter((f) => f.rendered).length
+  const progress = progressView(ui.kind)
+  const working = ui.kind === 'processing' || ui.kind === 'starting' || ui.kind === 'polishing'
+  const sessionType = notes?.session_type
   const fromLabel = ui.fromStage ? STAGE_LABELS[ui.fromStage] : 'the start'
 
   return (
     <div className="session">
       <div className="sr-only" aria-live="polite">
-        {ui.label}
+        {announcement(ui)}
       </div>
       <nav className="crumbs" aria-label="Breadcrumb">
         <Link to="/">Library</Link>
@@ -288,7 +286,7 @@ function SessionView({ id }: { id: string }) {
         </div>
       </header>
 
-      {length !== undefined && figures.some((f) => f.t !== undefined) && (
+      {finished && length !== undefined && figures.some((f) => f.t !== undefined) && (
         <SessionRibbon length={length} figures={figures} onSelect={showFigure} />
       )}
 
@@ -338,107 +336,73 @@ function SessionView({ id }: { id: string }) {
             </div>
           )}
 
-          <Tabs<TabId>
-            label="Session content"
-            idPrefix="session"
-            active={tab}
-            onChange={setTab}
-            tabs={[
-              { id: 'notes', label: 'Notes' },
-              { id: 'transcript', label: 'Transcript', count: segments.length ? String(segments.length) : undefined },
-              {
-                id: 'figures',
-                label: 'Figures',
-                count: figures.length ? (working ? `${rendered}/${figures.length}` : String(figures.length)) : undefined,
-              },
-            ]}
-          />
+          {progress ? (
+            <ProgressView
+              view={progress}
+              session={session}
+              run={run}
+              stream={stream}
+            />
+          ) : (
+            <>
+              <Tabs<TabId>
+                label="Session content"
+                idPrefix="session"
+                active={tab}
+                onChange={setTab}
+                tabs={[
+                  { id: 'notes', label: 'Notes' },
+                  { id: 'transcript', label: 'Transcript', count: segments.length ? String(segments.length) : undefined },
+                  { id: 'figures', label: 'Figures', count: figures.length ? String(figures.length) : undefined },
+                ]}
+              />
 
-          <TabPanel id="notes" idPrefix="session" active={tab === 'notes'}>
-            {notes ? (
-              <>
-                {!finished && (
-                  <div className="banner banner-info" role="note">
-                    <Icon name="file" />
-                    <div className="banner-body">
-                      <p>
-                        {ui.kind === 'polishing'
-                          ? "These notes are ready to read. A final pass is tidying them across the whole session; they'll update when it finishes."
-                          : "These notes are from an earlier run. They'll be replaced when this one finishes."}
-                      </p>
-                    </div>
+              <TabPanel id="notes" idPrefix="session" active={tab === 'notes'}>
+                {notes ? (
+                  <NotesView
+                    sessionId={session.id}
+                    title={notes.title}
+                    markdown={notes.markdown}
+                    figures={figureMeta}
+                    hideTitle={notes.title.trim() === session.title.trim()}
+                    onOutline={setOutline}
+                  />
+                ) : notesLoaded ? (
+                  <div className="placeholder">
+                    <h2>The notes couldn't be loaded</h2>
+                    <p>Reload the page to try again.</p>
                   </div>
-                )}
-                <NotesView
-                  sessionId={session.id}
-                  title={notes.title}
-                  markdown={notes.markdown}
-                  figures={figureMeta}
-                  hideTitle={notes.title.trim() === session.title.trim()}
-                  onOutline={setOutline}
-                />
-              </>
-            ) : draft ? (
-              <>
-                <div className="banner banner-info" role="note">
-                  <Icon name="file" />
-                  <div className="banner-body">
-                    <p>
-                      This is a draft. It fills in as Iris works, and figures show the original crop
-                      until they're redrawn.
-                    </p>
-                  </div>
-                </div>
-                <NotesView
-                  sessionId={session.id}
-                  title={draft.title}
-                  markdown={draft.markdown}
-                  figures={figureMeta}
-                  hideTitle={draft.title.trim() === session.title.trim()}
-                  onOutline={setOutline}
-                />
-              </>
-            ) : (
-              <NotesPlaceholder kind={ui.kind} run={run.notes} />
-            )}
-          </TabPanel>
-
-          <TabPanel id="transcript" idPrefix="session" active={tab === 'transcript'}>
-            {segments.length ? (
-              <TranscriptList segments={segments} />
-            ) : (
-              <div className="placeholder">
-                {finished ? (
-                  <h2>No speech was transcribed</h2>
                 ) : (
-                  <>
-                    <h2>No transcript yet</h2>
-                    <p>Lines appear here as each part of the recording is transcribed.</p>
-                  </>
+                  <div aria-busy="true" aria-label="Loading notes">
+                    {[90, 100, 95, 60, 100, 85].map((w, i) => (
+                      <div key={i} className="skeleton sk-line" style={{ width: `${w}%` }} />
+                    ))}
+                  </div>
                 )}
-              </div>
-            )}
-          </TabPanel>
+              </TabPanel>
 
-          <TabPanel id="figures" idPrefix="session" active={tab === 'figures'}>
-            {figures.length ? (
-              <FiguresGrid sessionId={session.id} figures={figures} />
-            ) : (
-              <div className="placeholder">
-                {finished ? (
-                  <>
+              <TabPanel id="transcript" idPrefix="session" active={tab === 'transcript'}>
+                {segments.length ? (
+                  <TranscriptList segments={segments} />
+                ) : (
+                  <div className="placeholder">
+                    <h2>No speech was transcribed</h2>
+                  </div>
+                )}
+              </TabPanel>
+
+              <TabPanel id="figures" idPrefix="session" active={tab === 'figures'}>
+                {figures.length ? (
+                  <FiguresGrid sessionId={session.id} figures={figures} />
+                ) : (
+                  <div className="placeholder">
                     <h2>No figures in this session</h2>
                     <p>Iris found nothing on screen worth redrawing.</p>
-                  </>
-                ) : (
-                  <>
-                    <h2>No figures yet</h2>
-                    <p>Figures appear here once Iris has read the screen, and fill in as they're redrawn.</p>
-                  </>
+                  </div>
                 )}
-              </div>
-            )}
-          </TabPanel>
+              </TabPanel>
+            </>
+          )}
         </div>
 
         <ProgressRail
@@ -446,10 +410,10 @@ function SessionView({ id }: { id: string }) {
           finished={finished}
           hasEvents={stream.eventCount > 0}
           currentStage={session.current_stage}
-          outline={notes || draft ? outline : []}
+          outline={notes ? outline : []}
           stream={stream.status}
           error={session.error ?? run.error}
-          showProgress={!finished || stream.eventCount > 0}
+          showProgress={finished && stream.eventCount > 0}
         />
       </div>
 
@@ -467,45 +431,57 @@ function SessionView({ id }: { id: string }) {
   )
 }
 
-function NotesPlaceholder({ kind, run }: { kind: string; run: { completed: number; total: number } | null }) {
-  if (kind === 'draft' && run) {
-    return (
-      <div className="placeholder">
-        <h2>
-          Writing notes: {run.completed} of {run.total} sections done
-        </h2>
-        <p>The notes appear here when they're put together with their figures.</p>
-      </div>
-    )
-  }
-  if (kind === 'failed' || kind === 'stalled') {
-    return (
-      <div className="placeholder">
-        <h2>No notes yet</h2>
-        <p>Processing stopped before the notes were written. Use {kind === 'failed' ? 'Try again' : 'Resume'} above.</p>
-      </div>
-    )
-  }
-  if (kind === 'recording-orphan') {
-    return (
-      <div className="placeholder">
-        <h2>No notes yet</h2>
-        <p>Notes are made after the recording is finished.</p>
-      </div>
-    )
-  }
-  if (kind === 'finished') {
-    return (
-      <div className="placeholder">
-        <h2>The notes couldn't be loaded</h2>
-        <p>Reload the page to try again.</p>
-      </div>
-    )
-  }
+/**
+ * Until the notes are finished, the main column shows where processing is instead of any notes
+ * (docs/frontend.md §2, Session): the state, the current step, every step, and how long the run
+ * has taken. The step list keeps one row per step, so nothing moves as steps advance.
+ */
+function ProgressView({ view, session, run, stream }: {
+  view: { heading: string; active: boolean }
+  session: Session
+  run: RunState
+  stream: SessionStream
+}) {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (!view.active) return
+    const timer = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(timer)
+  }, [view.active])
+  const steps = currentSteps(session, run)
+  const seconds = view.active ? runSeconds(run, now) : undefined
   return (
-    <div className="placeholder">
-      <h2>Notes appear here as they're written</h2>
-      <p>A one-hour recording usually takes a few minutes. The transcript and figures fill in first.</p>
-    </div>
+    <section className="progress-view" aria-labelledby="progress-heading">
+      <h2 id="progress-heading">{view.heading}</h2>
+      {view.active && (
+        <>
+          <p className="progress-current">
+            {steps.length ? steps.map((s) => stepLine(s, run)).join(' · ') : 'Getting started…'}
+          </p>
+          <p className="progress-elapsed">
+            {seconds !== undefined ? (
+              <>
+                Running for <span className="num">{formatClock(seconds)}</span>
+              </>
+            ) : (
+              '\u00a0'
+            )}
+          </p>
+        </>
+      )}
+      <StepList
+        className="progress-steps"
+        run={run}
+        finished={false}
+        hasEvents={stream.eventCount > 0}
+        currentStage={session.current_stage}
+      />
+      {view.active && (
+        <p className="progress-note">
+          Your notes appear here when they're finished. You can leave this page: processing carries
+          on, and the session is in the library.
+        </p>
+      )}
+    </section>
   )
 }

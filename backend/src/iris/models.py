@@ -209,8 +209,8 @@ class Renders(BaseModel):
 class NotesDraft(BaseModel):
     """The notes as far as they are written, before assembly.
 
-    Stored in notes_draft.json with ``[visual:<id>]`` markers. ``GET /notes/draft`` serves it
-    with the markers resolved to markdown images, as ``GET /notes`` does.
+    Stored in notes_draft.json with ``[visual:<id>]`` markers, written by the write stage. It is
+    never shown: assemble resolves the markers into ``notes.json``.
     """
 
     session_type: SessionType

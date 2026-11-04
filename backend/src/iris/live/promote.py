@@ -10,8 +10,8 @@ the plan (``remaining_plan``):
   written as ``transcript.json``, ``moments.json``, ``alignment.json`` and ``selection.json``, and
   the run continues from write. The draft lane froze its sections with the cache keys write
   computes over exactly this transcript and selection, and the select lane's renders are the
-  render stage's cache hits, so only the tail section (and figures not rendered live) is new
-  work.
+  render stage's cache hits, so only the sections still open at stop (and figures not rendered
+  live) are new work.
 - **The transcript only** (the audio lane finished cleanly, but the screen or select lane
   failed or skipped input): ``transcript.json`` is written and the run continues from detect
   without transcribe, so transcription isn't paid twice.
@@ -20,7 +20,7 @@ the plan (``remaining_plan``):
 
 What is written is exactly what the timeline holds: segments in its order with its ``language``
 (that of the first window with speech, not the transcribe stage's most-common rule), moments in
-the order they closed, and contents and visuals in the order they were read. The frozen draft
+the order they closed, and contents and visuals in the order they were read. The frozen notes
 sections' cache keys depend on it. Promotion also drops to a smaller set if the timeline doesn't
 hold together on disk (duplicate moment ids, a selection naming an unknown moment, a frame or
 source crop ingest didn't leave in place), since the stages it skips would have caught that.

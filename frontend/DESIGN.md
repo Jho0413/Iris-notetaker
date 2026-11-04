@@ -196,9 +196,6 @@ components:
   chip-finished:
     backgroundColor: "{colors.success-soft}"
     textColor: "{colors.success}"
-  chip-draft:
-    backgroundColor: "{colors.warning-soft}"
-    textColor: "{colors.warning}"
   chip-recording:
     backgroundColor: "{colors.recording-soft}"
     textColor: "{colors.recording}"
@@ -314,8 +311,9 @@ describes.
 Iris is a quiet working tool around a reading column. The shell (top bar, library, rail, recorder)
 is an Operate surface: dense, neutral, set in a 14px system sans, with hairlines doing the work
 cards and shadows would do elsewhere. The notes are a Read surface: 17px text at 1.7 line height in
-a 68-character column that never moves while results stream in. Progress is told in plain
-sentences in a 300px side rail, never as metrics or stage names stacked above the notes.
+a 68-character column, shown only once the notes are finished. Until then progress is told in
+plain sentences in the reading column's progress view, then in a 300px side rail, never as metrics
+or stage names stacked above the notes.
 
 Colour is cool, lightly indigo-tinted neutral in two layers: a white (or near-black) content
 surface on a slightly darker ground, and a second neutral layer (`surface-2`) for the top bar,
@@ -353,8 +351,7 @@ strong / soft / line triplet.
   button; failed chips and error banners; destructive actions; invalid LaTeX shown as source.
 - **Finished Green** (`success`, `-soft`, `-line`): the Finished chip, finished steps, the answer
   card and the Verified redraw badge.
-- **Draft Amber** (`warning`, `-soft`, `-line`): Draft chips, warning banners, the Watch out
-  callout, unverified original crops (badge and ribbon pin), capture warnings in the recording bar.
+- **Warning Amber** (`warning`, `-soft`, `-line`): warning banners, the Watch out callout, unverified original crops (badge and ribbon pin), capture warnings in the recording bar.
 - **Key-idea Blue** (`info`, `-soft`, `-line`): the Key idea callout only.
 
 ### Neutral
@@ -377,7 +374,7 @@ strong / soft / line triplet.
 focus, the current step, the selected tab. It is never used as decoration or as a background fill
 for whole regions.
 
-**The One Meaning Rule.** Red is recording, failure and deletion; green is finished; amber is draft
+**The One Meaning Rule.** Red is recording, failure and deletion; green is finished; amber is warning
 and unverified; blue is the Key idea callout. No state colour borrows another's job, and none ever
 appears without a word that says the same thing.
 
@@ -430,7 +427,8 @@ and 600 (300 only for the recorder clock).
   at 1200px, centred.
 - **Session page:** header (breadcrumb, title and meta left; status chip and actions right), the
   ribbon 20px below, then a two-column grid: reading column `minmax(0, 1fr)` plus a 300px sticky
-  rail, 32px apart. The notes column is capped at 68ch inside its track.
+  rail, 32px apart. The notes column is capped at 68ch inside its track. Until the notes are
+  finished the reading column holds the progress view instead, and there is no ribbon.
 - **Library:** one bordered list; columns `title 1fr · status 260px · created 150px · actions 150px`,
   rows at least 56px tall, each whole row a link.
 - **Spacing rhythm:** a 4px base. Common steps are 4, 6, 8, 12, 16, 20, 24, 32, 48 and 64. 6px
@@ -488,8 +486,8 @@ Compact, quiet, and obvious about the one thing to do.
 
 ### Chips and Badges
 - **Status chip:** 24px pill, 13px/500, hairline border, always a word ("Finished", "Failed ·
-  Transcribing") plus an icon or dot. Processing and starting use indigo with a spinning icon;
-  finished green with a check; draft amber; failed red with an alert icon; recording red with a
+  Transcribing") plus an icon or dot. Processing, polishing and starting use indigo with a spinning
+  icon; finished green with a check; failed red with an alert icon; recording red with a
   pulsing dot; stalled and orphaned states stay neutral.
 - **Figure badge:** smaller pill (12px/500) under a figure: Verified redraw (green), Screenshot
   (neutral), Original crop · not verified (amber).
@@ -526,6 +524,13 @@ step indigo spinner and `text` at 500, failed step red), the "On this page" outl
 collapsed Details disclosure holding stage names, timings and raw errors in mono. Under 1120px it
 becomes a one-line summary bar that expands in place.
 
+### Progress View
+Shown in the reading column until the notes are finished (no notes before then): an 18px/600
+heading for the state ("Making your notes"), the current step with its count in `text` at 500,
+"Running for m:ss" in 13px `text-2` with tabular numerals, the full step list on `surface` in a
+hairline box (the rail's step rows), and one `text-2` line saying the notes appear there and the
+page can be left. Each line keeps its height while empty, so nothing moves as steps advance.
+
 ### Notes Column
 - **Worked examples:** the Problem card is an indigo-washed box; steps are unboxed, joined by a 1px
   `accent-line` path with an 11px indigo ring at each step and an indigo step title; the Answer card
@@ -551,7 +556,9 @@ Pins are buttons in a labelled group.
 ### Recording Bar and Recorder
 A fixed 56px bar over the top bar while recording: `recording-soft` with a red hairline and the
 Float shadow, a pulsing red dot and "Recording" with the tabular clock, capture status, and the Stop
-button on the right. Below it the recorder centres the 56px light clock and a 16:10 preview.
+button on the right. Below it the recorder centres the 56px light clock and a 16:10 preview, and
+under the preview one 14px `text-2` progress line in tabular numerals ("Transcribed to 4:30 · 3
+screens · 2 figures read"), not announced.
 
 ### Feedback States
 Empty states are centred text (18px heading, `text-2` body at 52ch) with optional choice tiles.
@@ -568,8 +575,8 @@ animation and transition is off and the dot is solid.
 ## Do's and Don'ts
 
 ### Do:
-- **Do** keep the notes column fixed at 68ch and 17px/1.7; partial results fill in place without
-  moving what is already there.
+- **Do** keep the notes column fixed at 68ch and 17px/1.7; the notes appear whole once finished,
+  and progress lines keep their height so nothing moves as steps advance.
 - **Do** say state in words first: every chip, badge and step carries a label, with colour and icon
   as secondary signals.
 - **Do** use the global focus ring (2px `accent`, 2px offset) on every interactive element,
