@@ -4,9 +4,10 @@ Each stage is ``async def run(ctx: StageContext) -> None`` that reads files from
 writes its own output file. ``PLAN`` lists the stages in groups; stages within a group run
 concurrently, groups run in order.
 
-Finishing is two steps: assemble publishes the notes as written, so they can be read at once, then
-synthesize consolidates them across the session and assemble runs again inside the synthesize
-stage, so the polished notes replace the assembled ones. Each stage appears once in ``PLAN``:
+Finishing is two steps: assemble publishes the notes as written (the result if synthesis fails),
+then synthesize consolidates them across the session and assemble runs again inside the synthesize
+stage, so the polished notes replace the assembled ones. The UI shows the notes only once the
+session is done. Each stage appears once in ``PLAN``:
 ``plan_from``, ``Session.current_stage`` and the UI's progress list need no special cases, and a
 re-run from ``synthesize`` re-polishes without rewriting anything else. Assemble uses the
 synthesized draft only while it matches the current notes draft and selection.

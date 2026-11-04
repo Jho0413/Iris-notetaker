@@ -7,7 +7,8 @@ live"):
 - ``transcribed_to`` (T_a): the transcript is complete up to here. Audio lane.
 - ``closed_to`` (T_m): every moment that ends by here is closed. Screen lane.
 - ``selected_to`` (T_s): every closed moment that ends by here has been read. Select lane.
-- ``horizon``: ``min(T_a, T_s)``. Evidence before it is final, so the draft may freeze it.
+- ``horizon``: ``min(T_a, T_s)``. Evidence before it is final, so the draft lane may write its
+  notes sections ahead of stop.
 
 Selection is published in time order and never reaches back: every moment read after
 ``selected_to`` advanced starts at or after it, and so does every record made from it (its
@@ -42,7 +43,7 @@ class Lane(StrEnum):
     AUDIO = "audio"
     SCREEN = "screen"
     SELECT = "select"
-    DRAFT = "draft"
+    DRAFT = "draft"  # writes the final notes sections ahead of stop (live/draft.py)
 
 
 # The lanes whose results each lane uses, directly or through another lane.

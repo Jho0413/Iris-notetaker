@@ -123,7 +123,6 @@ class Settings(BaseSettings):
     live_frame_holdback_s: float = Field(default=2.0, ge=0)  # frames wait this long to be ordered
     live_speech_pad_s: float = Field(default=5.0, ge=0)  # transcript past a moment before select
     live_render_concurrency: int = Field(default=2, ge=1, le=16)
-    live_draft_refresh_s: float = Field(default=180.0, gt=0)  # the open tail section, at most
     live_finish_timeout_s: float = Field(default=300.0, gt=0)  # lanes still flushing are dropped
 
     # Cost controls: reasoning effort per call type; unset uses ``reasoning_effort``.

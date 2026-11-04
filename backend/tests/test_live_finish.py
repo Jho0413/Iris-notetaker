@@ -30,6 +30,7 @@ from iris.models import (
     Moment,
     MomentContent,
     Moments,
+    NotesDraft,
     Selection,
     SourceKind,
     Stage,
@@ -140,7 +141,6 @@ def live_settings(tmp_path: Path, **overrides) -> Settings:
         "live_window_max_s": 8.0,
         "live_transcribe_concurrency": 1,
         "live_speech_pad_s": 1.0,
-        "live_draft_refresh_s": 0.2,
         "notes_context_chars": 2000,
     }
     return Settings(**{**values, **overrides})
@@ -249,7 +249,7 @@ def draft_seen_at(monkeypatch, at: Stage) -> list[bool]:
     return seen
 
 
-def test_a_live_session_is_finished_at_stop_with_only_the_tail_left(
+def test_a_live_session_is_finished_at_stop_with_only_the_open_work_left(
     app_client: TestClient, recording, capsys, monkeypatch
 ):
     client = app_client
@@ -266,7 +266,10 @@ def test_a_live_session_is_finished_at_stop_with_only_the_tail_left(
     live = events(client, sid)
     assert {e.type for e in live} >= LIVE_EVENTS
     assert any(e.type == "notes_updated" and e.data.get("live") for e in live)
-    assert (root / "notes_draft.json").exists()
+    # Sections are written ahead of stop into the write stage's cache; no draft is made.
+    assert not (root / "notes_draft.json").exists()
+    frozen = len(list((root / "notes_sections").glob("*.json")))
+    assert frozen >= 1
     before = calls(client, sid)
     windows_before, batches_before = windows(root), len(timeline.contents)
     live_figures = {v.id for v in timeline.visuals}
@@ -276,8 +279,8 @@ def test_a_live_session_is_finished_at_stop_with_only_the_tail_left(
     session = wait_for_done(client, sid)
     assert session["status"] == "done", session.get("error")
     assert (root / "notes.json").exists()
-    # Promoted, select doesn't run again: the live draft stays on screen until write replaces it.
-    assert draft_at_promotion == [True]
+    # The live lanes left no notes draft for the run to keep or drop.
+    assert draft_at_promotion == [False]
     notes = client.get(f"/api/sessions/{sid}/notes").json()
     assert len(notes["visuals"]) == 4 and "visuals/v000004" in notes["markdown"]
 
@@ -304,13 +307,16 @@ def test_a_live_session_is_finished_at_stop_with_only_the_tail_left(
     assert [i.moment for i in items] == timeline.moments
     assert not (root / "transcript_chunks").exists()  # the transcribe stage never ran
 
-    # After stop: the last window(s), the last select batch, the tail section, the last figure's
-    # render (live renders don't start after stop) and synthesis. Nothing live is redone.
+    # After stop: the last window(s), the last select batch, the sections still open at stop,
+    # the last figure's render (live renders don't start after stop) and synthesis. Nothing live
+    # is redone.
     after = calls(client, sid)[len(before) :]
     counts = by_stage(after)
     new_windows = windows(root) - windows_before
     new_batches = 1 if len(timeline.contents) > batches_before else 0
     new_figures = len(timeline.visuals) - len(live_figures)
+    parts = read_model(root / "notes_draft.json", NotesDraft).parts
+    assert parts is not None and parts > frozen
     with capsys.disabled():
         print(f"\nmodel calls after stop: {counts} (live before stop: {by_stage(before)})")
     assert new_windows == 1 and new_batches == 1 and new_figures == 1
@@ -318,7 +324,7 @@ def test_a_live_session_is_finished_at_stop_with_only_the_tail_left(
         "transcribe": new_windows,  # the window cut at stop
         "select": new_batches,  # the moment closed at stop
         "render": 2 * new_figures,  # its figure: one drawing and one check
-        "write": 1,  # the tail section
+        "write": parts - frozen,  # the sections still open at stop, the last one included
         "synthesize": 1,  # the plan over several parts (no edits, so no rewrites)
     }
     # No repeats of live work: one call per window and per batch over the whole session.
@@ -372,8 +378,8 @@ def test_a_skipped_frame_promotes_the_transcript_and_runs_from_detect(
     root = client.app.state.settings.sessions_dir / sid  # type: ignore[attr-defined]
     # The frame at 7 s arrives after the screen lane has moved on; ingest samples it.
     record_session(client, sid, recording[:8], hold_frame=7.0)
-    wait_until_caught_up(client, sid, {"transcript_chunk", "moment_found", "notes_updated"})
-    assert (root / "notes_draft.json").exists()
+    wait_until_caught_up(client, sid, {"transcript_chunk", "moment_found"})
+    assert not (root / "notes_draft.json").exists()
     n = len(events(client, sid))
     windows_before = windows(root)
     before = len(calls(client, sid))
@@ -388,7 +394,7 @@ def test_a_skipped_frame_promotes_the_transcript_and_runs_from_detect(
     promoted = [s for kind, s, p in stages if p and kind == "stage_finished"]
     ran = [s for kind, s, p in stages if not p and kind == "stage_finished"]
     assert promoted == ["transcribe"]
-    # Select runs again, so visual ids may change: the live draft is gone before it starts.
+    # Select runs again: no notes draft is left for the run to assemble by mistake.
     assert draft_at_detect == [False]
     assert ran[:4] == ["ingest", "detect", "align", "select"]
     assert read_model(root / "transcript.json", Transcript) == timeline.transcript()
