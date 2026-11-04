@@ -12,8 +12,17 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import get_args
 
-from iris.models import GENERIC_FAILURE, FailureKind, Session, SessionStatus, SourceKind, Stage
+from iris.models import (
+    GENERIC_FAILURE,
+    FailureKind,
+    FailureMessage,
+    Session,
+    SessionStatus,
+    SourceKind,
+    Stage,
+)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS sessions (
@@ -38,6 +47,8 @@ ADDED_COLUMNS = {
     "failed_at": "TEXT",
 }
 SESSION_FIELDS = tuple(Session.model_fields)
+FAILURE_MESSAGES = frozenset(get_args(FailureMessage))
+FAILURE_KINDS = frozenset(FailureKind)
 
 
 @dataclass(frozen=True)
@@ -89,7 +100,18 @@ class SessionStore:
 
     @staticmethod
     def _session(row: sqlite3.Row) -> Session:
-        return Session(**{k: row[k] for k in SESSION_FIELDS})
+        fields = {k: row[k] for k in SESSION_FIELDS}
+        # A stored message no longer on the list (reworded since, or written by mistake) is served
+        # as the generic one, never as is, and never breaks reading the session list.
+        if fields["failure_message"] is not None:
+            if fields["failure_message"] not in FAILURE_MESSAGES:
+                fields["failure_message"] = GENERIC_FAILURE
+                fields["failure_kind"] = FailureKind.GENERAL
+            elif fields["failure_kind"] not in FAILURE_KINDS:
+                fields["failure_kind"] = FailureKind.GENERAL
+        elif fields["failure_kind"] is not None:
+            fields["failure_kind"] = None
+        return Session(**fields)
 
     def close(self) -> None:
         with self._lock:
@@ -146,7 +168,7 @@ class SessionStore:
         self,
         session_id: str,
         *,
-        message: str,
+        message: FailureMessage,
         kind: FailureKind,
         detail: str,
         stage: Stage | None = None,

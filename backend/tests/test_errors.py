@@ -673,3 +673,34 @@ def test_old_sessions_with_a_raw_error_are_not_leaked(tmp_path, capsys, monkeypa
     store = SessionStore(settings.db_path)
     assert store.failure_detail("old1").error.startswith("render failed: APIConnectionError")
     store.close()
+
+
+def test_a_stored_message_not_on_the_list_is_served_as_the_generic_one(tmp_path):
+    """Say a later version rewords a message: older rows never break the library or leak."""
+    settings = Settings(data_dir=tmp_path / "data", openai_api_key="test")
+    store = SessionStore(settings.db_path)
+    bad = store.create("Reworded", SourceKind.UPLOAD).id
+    odd_kind = store.create("Odd kind", SourceKind.UPLOAD).id
+    with store._conn:
+        store._conn.execute(
+            "UPDATE sessions SET status = 'failed', failure_message = ?, failure_kind = 'input'"
+            " WHERE id = ?",
+            ("SECRET-sk-proj-42 old wording", bad),
+        )
+        store._conn.execute(
+            "UPDATE sessions SET status = 'failed', failure_message = ?, failure_kind = 'weird'"
+            " WHERE id = ?",
+            (UPLOAD_WITHOUT_AUDIO, odd_kind),
+        )
+    store.close()
+    with TestClient(create_app(settings)) as client:
+        listed = client.get("/api/sessions")
+        assert listed.status_code == 200
+        assert_no_leak(listed.text)
+        one = client.get(f"/api/sessions/{bad}").json()
+        assert (one["failure_message"], one["failure_kind"]) == (GENERIC_FAILURE, "general")
+        other = client.get(f"/api/sessions/{odd_kind}").json()
+        assert (other["failure_message"], other["failure_kind"]) == (
+            UPLOAD_WITHOUT_AUDIO,
+            "general",
+        )
