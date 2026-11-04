@@ -8,6 +8,7 @@ transcription client is a fake that records each call.
 import asyncio
 import hashlib
 import io
+import json
 import random
 import wave
 from pathlib import Path
@@ -117,6 +118,7 @@ class FakeTranscriber:
         self.calls.append(
             {
                 "prompt": kwargs.get("prompt"),
+                "language": kwargs.get("language"),
                 "sha1": hashlib.sha1(data).hexdigest(),
                 "seconds": wav_seconds(data),
             }
@@ -745,6 +747,43 @@ async def test_another_model_invalidates_the_cache_and_stale_windows_are_removed
     assert len(again.calls) == len(names)  # every window paid for again with the new model
     assert all(c["prompt"] is None for c in again.calls)  # this model gets no prompt
     assert {p.name for p in paths.live_transcript_windows_dir.iterdir()} == names
+
+
+async def test_every_window_is_sent_the_language_and_a_changed_one_invalidates_the_cache(
+    tmp_path: Path, paths: SessionPaths, webm: bytes, monkeypatch
+):
+    chunks = split(webm, 2000)
+    first = FakeTranscriber()
+    run = Run(paths, settings(tmp_path, transcribe_language="en"), first, monkeypatch)
+    run.store(chunks, range(len(chunks)))
+    await run.stop()
+    assert len(first.calls) > 1
+    # Not just the first: a misdetected window can't pass its language on through the prompt.
+    assert all(c["language"] == "en" for c in first.calls)
+
+    again = FakeTranscriber()
+    await Run(paths, settings(tmp_path, transcribe_language="auto"), again, monkeypatch).stop()
+    assert len(again.calls) == len(first.calls)
+    assert all(c["language"] is None for c in again.calls)
+
+
+async def test_windows_cached_before_the_language_setting_are_resent_in_english(
+    tmp_path: Path, paths: SessionPaths, webm: bytes, monkeypatch
+):
+    chunks = split(webm, 2000)
+    first = FakeTranscriber()
+    run = Run(paths, settings(tmp_path, transcribe_language="auto"), first, monkeypatch)
+    run.store(chunks, range(len(chunks)))
+    await run.stop()
+    for path in paths.live_transcript_windows_dir.glob("*.json"):  # as written before the field
+        data = json.loads(path.read_text())
+        del data["requested_language"]
+        path.write_text(json.dumps(data))
+
+    again = FakeTranscriber()
+    await Run(paths, settings(tmp_path, transcribe_language="en"), again, monkeypatch).stop()
+    assert len(again.calls) == len(first.calls)
+    assert all(c["language"] == "en" for c in again.calls)
 
 
 async def test_at_stop_a_very_short_tail_joins_the_last_window(

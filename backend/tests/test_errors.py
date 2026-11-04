@@ -403,7 +403,7 @@ async def test_a_blocking_error_in_one_chunk_cancels_the_others(tmp_path, monkey
     write_wav(ctx.paths.audio, np.zeros(16_000 * 60, np.int16))
     started, cancelled = [], []
 
-    async def fake_chunk(_client, _model, _wav, _duration, prompt=None):
+    async def fake_chunk(_client, _model, _wav, _duration, prompt=None, language=None):
         n = len(started)
         started.append(n)
         if n == 0:

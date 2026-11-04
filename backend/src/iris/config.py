@@ -7,6 +7,16 @@ from typing import Literal
 from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# The two-letter codes Whisper knows (its tokenizer's language list), so a typo such as "jp" for
+# "ja" fails at startup instead of failing every transcription request.
+_WHISPER_CODES = (
+    "af am ar as az ba be bg bn bo br bs ca cs cy da de el en es et eu fa fi fo fr gl gu ha "
+    "he hi hr ht hu hy id is it ja jw ka kk km kn ko la lb ln lo lt lv mg mi mk ml mn mr ms "
+    "mt my ne nl nn no oc pa pl ps pt ro ru sa sd si sk sl sn so sq sr su sv sw ta te tg th "
+    "tk tl tr tt uk ur uz vi yi yo zh"
+)
+TRANSCRIBE_LANGUAGES = frozenset(_WHISPER_CODES.split())
+
 # --- Model prices (cost tracking) --------------------------------------------------------------
 
 
@@ -85,6 +95,10 @@ class Settings(BaseSettings):
     # OpenAI. Reads OPENAI_API_KEY as well as IRIS_OPENAI_API_KEY.
     openai_api_key: str | None = Field(default=None, validation_alias="OPENAI_API_KEY")
     transcribe_model: str = "whisper-1"  # the only OpenAI transcription model with timestamps
+    # Spoken language (ISO-639-1, e.g. "en"), sent with every transcription request. Detection
+    # is unreliable (whisper-1 hears some British English as Welsh, and a live session's first
+    # window carries its guess into the rest through the prompt). "auto" lets the model detect it.
+    transcribe_language: str | None = "en"
     vision_model: str = "gpt-5.5"  # reads the screen; checks rendered visuals
     notes_model: str = "gpt-5.5"
     diagram_model: str = "gpt-5.5"  # writes SVG for exact diagrams, charts and graphs
@@ -148,6 +162,21 @@ class Settings(BaseSettings):
 
     # Server
     cors_origins: list[str] = ["http://localhost:5173"]
+
+    @field_validator("transcribe_language", mode="before")
+    @classmethod
+    def _check_language(cls, value: object) -> str | None:
+        if value is None:
+            return None
+        code = str(value).strip().lower()
+        if code in ("", "auto"):
+            return None
+        if code not in TRANSCRIBE_LANGUAGES:
+            raise ValueError(
+                f'transcribe_language "{code}" is not a language Whisper knows: use an ISO-639-1 '
+                'code such as "en", "fr" or "ja", or "auto"'
+            )
+        return code
 
     @field_validator("api_retry_delays_s", mode="after")
     @classmethod

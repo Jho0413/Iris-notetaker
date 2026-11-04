@@ -42,9 +42,15 @@ Two tracks that can run side by side.
 
 ### Desktop app
 
-- [ ] Prototype: capture the screen plus system audio on macOS (decides whether a small native
-      helper is needed alongside Electron).
-- [ ] Electron app wrapping the current UI and starting the backend itself.
+- [x] Prototype: capture the screen plus system audio on macOS (decides whether a small native
+      helper is needed alongside Electron). No helper needed: Electron (`desktop/`) records any
+      screen or window from the macOS system picker with system audio, through the UI's own
+      capture code. Two live recordings worked end to end. Frames stay at 1 fps with Iris in the
+      background only because the app turns off Chromium's background throttling.
+- [ ] Package the backend into the app (no `uv` or repo needed): size, startup time, code
+      signing. PyAV and OpenCV each bundle their own FFmpeg (harmless today, ~17 MB unused).
+- [ ] Electron app wrapping the current UI and starting the backend itself, with an API key
+      screen and first-run permission guidance.
 - [ ] Record any screen or window, stop, and save the `.md` with its images to a chosen folder.
 - [ ] Windows support.
 
