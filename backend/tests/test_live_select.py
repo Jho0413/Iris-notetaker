@@ -424,6 +424,39 @@ async def test_a_fresh_lane_waits_to_rebuild_a_batch_split_by_the_gate(
     assert after.selection() == before.selection()
 
 
+async def test_a_second_restart_during_a_replay_keeps_the_rest_of_it(
+    ctx: StageContext, vision: FakeVision, renderer: FakeRenderer
+):
+    first = Driver(ctx).start()
+    vision.release.clear()
+    await first.close(0)
+    await first.transcribe(0, to=100)
+    await asyncio.wait_for(vision.started.wait(), 5)
+    await first.close(1, 2)
+    await first.transcribe(1, 2, to=100)
+    vision.release.set()
+    await first.stop()
+    assert vision.calls == [["m001"], ["m002", "m003"]]
+
+    second = Driver(ctx)  # replays only m001 before the backend restarts again
+    await second.close(0, 1, 2)
+    await second.transcribe(0, to=15)
+    second.start()
+    await second.selected(10)
+    assert second.task is not None
+    second.task.cancel()
+    await asyncio.gather(second.task, return_exceptions=True)
+    record = read_model(ctx.paths.live_select_batches, SelectBatches)
+    assert record.batches == [["m001"], ["m002", "m003"]]
+
+    third = Driver(ctx)
+    await third.close(0, 1, 2)
+    await third.transcribe(0, 1, 2, to=100)
+    third.start()
+    await third.stop()
+    assert len(vision.calls) == 2
+
+
 async def test_a_replay_that_no_longer_matches_is_dropped(
     ctx: StageContext, vision: FakeVision, renderer: FakeRenderer
 ):

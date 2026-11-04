@@ -164,7 +164,9 @@ class SelectLane(LiveLane):
         paths = self.ctx.paths
         paths.live_dir.mkdir(parents=True, exist_ok=True)
         write_model(paths.live_selection, tl.selection())
-        write_model(paths.live_select_batches, SelectBatches(batches=self._batches))
+        # Keep the batches still to replay, so a second restart can rebuild them too.
+        record = SelectBatches(batches=self._batches + self._replay)
+        write_model(paths.live_select_batches, record)
         for visual in result.visuals:
             task = asyncio.create_task(self._render(visual), name=f"live-render-{visual.id}")
             self._renders.add(task)
