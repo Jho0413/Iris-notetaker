@@ -29,7 +29,7 @@ Windows are transcribed with ``transcribe.transcribe_chunk``, at most
 ``live_transcribe_concurrency`` at once (a window starts only while fewer than that many are
 uncommitted), each attempted up to ``WINDOW_ATTEMPTS`` times before the lane fails. Each window is
 prompted with the tail of the text *committed when it is sent*: normally that is the previous
-window (windows end ~20 s apart and take a few seconds to transcribe), while a backlog (a slow API,
+window (windows end ~10 s apart and take a few seconds to transcribe), while a backlog (a slow API,
 or stop) is worked through concurrently with slightly older context. The cache entry records the
 prompt and which window it was taken from, and is reused only if its audio, model and prompt
 match the text now committed there; a damaged entry is regenerated. Windows commit strictly in

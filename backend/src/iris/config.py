@@ -117,8 +117,8 @@ class Settings(BaseSettings):
     # Live processing while recording (architecture section 1, "Life of a session: live").
     live_processing: bool = True  # off: a live session is processed after stop, like an upload
     live_audio_gap_wait_s: float = Field(default=35.0, gt=0)  # wait for a missing chunk, then skip
-    live_window_min_s: float = Field(default=10.0, gt=0)  # transcription windows are cut at the
-    live_window_max_s: float = Field(default=30.0, gt=0)  # quietest point between these lengths
+    live_window_min_s: float = Field(default=5.0, gt=0)  # transcription windows are cut at the
+    live_window_max_s: float = Field(default=15.0, gt=0)  # quietest point between these lengths
     live_transcribe_concurrency: int = Field(default=2, ge=1, le=8)
     live_frame_holdback_s: float = Field(default=2.0, ge=0)  # frames wait this long to be ordered
     live_speech_pad_s: float = Field(default=5.0, ge=0)  # transcript past a moment before select
