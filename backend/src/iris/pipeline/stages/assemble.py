@@ -9,6 +9,7 @@ selection; otherwise (absent, stale after a re-run, or unreadable) the notes dra
 
 import logging
 import re
+from pathlib import Path
 
 from iris.markdown import escape_text
 from iris.models import EventType, Notes, NotesDraft, Renders, Selection, SynthesizedDraft, Visual
@@ -51,6 +52,20 @@ def drop_title_heading(markdown: str, title: str) -> str:
     return markdown
 
 
+def with_renders(visuals: list[Visual], renders: Path) -> list[Visual]:
+    """Point each visual at its render where ``renders.json`` has one; the others keep their
+    selected path (the source crop)."""
+    if not renders.exists():
+        return visuals
+    rendered = {r.id: r for r in read_model(renders, Renders).visuals}
+    return [
+        v.model_copy(update={"path": r.path, "render_as": r.render_as})
+        if (r := rendered.get(v.id))
+        else v
+        for v in visuals
+    ]
+
+
 def current_draft(ctx: StageContext, selection: Selection) -> NotesDraft:
     """The synthesized draft if it is current, else the notes draft as written."""
     draft = read_model(ctx.paths.notes_draft, NotesDraft)
@@ -71,15 +86,7 @@ def current_draft(ctx: StageContext, selection: Selection) -> NotesDraft:
 async def run(ctx: StageContext) -> None:
     selection = read_model(ctx.paths.selection, Selection)
     draft = current_draft(ctx, selection)
-    visuals = selection.visuals
-    if ctx.paths.renders.exists():
-        rendered = {r.id: r for r in read_model(ctx.paths.renders, Renders).visuals}
-        visuals = [
-            v.model_copy(update={"path": r.path, "render_as": r.render_as})
-            if (r := rendered.get(v.id))
-            else v
-            for v in visuals
-        ]
+    visuals = with_renders(selection.visuals, ctx.paths.renders)
     markdown = resolve_markers(drop_title_heading(draft.markdown, draft.title), visuals)
     notes = Notes(
         session_id=ctx.session_id,

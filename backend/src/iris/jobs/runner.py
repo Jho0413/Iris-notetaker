@@ -57,7 +57,12 @@ class JobRunner:
                 # Promoting their outputs (so only the tail is new work) is not built yet, so the
                 # full plan runs and reuses model caches where inputs match.
                 await self.live.finish(session_id)
-            for group in plan_from(from_stage):
+            plan = plan_from(from_stage)
+            if any(Stage.SELECT in group for group in plan):
+                # The selection is made again, so visual ids may change: a draft written against
+                # the old one (live, or by an earlier run) must not be served meanwhile.
+                ctx.paths.notes_draft.unlink(missing_ok=True)
+            for group in plan:
                 await asyncio.gather(*(self.run_stage(ctx, s) for s in group))
         except Exception as exc:
             log.exception("session %s failed", session_id)

@@ -9,6 +9,7 @@ export type Session = components['schemas']['Session']
 export type SessionStatus = components['schemas']['SessionStatus']
 export type Stage = components['schemas']['Stage']
 export type Notes = components['schemas']['Notes']
+export type NotesDraft = components['schemas']['NotesDraft']
 export type Transcript = components['schemas']['Transcript']
 export type IrisEvent = components['schemas']['Event']
 

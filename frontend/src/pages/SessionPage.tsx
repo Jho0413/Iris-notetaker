@@ -10,7 +10,7 @@ import { SessionRibbon } from '../components/SessionRibbon'
 import { StatusChip } from '../components/StatusChip'
 import { TabPanel, Tabs } from '../components/Tabs'
 import { TranscriptList } from '../components/TranscriptList'
-import { fetchDraft, type NotesDraft } from '../session/draft'
+import { draftRefreshKey, fetchDraft, type NotesDraft } from '../session/draft'
 import { act } from '../session/request'
 import { formatWhen, SOURCE_LABEL } from '../session/format'
 import {
@@ -106,15 +106,19 @@ function SessionView({ id }: { id: string }) {
     }
   }, [id, run.stages.transcribe.status, reload])
 
-  const draftSections = run.notes && !run.notes.final ? run.notes.completed : 0
+  // The draft while recording or processing: once on load, then on every `notes_updated`. A failed
+  // fetch keeps the draft already shown.
+  const draftKey = draftRefreshKey(run.status ?? session?.status, run)
   useEffect(() => {
-    if (!draftSections) return
+    if (draftKey === null) return
     let live = true
-    void fetchDraft(id).then((d) => live && setDraft(d))
+    void fetchDraft(id).then((d) => {
+      if (live && d !== undefined) setDraft(d)
+    })
     return () => {
       live = false
     }
-  }, [id, draftSections])
+  }, [id, draftKey])
 
   const ui = session
     ? uiState(session, run, { stalled: stream.quiet && (run.status ?? session.status) === 'processing' })
@@ -375,7 +379,25 @@ function SessionView({ id }: { id: string }) {
                 />
               </>
             ) : draft ? (
-              <NotesView sessionId={session.id} title={draft.title} markdown={draft.markdown} onOutline={setOutline} />
+              <>
+                <div className="banner banner-info" role="note">
+                  <Icon name="file" />
+                  <div className="banner-body">
+                    <p>
+                      This is a draft. It fills in as Iris works, and figures show the original crop
+                      until they're redrawn.
+                    </p>
+                  </div>
+                </div>
+                <NotesView
+                  sessionId={session.id}
+                  title={draft.title}
+                  markdown={draft.markdown}
+                  figures={figureMeta}
+                  hideTitle={draft.title.trim() === session.title.trim()}
+                  onOutline={setOutline}
+                />
+              </>
             ) : (
               <NotesPlaceholder kind={ui.kind} run={run.notes} />
             )}
