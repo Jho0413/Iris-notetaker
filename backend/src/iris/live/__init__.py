@@ -1,6 +1,6 @@
 """Live processing: the pipeline's work done while a browser live session is recording.
 
-See architecture section 1, "Life of a session: live". ``LiveRegistry`` (owned by the job
+See docs/architecture/live.md. ``LiveRegistry`` (owned by the job
 runner) holds one ``LiveProcessor`` per recording session; each runs its lanes over a shared
 ``LiveTimeline``.
 """

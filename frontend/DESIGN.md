@@ -299,10 +299,7 @@ components:
 
 # Design System: Iris
 
-The reasoning behind these choices (theme, typography, notes content, the ribbon, motion) is in
-[docs/frontend.md §5](../docs/frontend.md#5-visual-design). This file records the system as built
-in `src/index.css` and `src/components`. Where the two differ, the build is what this file
-describes.
+This file records the design system as built in `src/index.css` and `src/components`.
 
 ## Overview
 

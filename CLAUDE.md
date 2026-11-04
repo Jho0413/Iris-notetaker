@@ -1,6 +1,7 @@
 # Iris: working agreement
 
-Read `README.md` and `docs/architecture.md` first. This file covers how we work.
+Read `README.md` and `docs/architecture/overview.md` first (the rest of `docs/architecture/` covers
+the pipeline, live sessions and errors). This file covers how we work.
 
 ## Conventions
 
@@ -8,7 +9,7 @@ Read `README.md` and `docs/architecture.md` first. This file covers how we work.
   the session folder and writes only its own outputs and caches (named in `store/layout.py`, typed in
   `models.py`), writing JSON atomically with `write_model`. No stage reaches into another stage's
   internals.
-- **Accurate visuals** (architecture principle 1). What was shown is rebuilt as a professional visual.
+- **Accurate visuals** (architecture overview, principle 1). What was shown is rebuilt as a professional visual.
   A redraw reaches the notes only after a vision check against the source crop and brief passes. If
   none passes, the source crop is shown instead and recorded as unverified in `renders.json`. Source
   crops stay on disk so any visual can be checked or regenerated.

@@ -1,4 +1,4 @@
-"""What went wrong, and what to do about it (architecture section 1, "Errors and retries").
+"""What went wrong, and what to do about it (docs/architecture/errors.md).
 
 ``classify`` sorts any exception into an ``ErrorKind``, from the OpenAI SDK's exception classes and
 status codes. Every unit of work (a transcription chunk, a selection batch, a notes section, a

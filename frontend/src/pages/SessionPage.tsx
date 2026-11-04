@@ -445,9 +445,8 @@ function SessionView({ id }: { id: string }) {
 }
 
 /**
- * Until the notes are finished, the main column shows where processing is instead of any notes
- * (docs/frontend.md §2, Session): the state, the current step, every step, and how long the run
- * has taken. The step list keeps one row per step, so nothing moves as steps advance.
+ * Until the notes are finished, the main column shows where processing is instead of any notes:
+ * the state, the current step, every step, and how long the run has taken. The step list keeps one row per step, so nothing moves as steps advance.
  */
 function ProgressView({ view, session, run, stream }: {
   view: { heading: string; active: boolean }

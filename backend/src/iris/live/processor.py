@@ -4,8 +4,8 @@
 ``LiveTimeline``. The API wakes a lane when its input arrives; the job runner calls ``finish``
 when recording stops, before processing the session. A failing lane is logged and marked failed
 on the timeline: the recording carries on, and stop promotes less of the live work (only the
-transcript, or nothing) and runs more of the pipeline (``live/promote.py``; architecture section
-1, "Life of a session: live").
+transcript, or nothing) and runs more of the pipeline (``live/promote.py``;
+docs/architecture/live.md).
 """
 
 import asyncio

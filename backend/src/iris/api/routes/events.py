@@ -1,7 +1,7 @@
 """Progress events over Server-Sent Events.
 
 SSE is the working choice for server -> UI progress; live input goes over plain HTTP POSTs.
-Revisit in architecture section 4 (SSE vs WebSockets).
+Revisit if live needs WebSockets (docs/architecture/overview.md, open questions).
 """
 
 import asyncio

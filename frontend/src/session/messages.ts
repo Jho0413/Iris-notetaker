@@ -1,4 +1,4 @@
-// Fixed user-facing wording shared by the pages (docs/frontend.md §3, errors). Pure, so it is
+// Fixed user-facing wording shared by the pages. Pure, so it is
 // testable under plain Node. Nothing here names the backend, a provider, a status code or a
 // command: the user assumes Iris is set up, so every failure is said in Iris's own words.
 import type { Session } from '../api/client'

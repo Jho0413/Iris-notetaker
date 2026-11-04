@@ -9,7 +9,7 @@ A failed check, a refusal or unusable output is retried with the problems as fee
 other renderer is tried. If nothing passes, the source crop is used and the failure is recorded, so
 notes are never blocked and never show an unverified redraw.
 
-An API error while redrawing (architecture section 1, "Errors and retries"), or any other error
+An API error while redrawing (docs/architecture/errors.md), or any other error
 that isn't unusable output, gives the source crop at once, with no retries of our own: it is marked
 unverified, the reason goes to the log and to ``problems`` in renders.json, and it is not cached,
 so a later run tries the redraw again. A blocking error (a rejected key, exhausted credit, a

@@ -1,4 +1,4 @@
-/* Iris UI. Design rationale and tokens: docs/frontend.md §5.
+/* Iris UI. Design system and tokens: frontend/DESIGN.md.
    Themes differ only in tokens. data-theme on <html> always holds the resolved theme ("light" or
    "dark"); index.html sets it before first paint and src/components/theme.ts keeps it current. */
 

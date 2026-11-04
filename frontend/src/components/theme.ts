@@ -1,4 +1,4 @@
-// Light, dark or system theme (docs/frontend.md §5). The choice is stored in localStorage; the
+// Light, dark or system theme (frontend/DESIGN.md). The choice is stored in localStorage; the
 // resolved theme is written to <html data-theme>. index.html runs the same resolution inline
 // before first paint, so dark mode never flashes white.
 import { useEffect, useState } from 'react'

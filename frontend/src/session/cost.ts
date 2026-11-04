@@ -1,5 +1,4 @@
-// Model cost as the UI shows it (docs/frontend.md §2: the rail's Cost slot and the library's
-// Cost column). Pure functions, testable under plain Node (tests/cost.test.ts). Costs are shown
+// Model cost as the UI shows it (the rail's Cost slot and the library's Cost column). Pure functions, testable under plain Node (tests/cost.test.ts). Costs are shown
 // per step with the plain step labels; model and provider names never reach the UI.
 import type { Session, SessionStatus, SessionUsage, Stage } from '../api/client'
 import {
@@ -40,7 +39,7 @@ export function costLabel(cost: Cost): string {
 }
 
 // A session with no model calls shows nothing while it is unfinished, and "$0.00" once it is
-// finished (docs/frontend.md §2, Library).
+// finished.
 const NONE_YET = (status: SessionStatus): Cost | null =>
   status === 'done' ? { usd: 0, partial: false } : null
 
