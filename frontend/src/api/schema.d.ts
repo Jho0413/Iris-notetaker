@@ -273,7 +273,8 @@ export interface paths {
          *
          *     A session with no model calls yet (or only cache hits) has empty records and zero totals.
          *     Calls whose cost is unknown are counted in ``unpriced_calls`` and excluded from ``cost_usd``.
-         *     Read from the call log, so it is current while stages are still running.
+         *     Read from the call log, so it is current while stages are still running. Failed calls are
+         *     flagged (``failed``); what they failed on stays in the log (``iris cost``, ``iris show``).
          */
         get: operations["get_usage_api_sessions__session_id__usage_get"];
         put?: never;
@@ -330,6 +331,11 @@ export interface components {
          */
         EventType: "status" | "stage_started" | "stage_finished" | "transcript_chunk" | "moment_found" | "visual_selected" | "visual_rendered" | "notes_updated" | "error";
         /**
+         * FailureKind
+         * @enum {string}
+         */
+        FailureKind: "input" | "general";
+        /**
          * FrameRef
          * @description One sampled frame on disk (``frames/<t_ms>.jpg``).
          */
@@ -344,14 +350,16 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
-        /** Health */
+        /**
+         * Health
+         * @description The backend is up. Setup problems (such as a missing API key) are not reported to the UI:
+         *     a run that hits one fails with the generic message, and the log says why.
+         */
         Health: {
             /** Ok */
             ok: boolean;
             /** Version */
             version: string;
-            /** Openai Key */
-            openai_key: boolean;
         };
         /** LiveEnd */
         LiveEnd: {
@@ -385,9 +393,46 @@ export interface components {
             /** Markdown */
             markdown: string;
             /** Visuals */
-            visuals: components["schemas"]["Visual"][];
+            visuals: components["schemas"]["NotesVisual"][];
         };
-        /** Session */
+        /**
+         * NotesVisual
+         * @description A visual as the finished notes show it: ``path`` is its render, and ``verified`` says how
+         *     it was made (``RenderedVisual.verified``): False for the source crop shown because no redraw
+         *     passed (or the redraw failed); None if it was never rendered.
+         */
+        NotesVisual: {
+            /** Id */
+            id: string;
+            /** Moment Id */
+            moment_id: string;
+            frame: components["schemas"]["FrameRef"];
+            crop?: components["schemas"]["Box"] | null;
+            /** Caption */
+            caption: string;
+            /** Path */
+            path: string;
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /**
+             * Render As
+             * @default screenshot
+             * @enum {string}
+             */
+            render_as: "svg" | "image" | "screenshot";
+            /** Source Path */
+            source_path?: string | null;
+            /** Verified */
+            verified?: boolean | null;
+        };
+        /**
+         * Session
+         * @description A session as the API shows it. The raw error of a failed run is not part of it: it is
+         *     stored for developers only (``SessionStore.failure_detail``, ``iris show``).
+         */
         Session: {
             /** Id */
             id: string;
@@ -396,8 +441,9 @@ export interface components {
             source: components["schemas"]["SourceKind"];
             status: components["schemas"]["SessionStatus"];
             current_stage?: components["schemas"]["Stage"] | null;
-            /** Error */
-            error?: string | null;
+            /** Failure Message */
+            failure_message?: ("Iris couldn't finish making the notes. Try again; finished steps are kept." | "Iris couldn't read this file. Upload an audio or video recording." | "This recording has no sound. Upload a recording with speech." | "No audio was recorded. Check that the microphone works, then record again." | "The recorded audio couldn't be read. Record the session again." | "Iris found no speech or screen content in this recording to make notes from.") | null;
+            failure_kind?: components["schemas"]["FailureKind"] | null;
             /** Duration S */
             duration_s?: number | null;
             /**
@@ -422,19 +468,12 @@ export interface components {
          */
         SessionType: "meeting" | "lecture" | "demo";
         /**
-         * SessionUsage
-         * @description Every model call made for a session, across all runs, with totals (``usage.json``).
-         *
-         *     Cache hits make no call, so a re-run that reuses cached work adds nothing here.
+         * SessionUsageView
+         * @description ``SessionUsage`` as the API serves it (``GET /sessions/{id}/usage``).
          */
-        SessionUsage: {
+        SessionUsageView: {
             /** Prices Checked */
             prices_checked: string;
-            /**
-             * Records
-             * @default []
-             */
-            records: components["schemas"]["UsageRecord"][];
             /**
              * @default {
              *       "calls": 0,
@@ -475,6 +514,11 @@ export interface components {
             by_purpose: {
                 [key: string]: components["schemas"]["UsageTotals"];
             };
+            /**
+             * Records
+             * @default []
+             */
+            records: components["schemas"]["UsageRecordView"][];
         };
         /**
          * SourceKind
@@ -505,10 +549,10 @@ export interface components {
             speaker?: string | null;
         };
         /**
-         * UsageRecord
-         * @description One model call. Token counts are as billed; breakdowns are subsets of their totals.
+         * UsageRecordView
+         * @description A model call as the API serves it: whether it failed, never the error text.
          */
-        UsageRecord: {
+        UsageRecordView: {
             /**
              * At
              * Format: date-time
@@ -572,8 +616,11 @@ export interface components {
             cost_usd?: number | null;
             /** Unpriced */
             unpriced?: string | null;
-            /** Error */
-            error?: string | null;
+            /**
+             * Failed
+             * @default false
+             */
+            failed: boolean;
         };
         /** UsageTotals */
         UsageTotals: {
@@ -660,37 +707,6 @@ export interface components {
             input?: unknown;
             /** Context */
             ctx?: Record<string, never>;
-        };
-        /**
-         * Visual
-         * @description A figure from the session, rebuilt as a professional visual (principle 1).
-         *
-         *     Select crops the source region (``source_path``); render produces ``path``.
-         */
-        Visual: {
-            /** Id */
-            id: string;
-            /** Moment Id */
-            moment_id: string;
-            frame: components["schemas"]["FrameRef"];
-            crop?: components["schemas"]["Box"] | null;
-            /** Caption */
-            caption: string;
-            /** Path */
-            path: string;
-            /**
-             * Description
-             * @default
-             */
-            description: string;
-            /**
-             * Render As
-             * @default screenshot
-             * @enum {string}
-             */
-            render_as: "svg" | "image" | "screenshot";
-            /** Source Path */
-            source_path?: string | null;
         };
     };
     responses: never;
@@ -1178,7 +1194,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SessionUsage"];
+                    "application/json": components["schemas"]["SessionUsageView"];
                 };
             };
             /** @description Validation Error */

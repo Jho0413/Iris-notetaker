@@ -328,7 +328,6 @@ h1, h2, h3 { line-height: 1.2; letter-spacing: -0.01em; text-wrap: balance; }
   border-radius: 3px 3px 1px 1px; border: 2px solid var(--accent); background: var(--surface); cursor: pointer;
   transition: transform var(--fast) var(--ease), background var(--fast) var(--ease); }
 .ribbon-mark.done { background: var(--accent); }
-.ribbon-mark.unverified { border-color: var(--warning); background: var(--warning); }
 .ribbon-mark:hover { transform: translateY(-2px); }
 .ribbon-scale { display: flex; justify-content: space-between; color: var(--text-2);
   font-size: 0.75rem; margin-top: 2px; }
@@ -373,9 +372,6 @@ h1, h2, h3 { line-height: 1.2; letter-spacing: -0.01em; text-wrap: balance; }
 .details table { width: 100%; border-collapse: collapse; margin-top: 6px; }
 .details td { padding: 3px 0; }
 .details td:last-child { text-align: right; }
-.details .raw { font-family: var(--mono); font-size: 0.75rem; white-space: pre-wrap;
-  overflow-wrap: anywhere; background: var(--surface); border: 1px solid var(--border);
-  border-radius: var(--radius-s); padding: 8px; margin-top: 8px; color: var(--text); }
 
 .tabs { display: flex; gap: 20px; border-bottom: 1px solid var(--border); margin-bottom: 24px; }
 .tab { position: relative; height: 40px; padding: 0; border: 0; background: none; cursor: pointer;
@@ -422,8 +418,7 @@ a.figure-box:hover { border-color: var(--accent); }
 .badge { display: inline-flex; align-self: flex-start; align-items: center; gap: 4px; font-size: 0.75rem;
   font-weight: 500; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--border); }
 .badge-verified { color: var(--success); background: var(--success-soft); border-color: var(--success-line); }
-.badge-unverified { color: var(--warning); background: var(--warning-soft); border-color: var(--warning-line); }
-.badge-shot { color: var(--text-2); background: var(--surface-2); }
+.badge-shot, .badge-original { color: var(--text-2); background: var(--surface-2); }
 
 dialog.confirm { border: 1px solid var(--border); border-radius: var(--radius-m); padding: 20px;
   background: var(--surface); color: var(--text); box-shadow: var(--shadow); width: min(420px, 92vw); }

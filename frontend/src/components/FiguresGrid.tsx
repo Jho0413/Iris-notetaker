@@ -1,13 +1,18 @@
 import { sessionFileUrl } from '../api/client'
 import { formatClock, provenance, type FigureState, type Provenance } from '../session/state'
+import { PROVENANCE_LABELS } from '../session/messages'
 import { Icon } from './Icon'
+
+const BADGE_STYLES: Record<Provenance, string> = {
+  verified: 'badge-verified',
+  screenshot: 'badge-shot',
+  unverified: 'badge-original', // as plain as a screenshot: no warning, no reason
+}
 
 /** The badge for a figure's provenance; shared by the Figures tab and the notes. */
 export function ProvenanceBadge({ kind }: { kind: Provenance | undefined }) {
-  if (kind === 'unverified') return <span className="badge badge-unverified">Original crop · not verified</span>
-  if (kind === 'screenshot') return <span className="badge badge-shot">Screenshot</span>
-  if (kind === 'verified') return <span className="badge badge-verified">Verified redraw</span>
-  return null
+  if (!kind) return null
+  return <span className={`badge ${BADGE_STYLES[kind]}`}>{PROVENANCE_LABELS[kind]}</span>
 }
 
 /** Every figure selected, each in a fixed 4:3 box so nothing moves when images arrive. */

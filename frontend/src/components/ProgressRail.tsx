@@ -20,7 +20,6 @@ export function ProgressRail(props: {
   currentStage?: Stage | null
   outline: OutlineItem[]
   stream: StreamStatus
-  error?: string | null
   showProgress: boolean
 }) {
   const [expanded, setExpanded] = useState(false)
@@ -97,13 +96,12 @@ export function ProgressRail(props: {
               </tbody>
             </table>
           ) : (
-            <p>Step times are only available for runs since the backend started.</p>
+            <p>Step times are only available for runs since Iris started.</p>
           )}
           <p>
             Live updates:{' '}
-            {props.stream === 'open' ? 'connected' : props.stream === 'connecting' ? 'waiting for the backend…' : 'reconnecting…'}
+            {props.stream === 'open' ? 'connected' : props.stream === 'connecting' ? 'waiting for Iris…' : 'reconnecting…'}
           </p>
-          {props.error && <div className="raw">{props.error}</div>}
         </details>
       </div>
     </aside>

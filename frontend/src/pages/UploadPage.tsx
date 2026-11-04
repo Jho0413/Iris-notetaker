@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState, type DragEvent, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { HealthBanner } from '../components/HealthBanner'
 import { Icon } from '../components/Icon'
 import { formatBytes } from '../session/format'
 import { UploadError, uploadWithProgress } from '../session/upload'
@@ -58,9 +57,9 @@ export function UploadPage() {
       setProgress(null)
       if (err instanceof UploadError && err.kind === 'aborted') return
       if (err instanceof UploadError && err.kind === 'network') {
-        setError("The upload was interrupted. Check that the backend is running (make dev), then try again.")
+        setError("The upload was interrupted. Iris isn't responding; try again in a moment.")
       } else {
-        setError(`The backend didn't accept the recording: ${err instanceof Error ? err.message : String(err)}`)
+        setError("Iris couldn't accept this recording. Try again in a moment.")
       }
     }
   }
@@ -78,7 +77,6 @@ export function UploadPage() {
           </p>
         </div>
       </div>
-      <HealthBanner />
       <form className="form" onSubmit={onSubmit}>
         {file ? (
           <div className="file-card">

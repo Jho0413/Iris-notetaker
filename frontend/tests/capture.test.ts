@@ -89,7 +89,12 @@ test('capture errors become actionable messages', () => {
   assert.match(describeCaptureError(denied, 'microphone'), /Microphone access was blocked/)
   assert.match(describeCaptureError(new DOMException('', 'NotFoundError'), 'microphone'), /No microphone/)
   assert.match(describeCaptureError(new DOMException('', 'NotReadableError'), 'microphone'), /another app/i)
-  assert.match(describeCaptureError('weird', 'screen'), /Could not start the screen: weird/)
+  // Anything else: our own words, never the browser's message.
+  assert.equal(describeCaptureError('weird', 'screen'), "The screen couldn't be started. Try again.")
+  assert.equal(
+    describeCaptureError(new Error('SECRET internal detail'), 'microphone'),
+    "The microphone couldn't be started. Try again.",
+  )
 })
 
 test('audio format: WebM/Opus preferred, nothing if WebM is unsupported', () => {
@@ -116,7 +121,20 @@ test('ending with missing audio fails so it can be retried', async () => {
   const missing = { detail: { message: '1 audio chunks are missing', missing_audio_chunks: [3] } }
   await assert.rejects(
     endLiveSession('s1', { audioChunks: 7, allowGaps: false }, async () => respond(409, missing)),
-    (err: unknown) => err instanceof EndSessionError && /not received all the audio/.test(err.message),
+    (err: unknown) =>
+      err instanceof EndSessionError &&
+      err.message === "Iris hasn't received all the audio yet. Try again in a moment." &&
+      !err.message.includes('chunks are missing'), // the backend's text is never shown
+  )
+})
+
+test('an end request the backend refuses gives our own message, with no status code', async () => {
+  await assert.rejects(
+    endLiveSession('s1', { audioChunks: 1, allowGaps: false }, async () => respond(500, { detail: 'SECRET' })),
+    (err: unknown) =>
+      err instanceof EndSessionError &&
+      err.message === "Iris couldn't finish the session. Try again in a moment." &&
+      !/500|SECRET|HTTP/.test(err.message),
   )
 })
 
@@ -137,6 +155,9 @@ test('ending while the backend is down fails with a clear message', async () => 
     endLiveSession('s1', { audioChunks: 1, allowGaps: false }, async () => {
       throw new TypeError('Failed to fetch')
     }),
-    /Could not reach Iris/,
+    (err: unknown) =>
+      err instanceof EndSessionError &&
+      err.message === "Iris isn't responding, so the session couldn't be finished. Try again in a moment." &&
+      !/make dev|backend/.test(err.message), // no developer instructions
   )
 })

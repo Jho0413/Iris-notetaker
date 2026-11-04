@@ -35,6 +35,6 @@ export async function uploadRecording(file: File, title?: string): Promise<Sessi
   form.append('file', file)
   if (title) form.append('title', title)
   const res = await fetch('/api/sessions', { method: 'POST', body: form })
-  if (!res.ok) throw new Error(`Upload failed: ${res.status} ${await res.text()}`)
+  if (!res.ok) throw new Error('Upload failed')
   return res.json()
 }

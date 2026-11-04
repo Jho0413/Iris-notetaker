@@ -161,7 +161,7 @@ test('a failed end request can be retried', async () => {
   const live = capture(t.env)
   await live.start()
   t.failWhen((url) => url.endsWith('/end'))
-  await assert.rejects(live.stop(), /Could not reach Iris/)
+  await assert.rejects(live.stop(), /Iris isn't responding/)
   t.failWhen(() => false)
   await live.stop()
   assert.equal(t.posted('/end').length, 1)
@@ -474,7 +474,7 @@ test('frame capture failing to start leaves nothing half-started', async () => {
     },
   })
   const live = capture(t.env)
-  await assert.rejects(live.start(), /Could not start recording/)
+  await assert.rejects(live.start(), (err: unknown) => err instanceof Error && err.message === "Recording couldn't start. Try again.")
   assert.ok(t.display.stopped && t.mic.stopped)
   const unload = new Event('beforeunload', { cancelable: true })
   t.env.page.dispatchEvent(unload)

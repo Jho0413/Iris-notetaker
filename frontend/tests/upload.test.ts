@@ -56,20 +56,15 @@ test('no title is sent when none is given', async () => {
   await result
 })
 
-test('a rejection carries the backend detail', async () => {
-  const { xhr, result } = start()
-  xhr.status = 422
-  xhr.response = { detail: 'unsupported file' }
-  xhr.onload?.()
-  await assert.rejects(result, (err) => err instanceof UploadError && err.kind === 'rejected' &&
-    err.message === 'unsupported file')
-})
-
-test('a rejection without a detail reports the HTTP status', async () => {
-  const { xhr, result } = start()
-  xhr.status = 500
-  xhr.onload?.()
-  await assert.rejects(result, (err) => err instanceof UploadError && err.message === 'HTTP 500')
+test('a rejection is told apart, without the backend detail or status', async () => {
+  for (const [status, response] of [[422, { detail: 'SECRET unsupported file' }], [500, null]] as const) {
+    const { xhr, result } = start()
+    xhr.status = status
+    xhr.response = response
+    xhr.onload?.()
+    await assert.rejects(result, (err) => err instanceof UploadError && err.kind === 'rejected' &&
+      !/SECRET|422|500|HTTP/.test(err.message))
+  }
 })
 
 test('network failures and cancellation are told apart', async () => {

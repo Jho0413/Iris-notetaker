@@ -1,9 +1,10 @@
 import { useState } from 'react'
+import { PROVENANCE_LABELS } from '../session/messages'
 import { formatClock, type FigureState } from '../session/state'
 
 /**
  * The session ribbon (docs/frontend.md §5): the session's length as a line, with each figure marked
- * where it was shown. Hollow while being redrawn, filled when done, amber for an unverified crop.
+ * where it was shown. Hollow while being redrawn, filled when done (an original image too).
  */
 export function SessionRibbon(props: {
   length: number
@@ -18,12 +19,12 @@ export function SessionRibbon(props: {
       <div className="ribbon-track" role="group" aria-label="Figures by time in the session">
         {placed.map((f) => {
           const left = Math.min(100, Math.max(0, ((f.t ?? 0) / props.length) * 100))
-          const state = !f.rendered ? 'Being redrawn' : f.verified === false ? 'Original crop, not verified' : 'Ready'
+          const state = !f.rendered ? 'Being redrawn' : f.verified === false ? PROVENANCE_LABELS.unverified : 'Ready'
           return (
             <button
               key={f.id}
               type="button"
-              className={`ribbon-mark${f.rendered ? ' done' : ''}${f.verified === false ? ' unverified' : ''}`}
+              className={`ribbon-mark${f.rendered ? ' done' : ''}`}
               style={{ left: `${left}%` }}
               aria-label={`${f.caption || 'Figure'} at ${formatClock(f.t ?? 0)}. ${state}.`}
               onClick={() => props.onSelect(f)}

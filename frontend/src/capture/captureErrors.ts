@@ -36,10 +36,8 @@ export function describeCaptureError(err: unknown, device: CaptureDevice): strin
       return `Starting the ${device} was interrupted. Try again.`
     case 'CaptureError':
       return (err as Error).message
-    default: {
-      const detail = err instanceof Error ? err.message : String(err)
-      return `Could not start the ${device}: ${detail}`
-    }
+    default: // the browser's own message isn't written for users: never shown
+      return `The ${device} couldn't be started. Try again.`
   }
 }
 

@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { useBlocker, useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
+import { CaptureError } from '../capture/captureErrors'
+import { EndSessionError } from '../capture/endSession'
 import { LiveCapture } from '../capture/liveCapture'
 import { ConfirmDialog } from '../components/ConfirmDialog'
-import { HealthBanner } from '../components/HealthBanner'
 import { Icon } from '../components/Icon'
+import { UNREACHABLE } from '../session/messages'
 import { act } from '../session/request'
 import { formatClock, liveProgress } from '../session/state'
 import { useSessionStream } from '../session/useSessionStream'
@@ -16,18 +18,26 @@ import { useTitle } from '../session/useTitle'
  */
 type Phase = 'idle' | 'requesting' | 'recording' | 'stopping' | 'unfinished' | 'finishing'
 
-/** Plain words for a capture failure. Messages from the capture module are shown as they are. */
+
+/**
+ * Plain words for a capture failure. Messages from the capture module are ours and shown as they
+ * are; anything else (an unexpected error's text) never is.
+ */
 function captureError(err: unknown): string {
-  if (!(err instanceof DOMException)) {
-    return err instanceof Error ? err.message : `Recording couldn't start: ${String(err)}`
-  }
+  if (err instanceof CaptureError) return err.message
+  if (!(err instanceof DOMException)) return "Recording couldn't start. Try again."
   const name = err.name
   if (name === 'NotAllowedError') {
     return 'Screen sharing or the microphone was blocked or cancelled. Allow both for this site in your browser, then try again.'
   }
   if (name === 'NotFoundError') return 'No microphone was found. Connect one and try again.'
   if (name === 'NotReadableError') return 'The microphone or screen is in use by another app. Close it and try again.'
-  return `Recording couldn't start: ${err.message}`
+  return "Recording couldn't start. Try again."
+}
+
+/** What to say when finishing the recording failed: our own message, or a generic one. */
+function finishError(err: unknown): string {
+  return err instanceof EndSessionError ? err.message : "The recording couldn't be finished. Try again."
 }
 
 export function LivePage() {
@@ -82,7 +92,7 @@ export function LivePage() {
       .catch(() => ({ data: undefined, error: true }))
     if (apiError || !data) {
       setPhase('idle')
-      setError("Can't reach the Iris backend. Start it with make dev, then try again.")
+      setError(UNREACHABLE)
       return
     }
     if (unmounted.current) {
@@ -131,7 +141,7 @@ export function LivePage() {
     } catch (err) {
       // Kept, so finishing again retries the uploads still queued as well as the end request.
       setPhase('unfinished')
-      setError(err instanceof Error && err.message ? err.message : String(err))
+      setError(finishError(err))
       return null
     } finally {
       stopping.current = false
@@ -150,7 +160,7 @@ export function LivePage() {
         return navigate(`/sessions/${sessionId}`)
       } catch (err) {
         setPhase('unfinished')
-        setError(err instanceof Error && err.message ? err.message : String(err))
+        setError(finishError(err))
         return
       }
     }
@@ -158,7 +168,7 @@ export function LivePage() {
     // 409: the session is no longer recording, so an earlier finish request did arrive.
     if (result.ok || result.status === 409) return navigate(`/sessions/${sessionId}`)
     setPhase('unfinished')
-    setError(result.status === 0 ? "Couldn't reach the backend. Is it running?" : `The backend refused (HTTP ${result.status}).`)
+    setError(result.status === 0 ? UNREACHABLE : "Iris couldn't finish the session. Try again in a moment.")
   }
 
   async function stopAndOpen() {
@@ -211,7 +221,6 @@ export function LivePage() {
             <p className="lede">Start recording, then get on with your session. Stop when it ends and the notes follow.</p>
           </div>
         </div>
-        <HealthBanner />
         <form
           className="setup"
           onSubmit={(e) => {

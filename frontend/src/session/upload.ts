@@ -1,5 +1,6 @@
 import type { Session } from '../api/client'
 
+/** Why an upload failed. Its message is ours: never the backend's detail or the status code. */
 export class UploadError extends Error {
   readonly kind: 'network' | 'rejected' | 'aborted'
   constructor(kind: 'network' | 'rejected' | 'aborted', message: string) {
@@ -31,10 +32,9 @@ export function uploadWithProgress(
     }
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300 && xhr.response) return resolve(xhr.response)
-      const detail = (xhr.response as { detail?: unknown } | null)?.detail
-      reject(new UploadError('rejected', typeof detail === 'string' ? detail : `HTTP ${xhr.status}`))
+      reject(new UploadError('rejected', 'Iris did not accept the recording'))
     }
-    xhr.onerror = () => reject(new UploadError('network', 'The connection to the backend was lost'))
+    xhr.onerror = () => reject(new UploadError('network', 'The connection to Iris was lost'))
     xhr.onabort = () => reject(new UploadError('aborted', 'Upload cancelled'))
     signal?.addEventListener('abort', () => xhr.abort(), { once: true })
     xhr.send(form)

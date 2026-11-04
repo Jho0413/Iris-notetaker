@@ -2,9 +2,10 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { IrisEvent, Notes, Session } from '../src/api/client.ts'
 import {
-  announcement, currentSteps, emptyRun, eventKey, failureHeadline, figureList, formatClock,
-  formatDuration, libraryState, liveProgress, progressView, provenance, reduceEvents, runSeconds,
-  sessionLength, STAGE_ORDER, stageDetail, stageFromError, stageSeconds, stepLine, stepStatus,
+  announcement, currentSteps, emptyRun, eventKey, failureView, figureList, formatClock,
+  formatDuration, GENERIC_FAILURE, knownFailureMessage, libraryState, liveProgress, progressView,
+  provenance, reduceEvents, runSeconds, sessionLength, STAGE_ORDER, stageDetail, stageSeconds,
+  stepLine, stepStatus,
   transcriptSegments, uiState, type UiStateKind,
 } from '../src/session/state.ts'
 import { STAGES } from '../src/api/client.ts'
@@ -17,7 +18,7 @@ function ev(type: IrisEvent['type'], data: Record<string, unknown> = {}): IrisEv
 
 const session: Session = {
   id: 's1', title: 'Algebra', source: 'upload', status: 'processing', current_stage: null,
-  error: null, duration_s: null, created_at: '2026-11-03T12:00:00Z', updated_at: '2026-11-03T12:00:00Z',
+  failure_message: null, failure_kind: null, duration_s: null, created_at: '2026-11-03T12:00:00Z', updated_at: '2026-11-03T12:00:00Z',
 }
 
 test('stages move through running and done, with durations from event times', () => {
@@ -92,7 +93,7 @@ test('a promotion that fails is shown as failed, not as done live', () => {
     ev('status', { status: 'processing' }),
     ev('stage_started', { stage: 'select', promoted: true }),
     ev('visual_selected', { id: 'v1', caption: 'Graph', frame: { t: 4 } }),
-    ev('error', { message: 'select failed: OSError: disk full' }),
+    ev('error', { message: GENERIC_FAILURE, kind: 'general', stage: 'select' }),
   ])
   assert.equal(run.stages.select.status, 'failed')
   assert.equal(stageDetail('select', run), '1 figure')
@@ -155,8 +156,13 @@ test('finished notes and run events merge into one figure list', () => {
   const redrawn = { ...notes, visuals: [{ ...notes.visuals[0], render_as: 'svg' as const }] }
   assert.equal(figureList(emptyRun(), redrawn)[0].verified, true)
   assert.equal(provenance(figureList(emptyRun(), redrawn)[0]), 'verified')
-  // A screenshot in the notes may be a fallback crop: no label without this run's events.
+  // A screenshot in older notes may be a fallback crop: no label without this run's events.
   assert.equal(provenance(figureList(emptyRun(), notes)[0]), undefined)
+  // Notes now say how each figure was made: an original image is labelled as such, events or not.
+  const original = { ...notes, visuals: [{ ...notes.visuals[0], verified: false }] }
+  assert.equal(provenance(figureList(emptyRun(), original)[0]), 'unverified')
+  const requested = { ...notes, visuals: [{ ...notes.visuals[0], verified: true }] }
+  assert.equal(provenance(figureList(emptyRun(), requested)[0]), 'screenshot')
   const shot = reduceEvents([ev('visual_rendered', { id: 'v1', path: 'visuals/v1.jpg',
     render_as: 'screenshot', verified: true })])
   assert.equal(provenance(figureList(shot, notes)[0]), 'screenshot')
@@ -166,7 +172,8 @@ test('finished notes and run events merge into one figure list', () => {
 
 test('a new run clears the previous run, and replays of its start do not', () => {
   const run1 = [ev('status', { status: 'processing' }), ev('stage_started', { stage: 'write' }),
-    ev('error', { message: 'write failed: TimeoutError: slow' }), ev('status', { status: 'failed' })]
+    ev('error', { message: GENERIC_FAILURE, kind: 'general', stage: 'write' }),
+    ev('status', { status: 'failed' })]
   const failed = reduceEvents(run1)
   assert.equal(failed.stages.write.status, 'failed')
   assert.equal(uiState({ ...session, status: 'failed' }, failed).fromStage, 'write')
@@ -174,7 +181,7 @@ test('a new run clears the previous run, and replays of its start do not', () =>
   const start2 = ev('status', { status: 'processing' })
   const run2 = reduceEvents([...run1, start2, ev('stage_started', { stage: 'write' }), start2])
   assert.equal(run2.status, 'processing')
-  assert.equal(run2.error, undefined)
+  assert.equal(run2.failure, undefined)
   assert.equal(run2.stages.write.status, 'running')
 })
 
@@ -193,11 +200,12 @@ test('resuming after a backend restart starts clean, even without a failed statu
 
 test('a failure in a parallel group marks only the named stage failed', () => {
   const run = reduceEvents([ev('stage_started', { stage: 'write' }),
-    ev('stage_started', { stage: 'render' }), ev('error', { message: 'render failed: boom' })])
+    ev('stage_started', { stage: 'render' }),
+    ev('error', { message: GENERIC_FAILURE, kind: 'general', stage: 'render' })])
   assert.equal(run.stages.render.status, 'failed')
   assert.equal(run.stages.write.status, 'stopped')
   const unnamed = reduceEvents([ev('stage_started', { stage: 'align' }),
-    ev('error', { message: 'KeyError: x' })])
+    ev('error', { message: GENERIC_FAILURE, kind: 'general' })])
   assert.equal(unnamed.stages.align.status, 'failed')
 })
 
@@ -259,9 +267,9 @@ test('the synthesis pass is the last step, after the notes are assembled', () =>
 
 test('library rows use the stored session only', () => {
   const failed = { ...session, status: 'failed' as const, current_stage: 'ingest' as const,
-    error: 'ingest failed: NotImplementedError: browser live ingest' }
+    failure_message: GENERIC_FAILURE, failure_kind: 'general' as const }
   assert.equal(libraryState(failed).label, 'Failed · Preparing the recording')
-  assert.equal(libraryState({ ...failed, error: 'boom' }).fromStage, 'ingest')
+  assert.equal(libraryState({ ...failed, failure_message: null }).fromStage, 'ingest')
   assert.equal(libraryState({ ...session, current_stage: 'render' }).label, 'Redrawing figures')
   assert.equal(libraryState({ ...session, current_stage: 'render' }).kind, 'processing')
   assert.equal(libraryState(session).label, 'Processing')
@@ -379,12 +387,71 @@ test('formatting and error helpers', () => {
   assert.equal(formatDuration(0.84), '0.8 s')
   assert.equal(formatDuration(42.4), '42 s')
   assert.equal(formatDuration(185), '3 min 05 s')
-  assert.equal(stageFromError('select failed: x'), 'select')
-  assert.equal(stageFromError('bogus failed: x'), undefined)
-  assert.equal(failureHeadline('write failed: x'), 'Writing notes failed')
-  assert.equal(failureHeadline(null), 'Processing failed')
   const segs = [{ start: 0, end: 61.5, text: 'a' }]
   assert.equal(sessionLength(session, segs), 61.5)
   assert.equal(sessionLength(session, []), undefined)
   assert.equal(sessionLength({ ...session, duration_s: 90 }, segs), 90)
+})
+
+// --- Failures: only our own messages ------------------------------------------------------------
+
+const SECRET = 'render failed: APIConnectionError: SECRET-sk-proj-42 openai at api.openai.com'
+
+function failedSession(patch: Partial<Session>): Session {
+  return { ...session, status: 'failed', current_stage: 'render', ...patch }
+}
+
+function shown(view: object): string {
+  return JSON.stringify(view)
+}
+
+test('a general failure shows the generic message, the step and Try again', () => {
+  const view = failureView(failedSession({ failure_message: GENERIC_FAILURE, failure_kind: 'general' }), emptyRun())
+  assert.deepEqual(view, {
+    message: GENERIC_FAILURE, kind: 'general', stage: 'render', headline: 'Stopped at Redrawing figures',
+  })
+  const ui = uiState(failedSession({ failure_message: GENERIC_FAILURE, failure_kind: 'general' }), emptyRun())
+  assert.equal(ui.label, 'Failed · Redrawing figures')
+  assert.equal(ui.fromStage, 'render')
+})
+
+test('an input failure shows its own message and what to do', () => {
+  const message = 'This recording has no sound. Upload a recording with speech.'
+  const view = failureView(
+    failedSession({ current_stage: 'ingest', failure_message: message, failure_kind: 'input' }), emptyRun())
+  assert.deepEqual(view, {
+    message, kind: 'input', stage: 'ingest', headline: "Iris couldn't use this recording",
+  })
+  // From this run's error event too.
+  const run = reduceEvents([ev('status', { status: 'processing' }), ev('stage_started', { stage: 'ingest' }),
+    ev('error', { message, kind: 'input', stage: 'ingest' })])
+  assert.equal(failureView(failedSession({}), run).kind, 'input')
+  assert.equal(failureView(failedSession({}), run).message, message)
+  assert.equal(run.stages.ingest.status, 'failed')
+})
+
+test('raw text from a crafted session or event is never shown', () => {
+  // A session whose message isn't on the list (say, an old raw error) gets the generic message.
+  const crafted = failedSession({ failure_message: SECRET as Session['failure_message'], failure_kind: 'input' })
+  const view = failureView(crafted, emptyRun())
+  assert.equal(view.message, GENERIC_FAILURE)
+  assert.equal(view.kind, 'general') // an unknown message can't claim to be an input problem
+  assert.ok(!shown(view).includes('SECRET') && !shown(view).includes('openai'))
+  // An old session with the raw `error` field and nothing else.
+  const old = { ...failedSession({}), error: SECRET } as Session
+  assert.ok(!shown(failureView(old, emptyRun())).includes('SECRET'))
+  assert.ok(!shown(uiState(old, emptyRun())).includes('SECRET'))
+  // An error event carrying raw text: dropped for the generic message.
+  const run = reduceEvents([ev('stage_started', { stage: 'write' }),
+    ev('error', { message: SECRET, kind: 'input', stage: 'write' })])
+  assert.deepEqual(run.failure, { message: GENERIC_FAILURE, kind: 'general', stage: 'write' })
+  assert.ok(!shown(failureView(failedSession({}), run)).includes('SECRET'))
+  assert.equal(knownFailureMessage(undefined), GENERIC_FAILURE)
+  assert.equal(knownFailureMessage({ toString: () => SECRET }), GENERIC_FAILURE)
+  assert.equal(knownFailureMessage('__proto__'), GENERIC_FAILURE)
+})
+
+test('a failure without a known step names none', () => {
+  const view = failureView(failedSession({ current_stage: null, failure_message: GENERIC_FAILURE }), emptyRun())
+  assert.equal(view.headline, "Iris couldn't finish the notes")
 })
