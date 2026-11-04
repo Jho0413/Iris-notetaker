@@ -119,6 +119,7 @@ class Backend extends EventEmitter {
     this.ready = null // {port, token} once healthy
     this.stopping = false
     this.starting = null // the start() under way
+    this.logClosed = Promise.resolve() // settles once the last process's log is written
   }
 
   /** Where the page's API requests go, or null while the backend isn't up. */
@@ -166,8 +167,17 @@ class Backend extends EventEmitter {
       })
       child.once('exit', (code, signal) => resolve({ code, signal }))
     })
+    // The log ends once the process has exited and its output has been read to the end ('close'
+    // follows 'exit' once stdout and stderr are drained); stop() waits for that last write.
+    const closed = new Promise((resolve) => {
+      child.once('close', resolve)
+      child.once('error', resolve)
+    })
+    this.logClosed = Promise.all([exited, closed]).then(
+      ([{ code, signal }]) =>
+        new Promise((resolve) => out.end(`--- backend exited (code ${code}, signal ${signal})\n`, resolve)),
+    )
     exited.then(({ code, signal, error }) => {
-      out.end(`--- backend exited (code ${code}, signal ${signal})\n`)
       if (this.child === child) {
         this.child = null
         this.ready = null
@@ -214,6 +224,7 @@ class Backend extends EventEmitter {
     this.ready = null
     await this._terminate(this.child)
     await this.starting?.catch(() => {})
+    await this.logClosed
   }
 
   async _terminate(child) {
