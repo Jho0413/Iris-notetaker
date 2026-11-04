@@ -112,7 +112,9 @@ function SessionView({ id }: { id: string }) {
   useEffect(() => {
     if (draftKey === null) return
     let live = true
-    void fetchDraft(id).then((d) => live && d && setDraft(d))
+    void fetchDraft(id).then((d) => {
+      if (live && d !== undefined) setDraft(d)
+    })
     return () => {
       live = false
     }

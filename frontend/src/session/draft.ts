@@ -7,17 +7,23 @@ export type { NotesDraft }
  * The notes as far as they're written (`GET /api/sessions/{id}/notes/draft`): the live draft
  * while recording, then the write stage's sections while processing. Figure markers are resolved
  * by the backend, like the final notes: to the redrawn figure once it exists, to the original crop
- * until then. Null when there is no draft (yet) or the backend can't be reached.
+ * until then.
+ *
+ * Null when there is no draft: none yet, or the backend dropped it because the run is selecting
+ * figures again, so its figure ids no longer apply. Callers clear what they show. Undefined when
+ * the answer is unknown (backend unreachable, an error, an unreadable body). Callers keep what
+ * they show.
  */
 export async function fetchDraft(
   sessionId: string,
   fetchFn: typeof fetch = (input, init) => fetch(input, init),
-): Promise<NotesDraft | null> {
+): Promise<NotesDraft | null | undefined> {
   try {
     const res = await fetchFn(`/api/sessions/${encodeURIComponent(sessionId)}/notes/draft`)
-    return res.ok ? ((await res.json()) as NotesDraft) : null
+    if (res.status === 404) return null
+    return res.ok ? ((await res.json()) as NotesDraft) : undefined
   } catch {
-    return null
+    return undefined
   }
 }
 

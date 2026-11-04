@@ -295,8 +295,10 @@ Details then says "Step times are only available for runs since the backend star
   to latest** button appears.
 - Figure boxes keep a fixed 4:3 size until the image loads.
 - When the draft is refetched, the reader keeps their scroll position: sections are added and
-  the open last one rewritten at the end, never above what is being read. A failed refetch keeps
-  the draft already shown.
+  the open last one rewritten at the end, never above what is being read. A failed refetch
+  (backend unreachable or erroring) keeps the draft already shown. A 404 clears it: there is no
+  draft, or the backend dropped it because the run is selecting figures again and its figure ids
+  no longer apply.
 - The draft is fetched once when the page loads (recording or processing) and then on each
   `notes_updated` (`draftRefreshKey` in `src/session/draft.ts`); replayed events don't refetch.
 - Status changes are announced politely to screen readers; transcript chunks are not.

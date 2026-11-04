@@ -62,7 +62,9 @@ export function LivePage() {
   useEffect(() => {
     if (draftKey === null || !sessionId) return
     let live = true
-    void fetchDraft(sessionId).then((d) => live && d && setDraft(d))
+    void fetchDraft(sessionId).then((d) => {
+      if (live && d !== undefined) setDraft(d)
+    })
     return () => {
       live = false
     }

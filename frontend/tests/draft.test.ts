@@ -22,15 +22,21 @@ test('the draft is fetched from the draft endpoint', async () => {
   assert.deepEqual(urls, ['/api/sessions/s%201/notes/draft'])
 })
 
-test('no draft yet, a refusal or an unreachable backend give null', async () => {
+test('no draft gives null, so the page clears what it shows', async () => {
+  // None yet, or dropped by the backend because the run is selecting figures again.
   const missing = async () => new Response('{"detail":"no draft notes"}', { status: 404 })
   assert.equal(await fetchDraft('s1', missing as typeof fetch), null)
+})
+
+test('an unknown answer gives undefined, so the page keeps what it shows', async () => {
   const offline = async () => {
     throw new TypeError('Failed to fetch')
   }
-  assert.equal(await fetchDraft('s1', offline as typeof fetch), null)
+  assert.equal(await fetchDraft('s1', offline as typeof fetch), undefined)
+  const failing = async () => new Response('{"detail":"boom"}', { status: 500 })
+  assert.equal(await fetchDraft('s1', failing as typeof fetch), undefined)
   const garbled = async () => new Response('not json', { status: 200 })
-  assert.equal(await fetchDraft('s1', garbled as typeof fetch), null)
+  assert.equal(await fetchDraft('s1', garbled as typeof fetch), undefined)
 })
 
 test('the draft is refetched on every notes update while recording or processing', () => {
