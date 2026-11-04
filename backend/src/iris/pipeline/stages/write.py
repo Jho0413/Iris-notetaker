@@ -270,6 +270,7 @@ async def run(ctx: StageContext) -> None:
             session_type=sections[0].session_type,
             title=sections[0].title,
             markdown="\n\n".join(section_markdown(s) for s in sections),
+            parts=len(parts),
         )
         write_model(ctx.paths.notes_draft, draft)
         ctx.emit(

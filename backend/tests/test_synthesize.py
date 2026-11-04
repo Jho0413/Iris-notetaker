@@ -1,6 +1,7 @@
 """The synthesis pass: local sweep, validated edit plan, rewrites of touched sections, safety."""
 
 import json
+import shutil
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -115,7 +116,7 @@ def visual(vid: str, mid: str, t: float, source: str) -> Visual:
     )
 
 
-def setup_session(ctx: StageContext, markdown: str) -> NotesDraft:
+def setup_session(ctx: StageContext, markdown: str, parts: int | None = 2) -> NotesDraft:
     """An upload-style session: moments with frames, figures with crops, a written draft."""
     root = ctx.paths.root
     shown = [("m1", 0, SLIDE_A), ("m2", 30, SLIDE_B), ("m3", 60, SLIDE_A), ("m4", 90, SLIDE_C)]
@@ -144,7 +145,7 @@ def setup_session(ctx: StageContext, markdown: str) -> NotesDraft:
     ]
     write_model(ctx.paths.selection, Selection(visuals=visuals, contents=contents))
     draft = NotesDraft(
-        session_type=SessionType.LECTURE, title="Quarterly review", markdown=markdown
+        session_type=SessionType.LECTURE, title="Quarterly review", markdown=markdown, parts=parts
     )
     write_model(ctx.paths.notes_draft, draft)
     return draft
@@ -288,6 +289,41 @@ def test_sweep_skips_unreadable_images_and_paths_outside_the_session(ctx: StageC
     assert synthesize.sweep(ctx.paths.root, [], []) == []
 
 
+def whiteboard(lines: int) -> np.ndarray:
+    """A crop of handwritten-style working, one more line per build step."""
+    img = np.full((600, 900, 3), 245, np.uint8)
+    for i in range(lines):
+        text = ["x^2 + 6x + 5 = 0", "(x + 1)(x + 5) = 0", "x = -1", "x = -5", "check: 1 - 6 + 5"][i]
+        cv2.putText(
+            img, text, (40, 90 + 100 * i), cv2.FONT_HERSHEY_SCRIPT_SIMPLEX, 1.6, (40, 40, 40), 3
+        )
+    return img
+
+
+@pytest.mark.parametrize("same_moment", [True, False])
+def test_build_steps_of_a_figure_are_not_duplicates(tmp_path: Path, same_moment: bool):
+    visuals = []
+    for i, n in enumerate([2, 3, 4, 5]):
+        rel = save(tmp_path, f"visuals/b{n}.source.jpg", whiteboard(n))
+        mid = "m1" if same_moment else f"m{i}"
+        visuals.append(visual(f"b{n}", mid, i, rel))
+    assert synthesize.sweep(tmp_path, [], visuals) == []
+
+
+def test_look_alike_groups_are_not_transitive():
+    base = synthesize.fingerprint(SLIDE_A)
+
+    def shifted(level: float) -> synthesize.Fingerprint:
+        return synthesize.Fingerprint(base.phash, base.thumb + level, base.aspect)
+
+    # B is close to A and to C; A and C are too far apart: B joins A, C stays alone.
+    items = [("a", base, None), ("b", shifted(4), None), ("c", shifted(8), None)]
+    assert synthesize.group_same(items) == [["a", "b"]]
+    # Items from one source (figures of one moment) are never grouped.
+    assert synthesize.group_same([("a", base, "m1"), ("b", base, "m1")]) == []
+    assert synthesize.group_same([("a", base, "m1"), ("b", base, "m2")]) == [["a", "b"]]
+
+
 def test_kept_moments_ignore_rejected_ones():
     moments = [
         Moment(id=m, start=i, end=i + 1, frame=FrameRef(t=i, path="f.jpg"))
@@ -330,10 +366,12 @@ def test_plan_validation_drops_unknown_ids_and_bad_edits():
                 edit("dedupe_figure", [0], keep="nope", drops=["v3"]),  # unknown keep
                 edit("dedupe_figure", [0], keep="v1", drops=["v3", "ghost", "v1"]),
                 edit("dedupe_figure", [1], keep="v3", drops=["v2"]),  # v3 already dropped
+                edit("dedupe_figure", [1], keep="v2", drops=["v1"]),  # not look-alikes
             ]
         }
     )
-    edits = synthesize.validate_plan(plan, sections, known)
+    repeats = [Repeat(kind="figure", ids=["v1", "v3"]), Repeat(kind="slide", ids=["v2", "v1"])]
+    edits = synthesize.validate_plan(plan, sections, known, repeats)
     assert [e.kind for e in edits] == ["merge", "correct", "dedupe_figure"]
     assert edits[0].sections == [1, 2] and edits[0].context_sections == [3]
     assert edits[1].keep_visual_id is None and edits[1].drop_visual_ids == []
@@ -341,7 +379,12 @@ def test_plan_validation_drops_unknown_ids_and_bad_edits():
     assert edits[2].sections == [3] and edits[2].context_sections == [0]
     assert edits[2].drop_visual_ids == ["v3"]
     # Markers in the notes that aren't selected visuals can't be kept or dropped.
-    assert synthesize.validate_plan(plan, sections, {"v2"})[-1].kind == "correct"
+    assert synthesize.validate_plan(plan, sections, {"v2"}, repeats)[-1].kind == "correct"
+    # Without the sweep grouping them, no figure is dropped.
+    assert [e.kind for e in synthesize.validate_plan(plan, sections, known, [])][-1] == "correct"
+    # One-part notes accept only duplicate figures.
+    one = synthesize.validate_plan(plan, sections, known, repeats, one_part=True)
+    assert [e.kind for e in one] == ["dedupe_figure"]
 
 
 def test_edits_touching_shared_sections_are_rewritten_together():
@@ -397,22 +440,39 @@ async def test_only_touched_sections_are_rewritten_and_markers_resolve(ctx, monk
     assert ctx.paths.notes_md.read_text() == notes.markdown
 
 
-async def test_a_duplicate_figure_is_pointed_at_the_first(ctx, monkeypatch):
+async def test_a_duplicate_figure_is_dropped_locally_without_a_rewrite(ctx, monkeypatch):
     setup_session(ctx, NOTES)
     original = synthesize.split_sections(NOTES)
-
-    def rewrite(payload):
-        assert [s["index"] for s in payload["sections"]] == [3]
-        assert [s["index"] for s in payload["context"]] == [0]
-        text = original[3].replace("as shown before", "as in the first chart")
-        text = text.replace("\n\n[visual:v3]", "")
-        return synthesize.Rewrite(sections=[synthesize.RewrittenSection(index=3, markdown=text)])
-
-    use(monkeypatch, FakeModel([edit("dedupe_figure", [0], keep="v1", drops=["v3"])], rewrite))
+    fake = use(monkeypatch, FakeModel([edit("dedupe_figure", [0], keep="v1", drops=["v3"])]))
     notes = await finish(ctx)
+    assert [name for name, _ in fake.calls] == ["EditPlan"]
+    hint = fake.calls[0][1]["repeats"][1]["figures"][1]
+    assert hint["visual_id"] == "v3" and hint["moment_id"] == "m3" and hint["section"] == 3
     assert "visuals/v3.jpg" not in notes.markdown and "visuals/v1.jpg" in notes.markdown
     assert [v.id for v in notes.visuals] == ["v1", "v2", "v3"]  # still listed, just not placed
-    assert report(ctx).edits[0].drop_visual_ids == ["v3"]
+    result = report(ctx)
+    assert result.edits[0].drop_visual_ids == ["v3"] and result.rewritten_sections == [3]
+    synthesized = read_model(ctx.paths.notes_synthesis, SynthesizedDraft).draft.markdown
+    assert synthesize.split_sections(synthesized)[3] == original[3].replace("\n\n[visual:v3]", "")
+
+
+async def test_a_wholly_repeated_section_can_be_dropped(ctx, monkeypatch):
+    md = NOTES + "\n\n## Revenue recap\n\nRevenue grew 12% in Q1, with $r = \\frac{a}{b}$.\n"
+    setup_session(ctx, md)
+
+    def rewrite(payload):
+        assert [s["index"] for s in payload["sections"]] == [4]
+        return synthesize.Rewrite(sections=[synthesize.RewrittenSection(index=4, markdown="")])
+
+    fake = use(monkeypatch, FakeModel([edit("drop_repeat", [4], context=[0])], rewrite))
+    notes = await finish(ctx)
+    assert "Revenue recap" not in notes.markdown and "\\frac{a}{b}" in notes.markdown
+    assert report(ctx).status == "applied"
+    # Without a section that keeps the point, emptying is still refused.
+    fake.plan = [edit("drop_repeat", [4])]
+    shutil.rmtree(ctx.paths.synthesis_cache_dir)  # same inputs would reuse the cached plan
+    await finish(ctx)
+    assert "Revenue recap" in read_model(ctx.paths.notes, Notes).markdown
 
 
 @pytest.mark.parametrize(
@@ -590,23 +650,39 @@ async def test_no_edits_costs_one_call_and_changes_nothing(ctx, monkeypatch):
     assert fake.calls[0][1]["sections"][0]["markdown"].startswith("## Revenue")
 
 
-async def test_one_section_makes_no_call_and_removes_a_duplicate_figure_locally(ctx, monkeypatch):
-    md = (
-        "Intro to the chart. Décision ✓ 収益.\n\n[visual:v1]\n\nMore.\n\n[visual:v2]\n\n[visual:v3]"
-    )
-    setup_session(ctx, md)
-    fake = use(monkeypatch, FakeModel())
+async def test_one_part_notes_with_look_alike_figures_cost_one_call(ctx, monkeypatch):
+    md = "## Chart\n\nIntro. Décision ✓ 収益.\n\n[visual:v1]\n\n## More\n\nText.\n\n[visual:v2]"
+    md += "\n\n[visual:v3]"
+    setup_session(ctx, md, parts=1)
+    plan = [edit("merge", [0, 1]), edit("dedupe_figure", [1], keep="v1", drops=["v3"])]
+    fake = use(monkeypatch, FakeModel(plan))
     notes = await finish(ctx)
-    assert fake.calls == []
+    assert [name for name, _ in fake.calls] == ["EditPlan"]  # the merge is ignored: one part
+    assert fake.calls[0][1]["one_part"] is True
     assert "visuals/v3.jpg" not in notes.markdown
     assert "visuals/v1.jpg" in notes.markdown and "visuals/v2.jpg" in notes.markdown
-    assert "収益" in notes.markdown
+    assert "## More" in notes.markdown and "収益" in notes.markdown
     result = report(ctx)
-    assert result.status == "applied" and result.edits[0].drop_visual_ids == ["v3"]
+    assert result.status == "applied" and [e.kind for e in result.edits] == ["dedupe_figure"]
+    # The model may also find the look-alikes different: then nothing changes.
+    fake.plan = []
+    shutil.rmtree(ctx.paths.synthesis_cache_dir)  # same inputs would reuse the cached plan
+    assert "visuals/v3.jpg" in (await finish(ctx)).markdown
+
+
+async def test_one_part_notes_with_headings_and_no_look_alikes_make_no_call(ctx, monkeypatch):
+    setup_session(ctx, NOTES.replace("[visual:v3]", ""), parts=1)
+    for name in ("v3.source.jpg", "v3.jpg"):
+        (ctx.paths.root / "visuals" / name).unlink()
+    fake = use(monkeypatch, FakeModel())
+    await finish(ctx)
+    assert fake.calls == [] and report(ctx).status == "skipped"
+    assert report(ctx).repeats == [Repeat(kind="slide", ids=["m1", "m3"])]
 
 
 async def test_one_section_without_duplicates_is_skipped(ctx, monkeypatch):
-    setup_session(ctx, "## Only\n\nText.\n\n[visual:v1]\n\n[visual:v2]")
+    # A draft from an older version doesn't record its parts: one section counts as one part.
+    setup_session(ctx, "## Only\n\nText.\n\n[visual:v1]\n\n[visual:v2]", parts=None)
     (ctx.paths.root / "visuals/v3.source.jpg").unlink()
     (ctx.paths.root / "visuals/v3.jpg").unlink()
     fake = use(monkeypatch, FakeModel())

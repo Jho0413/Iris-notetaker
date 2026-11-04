@@ -323,28 +323,36 @@ synthesis. A re-run from `synthesize` re-polishes without rewriting anything els
   shows up as two sections.
 - **Local sweep** (OpenCV, in a thread, no model calls): the kept moments' representative frames
   and the figures' source crops are compared pairwise by a 64-bit DCT perceptual hash, then
-  confirmed on blurred thumbnails (small mean difference, almost no strongly differing pixels;
-  figures must also have about the same shape). Different text on the same slide template is not a
-  repeat. Groups of look-alikes are passed to the model as hints; unreadable images are skipped.
+  confirmed on blurred thumbnails (small mean difference, almost no strongly differing pixels).
+  Figures are compared more strictly (one added line of working is a different figure), must have
+  about the same shape, and are never paired within one moment, whose figures are separate builds
+  by design. Groups are not transitive: a slow build (A like B, B like C) doesn't chain A and C.
+  Groups of look-alikes are only hints for the model; unreadable images are skipped.
 - **Edit plan:** one call to `IRIS_SYNTHESIS_MODEL` (default `gpt-5.5`) at
   `IRIS_SYNTHESIS_PLAN_REASONING_EFFORT` (default `low`) reads every section with its markers, an
   outline and the repeats, and returns structured edits: `merge`, `correct`, `drop_repeat`,
   `dedupe_figure`. They are validated: unknown section indexes and visual ids are dropped, a merge
-  needs two sections, only `dedupe_figure` may remove markers (and the sections it rewrites are
-  the ones holding them, computed locally), and a figure can't be both kept and dropped.
+  needs two sections, only `dedupe_figure` may remove markers, only among figures the sweep
+  grouped (so image similarity alone never removes a figure, and neither does the model alone),
+  the sections it changes are the ones holding the markers (computed locally), and a figure can't
+  be both kept and dropped.
 - **Rewrite:** edits that touch overlapping sections are grouped, and each group is rewritten in
   one call (up to 4 at once, effort `IRIS_SYNTHESIS_REASONING_EFFORT`, unset: the notes effort),
-  with read-only context sections. A rewrite is accepted only if each of its visual markers is
-  still there exactly once on a line of its own (minus the dropped duplicates), no images or HTML
-  appear, its length stays between 40% and 150% (+2,000 characters) of the original, it has no
+  with read-only context sections. A group that only drops duplicate figures is applied locally
+  (the markers are removed), with no call. A rewrite is accepted only if each of its visual markers
+  is still there exactly once on a line of its own (minus the dropped duplicates), no images or
+  HTML appear, its length stays between 40% and 150% (+2,000 characters) of the original (a
+  `drop_repeat` with a section that keeps the point may shrink or empty a section), it has no
   fewer decision, action-item, open-question or uncertainty words and task items, and any math it
   drops still appears elsewhere. A rejected group keeps its sections as written; the others are
   applied. Across groups, every equation in the notes must survive, and every marker must resolve
   once to a selected visual.
-- **Cost:** notes with one section make no call (the writer saw everything at once); a duplicate
-  figure there is removed locally. Otherwise one cheap planning call, which may return no edits,
-  plus one rewrite per group of touched sections. Notes over 200,000 characters are left as
-  assembled. Plans and rewrites are cached in `synthesis_cache/`, keyed by model, prompt, schema and
+- **Cost:** write records how many parts it planned (`NotesDraft.parts`). Notes written in one part
+  make no call, since the writer saw everything at once, unless the sweep found look-alike figures;
+  then one planning call may only drop duplicates, applied locally. Notes in several parts cost one
+  cheap planning call, which may return no edits, plus one rewrite per group of touched sections.
+  A draft that doesn't record its parts (an older version) counts as one part only if it has one
+  section. Notes over 200,000 characters are left as assembled. Plans and rewrites are cached in `synthesis_cache/`, keyed by model, prompt, schema and
   inputs; a damaged entry is regenerated and an invalid result is never stored.
 - **Safety:** any failure (API error, refusal, invalid output, missing key) is logged and recorded
   in `synthesis.json` (`status: failed`, with the reason); the session still ends `done` with the

@@ -212,6 +212,9 @@ class NotesDraft(BaseModel):
     session_type: SessionType
     title: str
     markdown: str
+    # Writing parts the notes were planned in (None: unknown, e.g. a draft from an older version).
+    # Synthesis makes no edit-plan call for one-part notes: the writer saw everything at once.
+    parts: int | None = None
 
 
 class Notes(BaseModel):
