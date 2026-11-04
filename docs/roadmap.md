@@ -2,15 +2,16 @@
 
 Updated: 4 November 2026.
 
-The first milestone is a complete live MVP: someone can record a session, watch useful notes with
-professional visuals appear, and leave with a finished, downloadable document in a well-designed UI.
+The first milestone is a complete live MVP: someone can record or upload a session, see its progress
+while Iris works, and leave with finished notes with professional visuals, downloadable, in a
+well-designed UI.
 Later milestones build on feedback from using that product. They describe direction rather than
 fixed release dates; revisit their scope after the MVP is in use.
 
 ## Current state
 
-- The upload pipeline is implemented: ingest, transcribe, detect, align, select, write, render and
-  assemble.
+- The pipeline is implemented: ingest, transcribe, detect, align, select, write, render, assemble
+  and synthesize.
 - Detection records what is added within a moment (builds) and follows vertical canvas scrolling,
   so a worked example or a drawing built up in stages stays one moment with ordered steps.
 - Selection reads screens into math (LaTeX), text, tables, code and figures. Notes follow the
@@ -36,7 +37,13 @@ fixed release dates; revisit their scope after the MVP is in use.
   are final are made during the session, and at stop the live work is kept (promoted), so only
   what was still open is new work. Only finished notes are shown (the user's decision): progress
   while recording and processing, the notes once done. First real measurements are below; long live sessions are untested.
-- Library, upload, live and session screens are basic; the intended UI design is not done.
+- The designed library, upload, live and session screens are built (light and dark themes): a
+  progress view until the notes are finished, each session's model cost, and only our own failure
+  messages. Not yet checked: the whole workflow in a real browser (permission denial, interrupted
+  uploads, Firefox and Safari, real tab and system audio).
+- Errors are classified and handled in the backend: temporary ones are retried per unit, blocking
+  ones fail the run at once, and a figure whose redraw hits an API error uses its source crop. Raw
+  errors stay in the backend log and `iris show`.
 
 ## Milestone 1 — Complete live MVP
 
@@ -55,7 +62,7 @@ capture. Live functionality and a well-designed UI are part of this milestone.
 - [x] Verify each redraw against the source and brief; retry with feedback, then fall back.
 - [x] Render the notes in the UI (KaTeX, step cards, callouts, figures) and export them.
 
-### Cost tracking and controls (next)
+### Cost tracking and controls
 
 - [x] Record every model call: stage, model, input/cached/output/reasoning tokens, image tokens,
       audio seconds and latency.
@@ -90,18 +97,19 @@ capture. Live functionality and a well-designed UI are part of this milestone.
 
 ### Design and complete the UI
 
-- [ ] Document the screen flows and visual design in `docs/frontend.md`.
-- [ ] Design and implement the library, upload, live session and finished-notes screens with
+- [x] Document the screen flows and visual design in `docs/frontend.md` (and `frontend/DESIGN.md`).
+- [x] Design and implement the library, upload, live session and finished-notes screens with
       consistent typography, spacing, navigation and readable visual placement.
-- [ ] Make recording state, capture status and the stop action clear throughout a live session.
-- [ ] Show progress while recording and processing without disruptive scrolling or layout shifts;
+- [x] Make recording state, capture status and the stop action clear throughout a live session.
+- [x] Show progress while recording and processing without disruptive scrolling or layout shifts;
       only finished notes are shown (the user's decision: no live draft, no draft while processing
       and no assembled notes before polishing ends).
-- [ ] Distinguish recording, processing, polishing, finished and failed states.
-- [ ] Show progress as it happens: the current step with counts, every step and the run time
+- [x] Distinguish recording, processing, polishing, finished and failed states.
+- [x] Show progress as it happens: the current step with counts, every step and the run time
       while processing; one progress line while recording.
 - [x] Show each session's model cost and time per stage.
-- [ ] Provide useful empty/loading/error states and clear retry and export actions.
+- [x] Provide useful empty/loading/error states and clear retry and export actions. Failures show
+      only our own messages, with Try again or Upload/Record again by kind.
 - [ ] Check keyboard access, focus, contrast and layouts at common laptop widths.
 - [ ] Test the whole workflow in the browser, including permission denial and interrupted requests.
 
@@ -119,12 +127,13 @@ capture. Live functionality and a well-designed UI are part of this milestone.
 
 ### Complete live capture and ingestion
 
-- [ ] Finalize browser audio chunks into the standard audio format and build the frame index.
-- [ ] Preserve timestamps and audio/screen alignment through recording and finalization.
-- [ ] Handle microphone/screen permissions, capture cancellation and screen sharing ending.
-- [ ] Handle failed uploads and out-of-order or repeated chunks without silently losing content.
-- [ ] Flush pending audio and frames before ending a session, and retain captured data for retries.
-- [ ] State which browsers and shared-audio modes are supported and validate them manually.
+- [x] Finalize browser audio chunks into the standard audio format and build the frame index.
+- [x] Preserve timestamps and audio/screen alignment through recording and finalization.
+- [x] Handle microphone/screen permissions, capture cancellation and screen sharing ending.
+- [x] Handle failed uploads and out-of-order or repeated chunks without silently losing content.
+- [x] Flush pending audio and frames before ending a session, and retain captured data for retries.
+- [ ] State which browsers and shared-audio modes are supported and validate them manually. Stated
+      in the README; checked only in headless Chrome with fake devices so far.
 
 ### Process sessions while they happen
 
@@ -187,11 +196,11 @@ sections that are final, so these one-moment recordings write none live).
 
 - [ ] Update setup instructions, supported inputs, capture limitations and recovery guidance.
 - [ ] Complete the architecture sections needed to explain the implemented pipeline and live flow.
-- [ ] Add automated coverage for live ingestion, incremental processing and final synthesis.
+- [x] Add automated coverage for live ingestion, incremental processing and final synthesis.
 - [ ] Record a small set of real examples and their quality, timing and cost results.
 
-**Complete when:** a user can upload or record a real session, see notes with visuals updating during
-live capture, stop, read coherent finished notes, and export them through the designed UI. The
+**Complete when:** a user can upload or record a real session, see its progress while recording and
+processing, stop, read coherent finished notes, and export them through the designed UI. The
 representative real sessions have been reviewed, known limitations are documented, and recoverable
 failures have a usable retry path. A passing mocked pipeline test alone does not complete the MVP.
 
@@ -253,23 +262,19 @@ hosting, access-control and data-handling requirements.
 
 ## Immediate sequence within milestone 1
 
-1. ~~Merge the pipeline work (`feat/pipeline`) into `main`.~~ Done (PR #1), with CI and the review
-   process (PRs #2, #3).
-2. Add cost tracking and controls; confirm where the cost goes and bring sessions within budget.
-   Collect the varied recordings alongside, so costs are measured on realistic sessions.
-3. Improve the frontend: write `docs/frontend.md`, then build the designed screens with progress
-   until the notes are finished, clear states and per-session cost.
-4. Live sessions: final synthesis pass, live ingestion, then processing while recording.
-   Processing while recording is designed in architecture section 1 ("Life of a session: live")
-   and built on `feat/live-processing`: the foundation (timeline, processor, lane contracts)
-   first, then these branches from it, in parallel, each merged back by PR:
-   - `feat/live-audio`: the audio lane (decode as chunks arrive, cut at pauses, transcribe).
-   - `feat/live-screen`: the screen lane and the select lane (moments, screen reading, renders).
-   - `feat/live-draft`: the draft lane, `GET /sessions/{id}/notes/draft` and the live UI (the
-     draft and its endpoint were later removed on `feat/final-notes-only`: only finished notes
-     are shown).
-   - `feat/synthesis`: the final synthesis pass (also for long uploads).
-   Then `feat/live-finish`: promote the live outputs at stop, end-to-end checks on real
-   recordings (built; first measurements above). `feat/live-processing` merges to `main` once
-   that is done.
-5. Run end-to-end real-session checks, fix the gaps and document the MVP's supported behavior.
+Done: the pipeline (PR #1, with CI and review in #2 and #3), cost tracking (#5), the designed
+frontend (#7), live capture (#6), processing while recording with the final synthesis pass (#11),
+only finished notes with progress until then (#12, #13), session cost in the UI (#14) and error
+handling (#15).
+
+Next:
+
+1. **A varied set of real recordings** (slides, a meeting with screen sharing, a software demo,
+   code, a camera-filmed whiteboard, and a 30–90 minute session), each run live and as an upload.
+   Review the notes, and measure cost and latency per hour. Everything below depends on it.
+2. **Cost controls** from those measurements: a cap on redrawn figures per hour (screenshots beyond
+   it) and a cheaper figure-check model where quality holds. The 53 s physics recording cost $0.89,
+   almost all of it figure redraws, against a goal of $0.50–2 per hour.
+3. **The whole workflow in a real browser:** permission denial, interrupted uploads, Firefox and
+   Safari, real tab and system audio.
+4. Document the MVP's supported behaviour and known limitations.
