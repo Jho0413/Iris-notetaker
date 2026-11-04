@@ -17,6 +17,22 @@ _WHISPER_CODES = (
 )
 TRANSCRIBE_LANGUAGES = frozenset(_WHISPER_CODES.split())
 
+
+def check_language(value: object) -> str | None:
+    """A spoken-language setting as a Whisper code, or None for "auto" (the model detects it)."""
+    if value is None:
+        return None
+    code = str(value).strip().lower()
+    if code in ("", "auto"):
+        return None
+    if code not in TRANSCRIBE_LANGUAGES:
+        raise ValueError(
+            f'transcribe_language "{code}" is not a language Whisper knows: use an ISO-639-1 '
+            'code such as "en", "fr" or "ja", or "auto"'
+        )
+    return code
+
+
 # --- Model prices (cost tracking) --------------------------------------------------------------
 
 
@@ -178,17 +194,7 @@ class Settings(BaseSettings):
     @field_validator("transcribe_language", mode="before")
     @classmethod
     def _check_language(cls, value: object) -> str | None:
-        if value is None:
-            return None
-        code = str(value).strip().lower()
-        if code in ("", "auto"):
-            return None
-        if code not in TRANSCRIBE_LANGUAGES:
-            raise ValueError(
-                f'transcribe_language "{code}" is not a language Whisper knows: use an ISO-639-1 '
-                'code such as "en", "fr" or "ja", or "auto"'
-            )
-        return code
+        return check_language(value)
 
     @field_validator("api_retry_delays_s", mode="after")
     @classmethod
@@ -210,6 +216,11 @@ class Settings(BaseSettings):
     @property
     def db_path(self) -> Path:
         return self.data_dir / "iris.db"
+
+    @property
+    def user_settings_path(self) -> Path:
+        """Settings saved from the UI's Settings page (``iris/user_settings.py``)."""
+        return self.data_dir / "settings.json"
 
 
 @lru_cache

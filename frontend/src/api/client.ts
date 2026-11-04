@@ -12,6 +12,7 @@ export type Notes = components['schemas']['Notes']
 export type Transcript = components['schemas']['Transcript']
 export type IrisEvent = components['schemas']['Event']
 export type SessionUsage = components['schemas']['SessionUsageView']
+export type AppSettings = components['schemas']['AppSettings']
 
 export const STAGES: Stage[] = [
   'ingest',

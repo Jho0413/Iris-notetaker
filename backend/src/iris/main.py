@@ -13,6 +13,7 @@ from iris.events import EventBus
 from iris.jobs.runner import JobRunner
 from iris.parent import watch_parent
 from iris.store.db import SessionStore
+from iris.user_settings import apply_user_settings, load_user_settings
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -23,10 +24,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         settings.sessions_dir.mkdir(parents=True, exist_ok=True)
         store = SessionStore(settings.db_path)
         bus = EventBus()
-        app.state.settings = settings
+        # What the Settings page saved applies on top, except where a value is pinned by the
+        # environment or .env; the loaded settings are kept to tell the two apart.
+        user = load_user_settings(settings.user_settings_path)
+        current = apply_user_settings(settings, user)
+        app.state.loaded_settings = settings
+        app.state.user_settings = user
+        app.state.settings_lock = asyncio.Lock()
+        app.state.settings = current
         app.state.store = store
         app.state.bus = bus
-        app.state.runner = JobRunner(store, bus, settings)
+        app.state.runner = JobRunner(store, bus, current)
         watcher = None
         if settings.parent_pid is not None:
             watcher = asyncio.create_task(
