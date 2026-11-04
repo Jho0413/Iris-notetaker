@@ -6,6 +6,10 @@ iris run <session_id> [--from S]    re-run a session's pipeline, optionally from
 iris stage <session_id> <stage>     run one stage on its own (reads/writes session files)
 iris cost [<session_id>]            model usage and cost per stage, model and purpose
                                     (the most recent session if no id is given)
+iris replay-live <file>... [--url U] [--speed X]
+                                    dev tool: play recordings into a running backend's live API
+                                    in real time (or X times faster), as the browser would, and
+                                    report latency and cost (iris/live/replay.py)
 """
 
 import argparse
@@ -141,6 +145,11 @@ def main() -> None:
     cost = sub.add_parser("cost")
     cost.add_argument("session_id", nargs="?", help="defaults to the most recent session")
 
+    replay = sub.add_parser("replay-live", help="play recordings into a running backend's live API")
+    replay.add_argument("files", type=Path, nargs="+")
+    replay.add_argument("--url", default="http://127.0.0.1:8000", help="the backend to replay into")
+    replay.add_argument("--speed", type=float, default=1.0, help="playback speed (1 = real time)")
+
     args = parser.parse_args()
     if args.cmd == "serve":
         import uvicorn
@@ -154,6 +163,10 @@ def main() -> None:
         asyncio.run(_stage(args.session_id, args.stage))
     elif args.cmd == "cost":
         sys.exit(_cost(args.session_id))
+    elif args.cmd == "replay-live":
+        from iris.live import replay as live_replay
+
+        sys.exit(live_replay.main(args.url, args.files, args.speed))
 
 
 if __name__ == "__main__":

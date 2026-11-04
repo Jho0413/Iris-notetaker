@@ -10,11 +10,9 @@ import hashlib
 import io
 import random
 import wave
-from fractions import Fraction
 from pathlib import Path
 from types import SimpleNamespace
 
-import av
 import numpy as np
 import pytest
 
@@ -29,6 +27,7 @@ from iris.live.audio import (
     WindowFailed,
     window_cut,
 )
+from iris.live.replay import encode_webm
 from iris.llm import client as llm_client
 from iris.llm import usage
 from iris.models import EventType, SourceKind, Stage, Transcript
@@ -61,23 +60,13 @@ WORDS = [
 
 def speech_webm(words=WORDS, seconds: int = SECONDS) -> bytes:
     """Mono Opus WebM at 48 kHz: a 440 Hz tone during each word, silence between."""
-    buf = io.BytesIO()
     src_rate, n = 48_000, 960  # 20 ms frames
-    with av.open(buf, "w", format="webm", options={"cluster_time_limit": "500"}) as out:
-        stream = out.add_stream("libopus", rate=src_rate)
-        stream.layout = "mono"
-        for k in range(seconds * src_rate // n):
-            t0 = k * n / src_rate
-            loud = any(a <= t0 < b for a, b in words)
-            t = (np.arange(n) + k * n) / src_rate
-            s = (0.3 * loud * np.sin(2 * np.pi * 440 * t)).astype(np.float32).reshape(1, -1)
-            frame = av.AudioFrame.from_ndarray(s, format="flt", layout="mono")
-            frame.sample_rate = src_rate
-            frame.pts = k * n
-            frame.time_base = Fraction(1, src_rate)
-            out.mux(stream.encode(frame))
-        out.mux(stream.encode())
-    return buf.getvalue()
+    t = np.arange(seconds * src_rate) / src_rate
+    starts = (np.arange(len(t)) // n * n) / src_rate  # each 20 ms frame is loud or quiet whole
+    loud = np.zeros(len(t), bool)
+    for a, b in words:
+        loud |= (starts >= a) & (starts < b)
+    return encode_webm([(0.3 * loud * np.sin(2 * np.pi * 440 * t)).astype(np.float32)]).data
 
 
 @pytest.fixture(scope="module")

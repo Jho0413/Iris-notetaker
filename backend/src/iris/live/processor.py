@@ -3,8 +3,9 @@
 ``LiveProcessor`` runs the lanes (``iris/live/``) as asyncio tasks that share one
 ``LiveTimeline``. The API wakes a lane when its input arrives; the job runner calls ``finish``
 when recording stops, before processing the session. A failing lane is logged and marked failed
-on the timeline: the recording carries on, and stop runs the full pipeline instead of promoting
-the live outputs (architecture section 1, "Life of a session: live").
+on the timeline: the recording carries on, and stop promotes less of the live work (only the
+transcript, or nothing) and runs more of the pipeline (``live/promote.py``; architecture section
+1, "Life of a session: live").
 """
 
 import asyncio
@@ -91,8 +92,8 @@ class LiveProcessor:
         """Ask every lane to flush, wait for all of them, and return the final timeline.
 
         Lanes still running after ``finish_timeout_s`` are cancelled and marked failed, so a stuck
-        lane delays stop by at most that long; stop then runs the full pipeline. Cancelling the
-        caller cancels the lanes too.
+        lane delays stop by at most that long; stop then redoes that lane's work in the pipeline.
+        Cancelling the caller cancels the lanes too.
         """
         await self.timeline.request_end()
         for lane in self.lanes.values():

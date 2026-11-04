@@ -492,10 +492,10 @@ async def test_stop_reads_the_rest_once_the_transcript_is_done_and_waits_for_ren
     renderer.hold = {"v000001": asyncio.Event()}
     driver = Driver(ctx).start()
     await driver.close(0)
-    await driver.transcribe(0, to=100)
+    await driver.transcribe(0, to=15)  # m001 ends at 10: passes its gate (10 + 5 s pad)
     await until(lambda: renderer.started == ["v000001"])
-    await driver.close(1, 2)  # gated: the audio lane is still flushing
-    await driver.transcribe(1, to=25)
+    await driver.close(1, 2)
+    await driver.transcribe(1, to=24)  # gated: m002 needs 25, m003 35; the audio is still flushing
     await driver.selected(10)
     await driver.timeline.request_end()
     await driver.timeline.finish_lane(Lane.SCREEN)

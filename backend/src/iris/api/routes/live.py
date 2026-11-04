@@ -149,7 +149,7 @@ async def end_live(
     runner: RunnerDep,
     body: LiveEnd | None = None,
 ) -> Session:
-    """Stop recording and run the full pipeline over the whole session.
+    """Stop recording and finish the session: the live work is kept, the rest is processed.
 
     The browser flushes its uploads first and says how many audio chunks it recorded. If any are
     missing, this returns 409 with ``detail.missing_audio_chunks`` and the session keeps recording,
