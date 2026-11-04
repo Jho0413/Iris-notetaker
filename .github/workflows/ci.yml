@@ -72,3 +72,22 @@ jobs:
 
       - name: Build
         run: npm run build
+
+  desktop:
+    name: Desktop (node --test)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      # The tests use plain Node only: no Electron download, no install needed.
+      - name: Test
+        run: npm test

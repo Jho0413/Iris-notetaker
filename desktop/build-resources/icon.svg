@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- The Iris mark (pages/iris.svg) on a macOS app icon plate: 824 px with a 185 px radius. -->
+  <defs>
+    <linearGradient id="plate" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#5a53e6"/>
+      <stop offset="1" stop-color="#3d36c2"/>
+    </linearGradient>
+  </defs>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#plate)"/>
+  <circle cx="512" cy="512" r="250" fill="none" stroke="#ffffff" stroke-width="66"/>
+  <circle cx="512" cy="512" r="96" fill="#ffffff"/>
+</svg>

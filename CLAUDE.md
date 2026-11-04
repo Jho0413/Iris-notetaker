@@ -1,7 +1,7 @@
 # Iris: working agreement
 
 Read `README.md` and `docs/architecture/overview.md` first (the rest of `docs/architecture/` covers
-the pipeline, live sessions and errors). This file covers how we work.
+the pipeline, live sessions, errors and the desktop app). This file covers how we work.
 
 ## Conventions
 
@@ -41,6 +41,7 @@ CI (`.github/workflows/ci.yml`) runs the same checks and must pass before mergin
 ```sh
 cd backend && uv run ruff format . && uv run ruff check . && uv run pytest -q
 cd frontend && npm run lint && npm run typecheck && npm test && npm run build
+cd desktop && npm test
 ```
 
 If you change the API, run `make gen-api` with the backend running and commit `schema.d.ts`.

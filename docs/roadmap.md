@@ -47,10 +47,15 @@ Two tracks that can run side by side.
       screen or window from the macOS system picker with system audio, through the UI's own
       capture code. Two live recordings worked end to end. Frames stay at 1 fps with Iris in the
       background only because the app turns off Chromium's background throttling.
-- [ ] Package the backend into the app (no `uv` or repo needed): size, startup time, code
-      signing. PyAV and OpenCV each bundle their own FFmpeg (harmless today, ~17 MB unused).
-- [ ] Electron app wrapping the current UI and starting the backend itself, with an API key
-      screen and first-run permission guidance.
+- [x] Package the backend into the app (no `uv` or repo needed): a standalone Python with Iris
+      installed (`make desktop`). `Iris.app` is 581 MB (Python and Iris 327 MB, Electron 243 MB),
+      the `.dmg` 224 MB. A warm launch shows the UI in about 2.6 s. PyAV and OpenCV each bundle
+      their own FFmpeg (harmless today, ~17 MB unused). Ad-hoc signed, not notarized.
+- [x] Electron app wrapping the current UI and starting the backend itself, with an API key
+      screen: the UI over `app://iris`, `/api` forwarded with a per-launch token, the backend
+      stopping with the app (also when it crashes), one instance at a time.
+- [ ] Sign and notarize with a Developer ID, then measure the first launch of a downloaded copy
+      (about 40 s unsigned, almost all macOS checking each native library once).
 - [ ] Record any screen or window, stop, and save the `.md` with its images to a chosen folder.
 - [ ] Windows support.
 

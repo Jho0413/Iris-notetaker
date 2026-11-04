@@ -1,0 +1,35 @@
+# Packaging for the desktop app (make desktop). Unsigned for distribution: ad-hoc signed so Apple
+# Silicon runs it, for the user's own Mac. The first launch needs right-click → Open.
+appId: io.github.jho0413.iris
+productName: Iris
+directories:
+  output: dist
+  buildResources: build-resources
+files:
+  - main.cjs
+  - package.json
+  - src/**/*
+  - pages/**/*
+extraResources:
+  # Standalone Python with Iris installed (scripts/build-backend.sh).
+  - from: build/backend/python
+    to: backend/python
+  # The built UI (npm run build in frontend/), served over app://iris.
+  - from: ../frontend/dist
+    to: frontend
+electronLanguages: [en]
+npmRebuild: false
+mac:
+  target:
+    - target: dmg
+      arch: arm64
+  category: public.app-category.productivity
+  icon: build/icon.icns
+  identity: "-"
+  hardenedRuntime: false
+  gatekeeperAssess: false
+  extendInfo:
+    NSMicrophoneUsageDescription: Iris records your voice, with what is on screen, to write your notes.
+    NSAudioCaptureUsageDescription: Iris records the sound your Mac plays, such as a call or a video, to write your notes.
+dmg:
+  sign: false

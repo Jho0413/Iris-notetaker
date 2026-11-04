@@ -4,7 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # The two-letter codes Whisper knows (its tokenizer's language list), so a typo such as "jp" for
@@ -162,6 +162,18 @@ class Settings(BaseSettings):
 
     # Server
     cors_origins: list[str] = ["http://localhost:5173"]
+    # Set by the desktop app at each launch (iris/api/token.py): when set, every request must
+    # carry it in X-Iris-Token, else 401. Unset (empty): no token is needed, as with `make dev`.
+    api_token: SecretStr | None = None
+    # Set by the desktop app to its own pid (iris/parent.py): the server shuts itself down once
+    # that process is gone, checking every parent_poll_s seconds.
+    parent_pid: int | None = Field(default=None, gt=0)
+    parent_poll_s: float = Field(default=1.0, gt=0, le=60)
+
+    @field_validator("api_token", mode="before")
+    @classmethod
+    def _empty_token_is_unset(cls, value: object) -> object:
+        return None if isinstance(value, str) and not value.strip() else value
 
     @field_validator("transcribe_language", mode="before")
     @classmethod

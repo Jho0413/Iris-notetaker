@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { CaptureError } from '../src/capture/captureErrors.ts'
-import { LiveCapture } from '../src/capture/liveCapture.ts'
+import { LiveCapture, SHARED_AUDIO, sendBeaconOrKeepalive } from '../src/capture/liveCapture.ts'
 
 class FakeTrack extends EventTarget {
   kind: string
@@ -505,4 +505,88 @@ test('the recorder failing mid-recording ends only after its last chunk', async 
   assert.deepEqual(order, ['audio?seq=0', 'audio?seq=1', 'end'])
   assert.deepEqual(JSON.parse(t.posted('/end')[0].body as string), { audio_chunks: 2, allow_gaps: false })
   assert.equal(live.pendingUploads, 0)
+})
+
+test('shared audio is requested without voice processing; the mic keeps it', async () => {
+  const asked: { display: unknown[]; mic: unknown[] } = { display: [], mic: [] }
+  const tabAudio = new FakeTrack('audio')
+  const t = setup({
+    mediaDevices: {
+      getDisplayMedia: async (c: unknown) => (asked.display.push(c), stream(t.display, tabAudio)),
+      getUserMedia: async (c: unknown) => (asked.mic.push(c), stream(t.mic)),
+    },
+  })
+  const live = capture(t.env)
+  await live.start()
+  assert.deepEqual(asked.display, [
+    { video: true, audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } },
+  ])
+  assert.deepEqual(SHARED_AUDIO, { echoCancellation: false, noiseSuppression: false, autoGainControl: false })
+  assert.deepEqual(asked.mic, [{ audio: true }])
+  await live.stop()
+})
+
+for (const name of ['TypeError', 'NotSupportedError']) {
+  test(`shared audio refused (${name}): the screen alone is asked for, and recording goes on with the mic`, async () => {
+    const asked: unknown[] = []
+    const t = setup({
+      mediaDevices: {
+        getDisplayMedia: async (c: { audio?: unknown }) => {
+          asked.push(c)
+          if (c.audio) throw name === 'TypeError' ? new TypeError('audio unsupported') : new DOMException('no audio', name)
+          return stream(t.display)
+        },
+        getUserMedia: async () => stream(t.mic),
+      },
+    })
+    const live = capture(t.env)
+    await live.start()
+    assert.deepEqual(asked, [{ video: true, audio: SHARED_AUDIO }, { video: true }])
+    assert.equal(FakeRecorder.created.length, 1)
+    await live.stop()
+  })
+}
+
+test('a refused screen share is not retried without audio', async () => {
+  const asked: unknown[] = []
+  const t = setup({
+    mediaDevices: {
+      getDisplayMedia: async (c: unknown) => {
+        asked.push(c)
+        throw new DOMException('Permission denied', 'NotAllowedError')
+      },
+      getUserMedia: async () => stream(t.mic),
+    },
+  })
+  await assert.rejects(capture(t.env).start(), CaptureError)
+  assert.equal(asked.length, 1)
+})
+
+test('sendBeaconOrKeepalive: a beacon where allowed, else a keepalive POST', async () => {
+  const body = new Blob(['{"allow_gaps":true}'], { type: 'application/json' })
+  const fetched: { url: string; init: RequestInit }[] = []
+  const fetchFn = async (url: string, init: RequestInit) => fetched.push({ url, init })
+
+  const beacons: string[] = []
+  assert.equal(sendBeaconOrKeepalive('/api/live/s1/end', body, (url) => (beacons.push(url), true), fetchFn), true)
+  assert.deepEqual(beacons, ['/api/live/s1/end'])
+  assert.equal(fetched.length, 0)
+
+  const refuse = () => {
+    throw new TypeError('Beacons are only supported over HTTP(S).')
+  }
+  assert.equal(sendBeaconOrKeepalive('/api/live/s1/end', body, refuse, fetchFn), true)
+  assert.equal(fetched.length, 1)
+  assert.equal(fetched[0].url, '/api/live/s1/end')
+  assert.equal(fetched[0].init.method, 'POST')
+  assert.equal(fetched[0].init.keepalive, true)
+  assert.equal(fetched[0].init.body, body)
+  assert.deepEqual(fetched[0].init.headers, { 'content-type': 'application/json' })
+
+  // A failing fetch is swallowed: the page is going away.
+  const failing = async () => {
+    throw new TypeError('Failed to fetch')
+  }
+  assert.equal(sendBeaconOrKeepalive('/x', body, refuse, failing), true)
+  await new Promise((r) => setTimeout(r, 0))
 })
