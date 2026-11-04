@@ -23,11 +23,17 @@ Files (``store/layout.py``):
   are current while a stage is still running.
 
 Appends are serialized by a lock, so concurrent stages in this process never interleave lines.
+
+The session list shows each session's cost from ``running_total``: totals kept in memory per log
+and advanced by reading only the lines appended since the last read, so listing stays cheap
+however long the logs grow, and is still read from the source of truth (current mid-stage, and
+across re-runs, which only ever append).
 """
 
 import io
 import logging
 import math
+import os
 import re
 import threading
 import time
@@ -41,7 +47,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from iris.config import PRICES_CHECKED, ModelPrice
-from iris.models import SessionUsage, Stage, UsageRecord, UsageTotals
+from iris.models import Session, SessionUsage, Stage, UsageRecord, UsageTotals
 from iris.store.layout import write_model
 
 if TYPE_CHECKING:
@@ -315,7 +321,9 @@ def read_records(log_path: Path) -> list[UsageRecord]:
         return []
     records = []
     with _lock:
-        lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+        # Split on "\n" only: JSON leaves U+2028, NEL and the like unescaped inside strings,
+        # and ``str.splitlines`` would cut a record there (``running_total`` reads the same way).
+        lines = log_path.read_text(encoding="utf-8", errors="replace").split("\n")
     for n, line in enumerate(lines, 1):
         if not line.strip():
             continue
@@ -371,3 +379,78 @@ def _add(totals: UsageTotals, r: UsageRecord) -> None:
 def read_usage(log_path: Path) -> SessionUsage:
     """A session's usage so far, from its call log."""
     return summarize(read_records(log_path))
+
+
+# --- Running totals for the session list ----------------------------------------------------------
+
+
+@dataclass
+class _Tally:
+    file: tuple[int, int]  # (device, inode): a replaced log is counted again from the start
+    offset: int  # bytes of complete lines counted so far
+    totals: UsageTotals
+
+
+_tallies: dict[Path, _Tally] = {}
+_tally_lock = threading.Lock()  # separate from ``_lock``, so appends never wait for a reader
+
+
+def running_total(log_path: Path) -> UsageTotals:
+    """A session's totals so far, reading only what was appended since the last call.
+
+    Only complete lines are counted: a line still being written (by this process or another,
+    e.g. ``iris process``) waits for the next call, and one cut off by a crash is skipped once
+    ``append_record`` starts a new line after it. Unreadable lines are skipped, as in
+    ``read_records``. A log that shrank or was replaced is counted again from the start.
+    """
+    with _tally_lock:
+        try:
+            with log_path.open("rb") as f:
+                return _advance(log_path, f)
+        except FileNotFoundError:
+            _tallies.pop(log_path, None)
+            return UsageTotals()
+        except OSError:
+            # One unreadable log must not break the session list: that session shows no cost.
+            # Its tally is dropped, so it is counted from the start once it can be read.
+            log.warning("could not read %s", log_path, exc_info=True)
+            _tallies.pop(log_path, None)
+            return UsageTotals()
+
+
+def _advance(log_path: Path, f: io.BufferedReader) -> UsageTotals:
+    """Count the complete lines appended to the open log since its tally was last advanced."""
+    st = os.fstat(f.fileno())
+    file = (st.st_dev, st.st_ino)
+    tally = _tallies.get(log_path)
+    if tally is None or tally.file != file or st.st_size < tally.offset:
+        tally = _tallies[log_path] = _Tally(file, 0, UsageTotals())
+    if st.st_size > tally.offset:
+        f.seek(tally.offset)
+        data = f.read(st.st_size - tally.offset)  # read in full before anything is counted
+        complete = data.rfind(b"\n") + 1  # 0: no complete line yet
+        for line in data[:complete].split(b"\n"):
+            if not line.strip():
+                continue
+            try:
+                _add(tally.totals, UsageRecord.model_validate_json(line))
+            except ValueError:
+                log.warning("skipping unreadable line in %s", log_path)
+        tally.offset += complete
+    return tally.totals.model_copy()
+
+
+def with_cost(session: Session, log_path: Path) -> Session:
+    """The session with its model cost so far (``cost_usd`` stays None until a call is made)."""
+    totals = running_total(log_path)
+    if not totals.calls:
+        return session
+    return session.model_copy(
+        update={"cost_usd": totals.cost_usd, "cost_partial": totals.unpriced_calls > 0}
+    )
+
+
+def forget_total(log_path: Path) -> None:
+    """Drop the running total kept for a log (its session was deleted)."""
+    with _tally_lock:
+        _tallies.pop(log_path, None)

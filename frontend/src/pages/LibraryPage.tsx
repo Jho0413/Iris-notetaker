@@ -2,8 +2,10 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api, type Session } from '../api/client'
 import { ConfirmDialog } from '../components/ConfirmDialog'
+import { CostText } from '../components/CostText'
 import { Icon } from '../components/Icon'
 import { StatusChip } from '../components/StatusChip'
+import { sessionCost } from '../session/cost'
 import { formatWhen, SOURCE_LABEL } from '../session/format'
 import { UNREACHABLE } from '../session/messages'
 import { act } from '../session/request'
@@ -104,6 +106,7 @@ export function LibraryPage() {
               <div className="skeleton sk-line" style={{ width: `${60 - i * 6}%` }} />
               <div className="skeleton sk-line" style={{ width: '70%' }} />
               <div className="skeleton sk-line meta" style={{ width: '60%' }} />
+              <div className="skeleton sk-line meta" style={{ width: '50%', marginLeft: 'auto' }} />
               <span />
             </div>
           ))}
@@ -149,12 +152,16 @@ export function LibraryPage() {
             <span role="columnheader" className="meta">
               Created
             </span>
+            <span role="columnheader" className="meta cost-cell">
+              Cost
+            </span>
             <span role="columnheader">
               <span className="sr-only">Actions</span>
             </span>
           </div>
           {load.sessions.map((s) => {
             const state = libraryState(s)
+            const cost = sessionCost(s)
             return (
               <div className="library-row" role="row" key={s.id}>
                 <div className="title-cell" role="cell">
@@ -168,6 +175,9 @@ export function LibraryPage() {
                 </div>
                 <div className="meta num" role="cell">
                   {formatWhen(s.created_at)}
+                </div>
+                <div className="meta cost-cell" role="cell">
+                  {cost && <CostText cost={cost} />}
                 </div>
                 <div className="row-actions" role="cell">
                   {state.kind === 'finished' && (

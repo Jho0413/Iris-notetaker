@@ -9,7 +9,9 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, PlainTextResponse
 
 from iris.api.deps import PathsDep, RunnerDep, SessionDep, SettingsDep, StoreDep
+from iris.config import Settings
 from iris.export import export_markdown_embedded
+from iris.llm.usage import forget_total, with_cost
 from iris.models import Notes, Session, SourceKind, Stage, Transcript
 from iris.sources.upload import save_upload
 from iris.store.layout import read_model, session_paths
@@ -19,9 +21,18 @@ router = APIRouter(prefix="/sessions", tags=["sessions"])
 SERVABLE_DIRS = ("frames", "visuals")
 
 
+def _with_cost(session: Session, settings: Settings) -> Session:
+    return with_cost(session, session_paths(settings.sessions_dir, session.id).usage_log)
+
+
 @router.get("", response_model=list[Session])
-def list_sessions(store: StoreDep) -> list[Session]:
-    return store.list()
+def list_sessions(store: StoreDep, settings: SettingsDep) -> list[Session]:
+    """Every session, newest first, each with its model cost so far.
+
+    Costs come from running totals that read only what each call log gained since the last
+    list, so polling the list while sessions process stays cheap (``iris.llm.usage``).
+    """
+    return [_with_cost(s, settings) for s in store.list()]
 
 
 @router.post("", response_model=Session, status_code=201)
@@ -42,8 +53,8 @@ async def create_upload_session(
 
 
 @router.get("/{session_id}", response_model=Session)
-def get_session(session: SessionDep) -> Session:
-    return session
+def get_session(session: SessionDep, settings: SettingsDep) -> Session:
+    return _with_cost(session, settings)
 
 
 @router.delete("/{session_id}", status_code=204)
@@ -55,17 +66,23 @@ async def delete_session(session: SessionDep, paths: PathsDep, store: StoreDep, 
     store.delete(session.id)
     await runner.live.cancel(session.id)  # stop live processing before its files go
     await asyncio.to_thread(shutil.rmtree, paths.root, ignore_errors=True)
+    forget_total(paths.usage_log)
 
 
 @router.post("/{session_id}/run", response_model=Session)
 async def rerun(
-    session: SessionDep, store: StoreDep, runner: RunnerDep, from_stage: Stage | None = None
+    session: SessionDep,
+    store: StoreDep,
+    runner: RunnerDep,
+    settings: SettingsDep,
+    from_stage: Stage | None = None,
 ) -> Session:
     """Re-run the pipeline, optionally from a given stage (never lose a session: principle 4)."""
     if runner.is_running(session.id):
         raise HTTPException(409, "session is already processing")
     runner.start(session.id, from_stage)
-    return store.get(session.id)  # type: ignore[return-value]
+    session = store.get(session.id)  # type: ignore[assignment]
+    return await asyncio.to_thread(_with_cost, session, settings)
 
 
 @router.get("/{session_id}/transcript", response_model=Transcript)

@@ -100,7 +100,7 @@ capture. Live functionality and a well-designed UI are part of this milestone.
 - [ ] Distinguish recording, processing, polishing, finished and failed states.
 - [ ] Show progress as it happens: the current step with counts, every step and the run time
       while processing; one progress line while recording.
-- [ ] Show each session's model cost and time per stage.
+- [x] Show each session's model cost and time per stage.
 - [ ] Provide useful empty/loading/error states and clear retry and export actions.
 - [ ] Check keyboard access, focus, contrast and layouts at common laptop widths.
 - [ ] Test the whole workflow in the browser, including permission denial and interrupted requests.

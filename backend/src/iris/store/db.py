@@ -100,7 +100,9 @@ class SessionStore:
 
     @staticmethod
     def _session(row: sqlite3.Row) -> Session:
-        fields = {k: row[k] for k in SESSION_FIELDS}
+        # Only stored fields: the cost is added by the API from the call log (``with_cost``).
+        columns = set(row.keys())  # (``in row`` would test the values)
+        fields = {k: row[k] for k in SESSION_FIELDS if k in columns}
         # A stored message no longer on the list (reworded since, or written by mistake) is served
         # as the generic one, never as is, and never breaks reading the session list.
         if fields["failure_message"] is not None:
