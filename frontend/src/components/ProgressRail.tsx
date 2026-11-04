@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import type { Stage } from '../api/client'
+import { detailRows, type Cost, type StepCost } from '../session/cost'
 import type { StreamStatus } from '../session/useSessionStream'
-import {
-  doneLive, formatDuration, stageSeconds, STAGE_ORDER, stepLine, stepStatus, type RunState,
-} from '../session/state'
+import { STAGE_ORDER, stepLine, stepStatus, type RunState } from '../session/state'
+import { CostText } from './CostText'
 import type { OutlineItem } from './NotesView'
 import { StepList } from './StepList'
 
@@ -22,6 +22,10 @@ export function ProgressRail(props: {
   stream: StreamStatus
   error?: string | null
   showProgress: boolean
+  /** The session's model cost so far; null shows nothing (no calls yet, or not loaded). */
+  cost: Cost | null
+  /** Cost per step that made model calls, in pipeline order. */
+  stepCosts: StepCost[]
 }) {
   const [expanded, setExpanded] = useState(false)
   const { run } = props
@@ -35,9 +39,7 @@ export function ProgressRail(props: {
     : running.length
       ? running.map((s) => stepLine(s, run)).join(' · ')
       : props.finished ? 'All steps finished' : 'Progress'
-  const timed = STAGE_ORDER.filter(
-    (s) => doneLive(run.stages[s]) || stageSeconds(run.stages[s]) !== undefined,
-  )
+  const rows = detailRows(run, props.stepCosts)
 
   return (
     <aside className={`rail${expanded ? ' expanded' : ''}`} aria-label="Session progress and details">
@@ -75,29 +77,35 @@ export function ProgressRail(props: {
           </>
         )}
 
-        {/* Cost slot (docs/frontend.md §7): built once the cost-tracking API is merged. */}
+        {/* Always laid out, so the rail doesn't move when the first cost arrives. */}
+        <p className="cost-slot" style={props.cost ? undefined : { visibility: 'hidden' }} aria-hidden={!props.cost}>
+          <span>Cost</span> {props.cost && <CostText cost={props.cost} />}
+        </p>
 
         <details className="details">
           <summary>Details</summary>
-          {timed.length > 0 ? (
+          {rows.length > 0 && (
             <table>
               <tbody>
-                {timed.map((s) => (
-                  <tr key={s}>
-                    <td>
-                      <code>{s}</code>
-                    </td>
+                {rows.map((row) => (
+                  <tr key={row.key}>
+                    <td>{row.label}</td>
                     <td className="num">
-                      {doneLive(run.stages[s])
-                        ? 'while recording'
-                        : formatDuration(stageSeconds(run.stages[s])!)}
+                      {row.cost && <CostText cost={row.cost} />}
+                      {row.cost && row.time && ' · '}
+                      {row.time}
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
-          ) : (
-            <p>Step times are only available for runs since the backend started.</p>
+          )}
+          {!rows.some((r) => r.time) && <p>Step times are only available for runs since the backend started.</p>}
+          {props.cost?.partial && (
+            <p>
+              Costs marked ≥ leave out model calls Iris has no price for yet, so the real cost may
+              be higher.
+            </p>
           )}
           <p>
             Live updates:{' '}

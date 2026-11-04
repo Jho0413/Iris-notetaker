@@ -30,6 +30,7 @@ from iris.main import create_app
 from iris.models import (
     Renders,
     Selection,
+    SessionStatus,
     SessionUsage,
     SourceKind,
     Stage,
@@ -39,7 +40,7 @@ from iris.models import (
 from iris.pipeline.context import StageContext
 from iris.pipeline.stages import render, select
 from iris.store.db import SessionStore
-from iris.store.layout import SessionPaths, read_model, write_model
+from iris.store.layout import SessionPaths, read_model, session_paths, write_model
 
 SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 9 9"><rect width="9"/></svg>'
 IMAGE = b"\x89PNG generated"
@@ -228,6 +229,185 @@ def test_pipeline_records_every_call_and_cached_rerun_costs_nothing(tmp_path, fa
         assert again.records == result.records
         assert read_model(summary, SessionUsage) == result
         assert again.total.cost_usd == pytest.approx(total)
+        # The session list's cost matches, before and after the cached re-run.
+        listed = next(s for s in client.get("/api/sessions").json() if s["id"] == sid)
+        assert listed["cost_usd"] == pytest.approx(total)
+        assert listed["cost_partial"] is False
+
+
+# --- Cost in the session list --------------------------------------------------------------------
+
+
+def call(cost: float | None = 0.25, stage: Stage = Stage.RENDER) -> UsageRecord:
+    return UsageRecord(
+        at=datetime.now(UTC),
+        stage=stage,
+        purpose="x",
+        operation="op",
+        model="gpt-5.5" if cost is not None else "mystery-1",
+        latency_s=1,
+        cost_usd=cost,
+        unpriced=None if cost is not None else "no price for model 'mystery-1'",
+    )
+
+
+@pytest.fixture
+def api(tmp_path):
+    settings = Settings(data_dir=tmp_path / "data", openai_api_key="test", render_attempts=1)
+    with TestClient(create_app(settings)) as client:
+        yield client, settings
+
+
+def new_session(client: TestClient, settings: Settings) -> tuple[str, SessionPaths]:
+    sid = client.app.state.store.create("Talk", SourceKind.UPLOAD).id
+    return sid, session_paths(settings.sessions_dir, sid).ensure()
+
+
+def listed(client: TestClient, sid: str) -> dict:
+    return next(s for s in client.get("/api/sessions").json() if s["id"] == sid)
+
+
+def test_session_list_cost_counts_priced_calls_and_flags_unpriced(api):
+    client, settings = api
+    sid, paths = new_session(client, settings)
+    for record in (call(0.25), call(None), call(0.5, Stage.WRITE)):
+        usage.append_record(paths.usage_log, record)
+    row = listed(client, sid)
+    assert row["cost_usd"] == pytest.approx(0.75)  # never a guess for the unpriced call
+    assert row["cost_partial"] is True
+    one = client.get(f"/api/sessions/{sid}").json()
+    assert (one["cost_usd"], one["cost_partial"]) == (row["cost_usd"], True)
+
+
+def test_session_list_cost_is_none_without_model_calls(api):
+    client, settings = api
+    sid, paths = new_session(client, settings)
+    assert (listed(client, sid)["cost_usd"], listed(client, sid)["cost_partial"]) == (None, False)
+    paths.usage_log.touch()  # an empty log is no calls either
+    assert listed(client, sid)["cost_usd"] is None
+    usage.append_record(paths.usage_log, call(0.0))  # a call that cost nothing (e.g. it failed)
+    assert listed(client, sid)["cost_usd"] == 0
+
+
+def test_session_list_cost_adds_a_reruns_calls_reading_only_new_lines(api, monkeypatch):
+    client, settings = api
+    sid, paths = new_session(client, settings)
+    for _ in range(3):
+        usage.append_record(paths.usage_log, call(0.25))
+    assert listed(client, sid)["cost_usd"] == pytest.approx(0.75)
+
+    parsed = []
+    validate = UsageRecord.model_validate_json
+    monkeypatch.setattr(
+        UsageRecord, "model_validate_json", lambda data: parsed.append(data) or validate(data)
+    )
+    usage.append_record(paths.usage_log, call(0.5))  # a re-run that made a new call
+    assert listed(client, sid)["cost_usd"] == pytest.approx(1.25)
+    assert len(parsed) == 1  # only the appended line was read
+    assert listed(client, sid)["cost_usd"] == pytest.approx(1.25)  # nothing appended
+    assert len(parsed) == 1
+
+
+async def test_session_list_cost_is_current_while_processing(api, fake):
+    client, settings = api
+    sid, paths = new_session(client, settings)
+    client.app.state.store.update(sid, status=SessionStatus.PROCESSING, current_stage=Stage.SELECT)
+    ctx = StageContext(session_id=sid, source=SourceKind.UPLOAD, paths=paths, settings=settings)
+    with usage.recording(ctx, Stage.SELECT):
+        await get_openai(settings).chat.completions.parse(model="gpt-5.5", messages=[])
+        assert not paths.usage.exists()  # usage.json waits for the stage to end
+        row = listed(client, sid)
+        assert row["status"] == "processing"
+        assert row["cost_usd"] == pytest.approx(CHAT_COST)
+
+        # A line still being written (e.g. by another process) waits until it is complete.
+        line = call(0.5).model_dump_json()
+        with paths.usage_log.open("a") as f:
+            f.write(line[:20])
+        assert listed(client, sid)["cost_usd"] == pytest.approx(CHAT_COST)
+        with paths.usage_log.open("a") as f:
+            f.write(line[20:] + "\n")
+        assert listed(client, sid)["cost_usd"] == pytest.approx(CHAT_COST + 0.5)
+
+
+def test_session_list_cost_skips_damage_and_recounts_a_replaced_log(api, caplog):
+    client, settings = api
+    sid, paths = new_session(client, settings)
+    usage.append_record(paths.usage_log, call(0.25))
+    with paths.usage_log.open("a") as f:
+        f.write('{"at": "2026-11-03T00:00:00Z", "purp')  # cut off by a crash
+    assert listed(client, sid)["cost_usd"] == pytest.approx(0.25)
+    usage.append_record(paths.usage_log, call(0.5))  # starts a new line after the damage
+    with caplog.at_level(logging.WARNING, "iris.llm.usage"):
+        assert listed(client, sid)["cost_usd"] == pytest.approx(0.75)
+    assert "skipping unreadable line" in caplog.text
+    assert listed(client, sid)["cost_usd"] == pytest.approx(0.75)  # counted once
+
+    paths.usage_log.unlink()  # replaced by a shorter log
+    usage.append_record(paths.usage_log, call(0.1))
+    assert listed(client, sid)["cost_usd"] == pytest.approx(0.1)
+
+
+def test_deleting_a_session_forgets_its_running_total(api):
+    client, settings = api
+    sid, paths = new_session(client, settings)
+    for _ in range(3):
+        usage.append_record(paths.usage_log, call(0.25))
+    assert listed(client, sid)["cost_usd"] == pytest.approx(0.75)
+    assert client.delete(f"/api/sessions/{sid}").status_code == 204
+    # A new session folder's log at the same path is counted from zero, not added to the old one.
+    paths.ensure()
+    for _ in range(3):
+        usage.append_record(paths.usage_log, call(0.1))
+    assert usage.running_total(paths.usage_log).cost_usd == pytest.approx(0.3)
+
+
+def test_one_unreadable_log_does_not_break_the_session_list(api, caplog):
+    client, settings = api
+    broken, broken_paths = new_session(client, settings)
+    broken_paths.usage_log.mkdir()  # opening it fails with an OSError other than "not found"
+    fine, fine_paths = new_session(client, settings)
+    usage.append_record(fine_paths.usage_log, call(0.25))
+    with caplog.at_level(logging.WARNING, "iris.llm.usage"):
+        response = client.get("/api/sessions")
+    assert response.status_code == 200
+    rows = {s["id"]: s for s in response.json()}
+    assert rows[broken]["cost_usd"] is None
+    assert rows[fine]["cost_usd"] == pytest.approx(0.25)
+    assert "could not read" in caplog.text
+
+
+def test_a_read_error_after_opening_the_log_does_not_break_the_session_list(api, monkeypatch):
+    client, settings = api
+    sid, paths = new_session(client, settings)
+    usage.append_record(paths.usage_log, call(0.25))
+
+    def failing_read(*_args):
+        raise OSError(5, "Input/output error")
+
+    monkeypatch.setattr(usage.os, "fstat", failing_read)
+    assert listed(client, sid)["cost_usd"] is None  # the list still loads
+    monkeypatch.undo()
+    assert listed(client, sid)["cost_usd"] == pytest.approx(0.25)  # counted once readable
+
+
+def test_list_and_usage_agree_on_records_with_unicode_line_separators(api):
+    client, settings = api
+    sid, paths = new_session(client, settings)
+    for cost, error in ((0.25, "model said: a\u2028b"), (0.5, "c\x85d\u2029e"), (0.125, None)):
+        usage.append_record(paths.usage_log, call(cost).model_copy(update={"error": error}))
+    rail = client.get(f"/api/sessions/{sid}/usage").json()["total"]
+    assert rail["calls"] == 3 and rail["cost_usd"] == pytest.approx(0.875)
+    assert listed(client, sid)["cost_usd"] == pytest.approx(rail["cost_usd"])
+
+
+def test_rerun_returns_the_sessions_cost(api, monkeypatch):
+    client, settings = api
+    sid, paths = new_session(client, settings)
+    usage.append_record(paths.usage_log, call(0.25))
+    monkeypatch.setattr(client.app.state.runner, "start", lambda *_args, **_kwargs: None)
+    body = client.post(f"/api/sessions/{sid}/run").json()
+    assert (body["cost_usd"], body["cost_partial"]) == (0.25, False)
 
 
 # --- Recording ------------------------------------------------------------------------------------

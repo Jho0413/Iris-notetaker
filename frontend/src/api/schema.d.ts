@@ -28,7 +28,13 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List Sessions */
+        /**
+         * List Sessions
+         * @description Every session, newest first, each with its model cost so far.
+         *
+         *     Costs come from running totals that read only what each call log gained since the last
+         *     list, so polling the list while sessions process stays cheap (``iris.llm.usage``).
+         */
         get: operations["list_sessions_api_sessions_get"];
         put?: never;
         /**
@@ -410,6 +416,13 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+            /** Cost Usd */
+            cost_usd?: number | null;
+            /**
+             * Cost Partial
+             * @default false
+             */
+            cost_partial: boolean;
         };
         /**
          * SessionStatus

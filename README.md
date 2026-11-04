@@ -87,6 +87,7 @@ uv run iris cost [<session_id>]             # model calls and cost per stage, mo
 Every model call is recorded in the session's `usage.json` (also `GET /api/sessions/{id}/usage`):
 tokens, images, audio seconds, latency and cost from the price table in `config.py`. Calls to
 models missing from the table are reported as unpriced, not guessed. Cached work costs nothing.
+The UI shows each session's cost in the library and the session rail, per step in its Details.
 
 ### Live capture
 

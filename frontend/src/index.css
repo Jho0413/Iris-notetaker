@@ -230,7 +230,7 @@ h1, h2, h3 { line-height: 1.2; letter-spacing: -0.01em; text-wrap: balance; }
 .library { border: 1px solid var(--border); border-radius: var(--radius-m); background: var(--surface);
   overflow: hidden; }
 .library-head, .library-row { display: grid; align-items: center; gap: 16px;
-  grid-template-columns: minmax(0, 1fr) 260px 150px 150px; padding: 0 16px; }
+  grid-template-columns: minmax(0, 1fr) 260px 130px 88px 150px; padding: 0 16px; }
 .library-head { height: 36px; background: var(--surface-2); border-bottom: 1px solid var(--border);
   color: var(--text-2); font-size: 0.8125rem; font-weight: 500; }
 .library-row { position: relative; min-height: 56px; border-bottom: 1px solid var(--border); }
@@ -244,6 +244,7 @@ h1, h2, h3 { line-height: 1.2; letter-spacing: -0.01em; text-wrap: balance; }
 .library-row:has(.title-link:focus-visible) { outline: 2px solid var(--accent); outline-offset: -2px; }
 .library-row .sub { color: var(--text-2); font-size: 0.8125rem; }
 .library-row .meta { color: var(--text-2); }
+.library .cost-cell { text-align: right; white-space: nowrap; }
 .library-row .row-actions { display: flex; justify-content: flex-end; gap: 4px; position: relative;
   z-index: 1; }
 .choices { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; max-width: 640px;
@@ -358,11 +359,13 @@ h1, h2, h3 { line-height: 1.2; letter-spacing: -0.01em; text-wrap: balance; }
 .outline a { display: block; padding: 4px 0; color: var(--text-2); text-decoration: none;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .outline a:hover { color: var(--text); }
-.cost-slot { color: var(--text-2); font-size: 0.8125rem; }
+.cost-slot { display: flex; justify-content: space-between; align-items: baseline; gap: 8px;
+  margin: 8px 0 0; color: var(--text-2); font-size: 0.8125rem; font-weight: 600; }
+.cost-slot .num { color: var(--text); font-weight: 500; }
 .details { font-size: 0.8125rem; color: var(--text-2); margin-top: 8px; border-top: 1px solid var(--border);
   padding-top: 8px; }
-/* Alone in the rail (until the notes are finished): no rule above it. */
-.rail-full > .details:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
+/* First in the rail until the notes are finished (no progress list or outline above it). */
+.rail-full > .cost-slot:first-child { margin-top: 0; }
 .details summary { cursor: pointer; color: var(--text); font-weight: 500; padding: 4px 0;
   list-style: none; display: flex; align-items: center; gap: 6px; }
 .details summary::-webkit-details-marker { display: none; }
