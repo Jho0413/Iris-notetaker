@@ -113,6 +113,7 @@ or rejected `OPENAI_API_KEY`, exhausted credit or a missing model fails the run 
 - **Screen Recording or the microphone:** macOS asks the first time you record. If you said no,
   allow Iris in System Settings → Privacy & Security → Screen & System Audio Recording (or
   Microphone), then quit and reopen Iris. Each rebuild is a new ad-hoc signature, so after
-  `make desktop` macOS may ask again (and may ask once to let Iris read its Keychain item).
+  `make desktop` macOS may ask again, and asks to let Iris use "Iris Safe Storage" in your
+  keychain: choose **Always Allow**, or it asks at every launch.
 - **Starting is slow the first time:** macOS checks each native library of a new install once
   (about 40 s was measured for a copy never run on that Mac); later launches take about 3 s.

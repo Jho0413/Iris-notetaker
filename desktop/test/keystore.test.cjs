@@ -38,7 +38,7 @@ test('save encrypts, load decrypts, file is private', () => {
   const store = createKeyStore({ safeStorage: fakeSafeStorage(), file })
   assert.equal(store.has(), false)
   assert.equal(store.load(), null)
-  store.save(`${KEY}\n`)
+  assert.equal(store.save(`${KEY}\n`), KEY) // returns the key as stored
   assert.equal(store.has(), true)
   assert.equal(store.load(), KEY)
   assert.ok(!fs.readFileSync(file).toString().includes(KEY), 'the key is never on disk in plain text')

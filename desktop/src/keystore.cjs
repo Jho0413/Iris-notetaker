@@ -27,7 +27,8 @@ function createKeyStore({ safeStorage, file }) {
       return fs.existsSync(file)
     },
 
-    /** Encrypt and store a key that passed checkApiKey. Throws if encryption isn't available. */
+    /** Encrypt and store a key that passed checkApiKey; returns the key as stored (trimmed).
+     * Throws if encryption isn't available. */
     save(key) {
       const checked = checkApiKey(key)
       if (!checked.ok) throw new Error(checked.error)
@@ -39,6 +40,7 @@ function createKeyStore({ safeStorage, file }) {
       const tmp = `${file}.tmp`
       fs.writeFileSync(tmp, data, { mode: 0o600 })
       fs.renameSync(tmp, file)
+      return checked.key
     },
 
     /** The stored key, or null if there is none or it can't be decrypted (then ask again). */

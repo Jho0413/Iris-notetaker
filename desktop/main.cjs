@@ -57,6 +57,13 @@ function log(line) {
 // ---- state -----------------------------------------------------------------------------------
 
 const keystore = createKeyStore({ safeStorage, file: path.join(USER_DATA, 'openai-key.bin') })
+// Decrypted once per launch: each decrypt reads the Keychain, and an app whose signature changed
+// (every rebuild, for an ad-hoc signed app) makes macOS ask the user each time.
+let apiKey = null
+function currentKey() {
+  apiKey ??= keystore.load()
+  return apiKey
+}
 const backend = new Backend({
   command: (port, token) =>
     backendCommand({
@@ -67,7 +74,7 @@ const backend = new Backend({
       port,
       token,
       parentPid: process.pid,
-      apiKey: keystore.load(),
+      apiKey: currentKey(),
       env: process.env,
     }),
   logFile: path.join(LOGS, 'backend.log'),
@@ -220,7 +227,7 @@ ipcMain.handle('iris-key:has', (event) => {
 ipcMain.handle('iris-key:save', (event, key) => {
   if (!fromKeyScreen(event)) throw new Error('not allowed')
   try {
-    keystore.save(key)
+    apiKey = keystore.save(key)
   } catch (err) {
     return { ok: false, error: err.message }
   }
@@ -467,7 +474,7 @@ if (!app.requestSingleInstanceLock()) {
     buildMenu()
 
     // The packaged app needs a key; in development the repo's backend/.env can supply it.
-    if (PACKAGED && !keystore.load()) {
+    if (PACKAGED && !currentKey()) {
       if (keystore.has()) log('[key] the stored key could not be decrypted: asking again')
       if (!(await askForKey('first'))) return app.quit()
     }
