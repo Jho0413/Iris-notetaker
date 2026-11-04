@@ -68,9 +68,11 @@ whole request body ahead of the socket. Server-sent events stream event by event
   on `app://` (`sendBeaconOrKeepalive` in `frontend/src/capture/liveCapture.ts`).
 - **XHR upload progress never fires** through a custom protocol, so the upload page shows
   "Uploading…" until the response. Locally, 500 MB takes about a second.
-- **Electron cancels a `beforeunload` close silently**, without a dialog. The live page asks
-  before unloading while it records, so the main process shows its own "Stop recording?" dialog
-  (`will-prevent-unload`).
+- **Electron cancels a `beforeunload` close silently**, without a dialog. Two pages ask before
+  unloading: the live page while it records, and Settings with an unsaved change. So the main
+  process shows its own dialog (`will-prevent-unload`), worded by page in `src/unload.cjs`: "Stop
+  recording?" for the live page, "Leave without saving?" (or "Quit without saving?", which cancels
+  the quit if kept) otherwise.
 - **Capture errors** name Iris and the System Settings pane instead of the browser
   (`describeCaptureError`, when the page's protocol is `app:`).
 
