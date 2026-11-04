@@ -22,17 +22,21 @@ the whole search range plus ``CONFIRM_S`` is decoded: the cut never falls in the
 decoded audio, where a pause can't be confirmed yet, and it depends only on the audio, never on
 how much had arrived, so a lane restarted after a backend restart reproduces the same cuts and
 reuses its cached windows. Cuts are made in decoded audio, so a chunk edge is never a cut. At stop
-the rest of the audio is cut the same way and the last window ends where the audio ends.
+the rest of the audio is cut the same way and the last window ends where the audio ends
+(stretched by up to ``CONFIRM_S`` rather than leave a tail shorter than ``MIN_TAIL_S``).
 
 Windows are transcribed with ``transcribe.transcribe_chunk``, at most
 ``live_transcribe_concurrency`` at once (a window starts only while fewer than that many are
-uncommitted), each retried ``WINDOW_ATTEMPTS`` times before the lane fails. Each window is
+uncommitted), each attempted up to ``WINDOW_ATTEMPTS`` times before the lane fails. Each window is
 prompted with the tail of the text *committed when it is sent*: normally that is the previous
 window (windows end ~20 s apart and take a few seconds to transcribe), while a backlog (a slow API,
 or stop) is worked through concurrently with slightly older context. The cache entry records the
 prompt and which window it was taken from, and is reused only if its audio, model and prompt
 match the text now committed there; a damaged entry is regenerated. Windows commit strictly in
-order. Memory stays bounded: window samples are read back from ``live/audio.pcm``.
+order. The transcript's language is that of the first window with speech (the timeline keeps the
+first language published, and silent windows are often misdetected), in the timeline and
+``live/transcript.json`` alike. Memory stays bounded: window samples are read back from
+``live/audio.pcm``.
 """
 
 import asyncio
@@ -42,7 +46,7 @@ import io
 import logging
 import threading
 import time
-from collections import Counter, deque
+from collections import deque
 from collections.abc import Callable
 from pathlib import Path
 from typing import Literal
@@ -75,6 +79,7 @@ PROMPT_CHARS = 500  # tail of the committed transcript sent as a window's prompt
 WINDOW_ATTEMPTS = 3  # transcription attempts per window before the lane fails
 RETRY_DELAY_S = 2.0  # times the attempt number, between attempts
 MIN_API_S = 0.1  # the API rejects shorter audio; a shorter final window is committed empty
+MIN_TAIL_S = 1.0  # at stop, a shorter last window joins the one before (whisper hallucinates)
 PROGRESS_S = 5.0  # while catching up, the decoder reports progress at least this often
 
 
@@ -328,6 +333,19 @@ class WindowFailed(RuntimeError):
     pass
 
 
+def _within(segments: list[TranscriptSegment], start: float, end: float) -> list[TranscriptSegment]:
+    """Segments clamped into their window and sorted. ``offset + duration`` can land a float ulp
+    past the window end, and a segment past it would precede the next window's first one."""
+    clamped = []
+    for seg in segments:
+        a = min(max(seg.start, start), end)
+        b = min(max(seg.end, a), end)
+        if (a, b) != (seg.start, seg.end):
+            seg = seg.model_copy(update={"start": a, "end": b})
+        clamped.append(seg)
+    return sorted(clamped, key=lambda seg: (seg.start, seg.end))
+
+
 def _load_window(path: Path) -> CachedWindow | None:
     if not path.exists():
         return None
@@ -349,17 +367,17 @@ class AudioLane(LiveLane):
         self.min_len = max(1, int(s.live_window_min_s * self.rate))
         self.max_len = int(s.live_window_max_s * self.rate)
         self.confirm = int(CONFIRM_S * self.rate)
+        self.min_tail = int(MIN_TAIL_S * self.rate)
         self.concurrency = s.live_transcribe_concurrency
         self._changed = asyncio.Event()  # something the main loop acts on may have happened
         self._commits = asyncio.Condition()
         self._committed = 0  # windows committed, in order
         self._segment_counts: list[int] = []  # published segments after each committed window
-        self._languages: Counter[str] = Counter()
         self._kept: set[str] = set()  # cache files of the committed windows
         self._client = None
 
     async def run(self) -> None:
-        if self.max_len * 2 + 1024 > transcribe.API_MAX_UPLOAD_BYTES:
+        if (self.max_len + self.confirm) * 2 + 1024 > transcribe.API_MAX_UPLOAD_BYTES:
             raise ValueError("live_window_max_s exceeds the transcription API's upload limit")
         paths = self.ctx.paths
         paths.live_transcript_windows_dir.mkdir(parents=True, exist_ok=True)
@@ -443,7 +461,10 @@ class AudioLane(LiveLane):
             rel = await asyncio.to_thread(
                 window_cut, samples, self.rate, self.min_len, self.max_len
             )
-            return cut_at + rel
+            cut = cut_at + rel
+            if final and decoded - cut < self.min_tail:
+                return decoded  # only possible when decoded < cut_at + max_len + confirm
+            return cut
         return decoded if final else None
 
     def _read(self, start: int, end: int) -> np.ndarray:
@@ -488,12 +509,13 @@ class AudioLane(LiveLane):
         if duration >= MIN_API_S:
             result = await self._transcribe(i, samples, offset, duration, prompt)
             language = result.language
-            segments = sorted(
-                (
+            segments = _within(
+                [
                     seg.model_copy(update={"start": seg.start + offset, "end": seg.end + offset})
                     for seg in result.segments
-                ),
-                key=lambda seg: (seg.start, seg.end),
+                ],
+                offset,
+                end / self.rate,
             )
         window = CachedWindow(
             index=i,
@@ -557,16 +579,19 @@ class AudioLane(LiveLane):
     async def _commit(self, window: CachedWindow) -> None:
         """Commit the next window: ``live/transcript.json`` and the event first, then the timeline,
         so a lane that sees the watermark move finds the file already written."""
-        segments = sorted(window.segments, key=lambda seg: (seg.start, seg.end))
-        if window.language:
-            self._languages[window.language] += 1
-        transcript = self._transcript([*self.timeline.segments, *segments])
+        segments = _within(window.segments, window.start, window.end)
+        # The first window with speech sets the language (the timeline keeps the first one).
+        language = window.language if segments else None
+        transcript = Transcript(
+            language=self.timeline.language or language,
+            segments=[*self.timeline.segments, *segments],
+        )
         await asyncio.to_thread(write_model, self.ctx.paths.live_transcript, transcript)
         self.ctx.emit(
             EventType.TRANSCRIPT_CHUNK,
             {"chunk": window.index, "segments": [s.model_dump() for s in segments]},
         )
-        await self.timeline.publish_transcript(segments, window.end, window.language)
+        await self.timeline.publish_transcript(segments, window.end, language)
         self._committed += 1
         self._segment_counts.append(len(self.timeline.segments))
         start, end = round(window.start * self.rate), round(window.end * self.rate)
@@ -575,17 +600,12 @@ class AudioLane(LiveLane):
             self._commits.notify_all()
         self._changed.set()
 
-    def _transcript(self, segments: list[TranscriptSegment]) -> Transcript:
-        # Most common language over the windows, as the transcribe stage picks it.
-        language = self._languages.most_common(1)[0][0] if self._languages else None
-        return Transcript(language=language, segments=segments)
-
     async def _finish(self, decoded: int) -> None:
         """After the last commit: publish the end of the audio and drop windows of earlier cuts."""
         await self.timeline.publish_transcript([], decoded / self.rate)
         if not self._committed:
-            transcript = self._transcript([])
-            await asyncio.to_thread(write_model, self.ctx.paths.live_transcript, transcript)
+            empty = Transcript(segments=[])
+            await asyncio.to_thread(write_model, self.ctx.paths.live_transcript, empty)
         for old in self.ctx.paths.live_transcript_windows_dir.glob("*.json"):
             if old.name not in self._kept:
                 old.unlink(missing_ok=True)

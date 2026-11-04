@@ -21,8 +21,17 @@ import pytest
 from iris.config import Settings
 from iris.live import Lane, LiveProcessor, LiveTimeline
 from iris.live import audio as audio_lane
-from iris.live.audio import PROMPT_CHARS, WINDOW_ATTEMPTS, AudioLane, WindowFailed, window_cut
-from iris.models import EventType, SourceKind, Transcript
+from iris.live.audio import (
+    CONFIRM_S,
+    PROMPT_CHARS,
+    WINDOW_ATTEMPTS,
+    AudioLane,
+    WindowFailed,
+    window_cut,
+)
+from iris.llm import client as llm_client
+from iris.llm import usage
+from iris.models import EventType, SourceKind, Stage, Transcript
 from iris.pipeline.context import StageContext
 from iris.pipeline.stages.transcribe import encode_wav, transcribe_chunk
 from iris.sources.browser_live import (
@@ -136,8 +145,18 @@ class FakeTranscriber:
 class Run:
     """One lane over a session folder, with its timeline and the events it emitted."""
 
-    def __init__(self, paths: SessionPaths, s: Settings, fake: FakeTranscriber, monkeypatch):
-        monkeypatch.setattr(audio_lane, "get_openai", lambda _: fake.client)
+    def __init__(
+        self,
+        paths: SessionPaths,
+        s: Settings,
+        fake: FakeTranscriber,
+        monkeypatch,
+        metered: bool = False,
+    ):
+        if metered:  # through the real get_openai, which records usage
+            monkeypatch.setattr(llm_client, "_client", lambda _key: fake.client)
+        else:
+            monkeypatch.setattr(audio_lane, "get_openai", lambda _: fake.client)
         monkeypatch.setattr(audio_lane, "RETRY_DELAY_S", 0.0)
         self.events: list[tuple[EventType, dict]] = []
         self.ctx = StageContext(
@@ -347,10 +366,14 @@ async def test_transcript_commits_while_recording_and_stop_flushes_the_rest(
     half = len(chunks) // 2
     run.store(chunks, range(half))
     await run.until(lambda: run.timeline.transcribed_to > 0)  # before stop
+    await asyncio.sleep(0.3)  # let the lane cut everything it can from these chunks
     early = run.timeline.transcribed_to
     assert run.chunk_events()
-    # Nothing is cut in the last moments of what has been decoded.
-    assert early <= len(live_pcm(paths)) / RATE - audio_lane.CONFIRM_S + 1e-3
+    # Nothing is cut in the last moments of what has been decoded, and the rest waits for more
+    # audio: a cut needs the whole range up to the maximum window, plus CONFIRM_S, decoded.
+    decoded = len(live_pcm(paths)) / RATE
+    assert early <= decoded - CONFIRM_S + 1e-3
+    assert decoded - early < 2.5 + CONFIRM_S
 
     run.store(chunks, range(half, len(chunks)))
     await run.stop()
@@ -581,3 +604,124 @@ async def test_a_changed_prompt_invalidates_the_cached_window(
     # Window 0, and window 1 whose prompt was window 0's text; window 2's prompt (window 1's
     # text, whose audio is unchanged) still matches.
     assert [c["sha1"] for c in again.calls] == [c["sha1"] for c in first.calls[:2]]
+
+
+async def test_segments_past_the_window_end_stay_inside_it(
+    tmp_path: Path, paths: SessionPaths, webm: bytes, monkeypatch
+):
+    # Whisper can return trailing text ("Thank you.") timed at or after the end of the audio;
+    # transcribe_chunk clamps it to the duration, and offset + duration may exceed the window
+    # end by a float ulp. Committing must not then fail as out of order.
+    fake = FakeTranscriber()
+    original = fake.create
+
+    async def create(**kwargs):
+        result = await original(**kwargs)
+        d = result["segments"][0]["end"]
+        result["segments"].append({"start": d + 0.02, "end": d + 0.5, "text": "Thank you."})
+        return result
+
+    fake.client.audio.transcriptions.create = create
+    run = Run(
+        paths, settings(tmp_path, live_window_min_s=0.7, live_window_max_s=1.9), fake, monkeypatch
+    )
+    chunks = split(webm, 2000)
+    run.store(chunks, range(len(chunks)))
+    await run.stop()
+    starts = [seg.start for seg in run.timeline.segments]
+    assert starts == sorted(starts)
+    bounds = run.windows()
+    for i, (a, b) in enumerate(bounds):
+        in_window = run.timeline.segments[2 * i : 2 * i + 2]
+        assert all(a - 1e-9 <= seg.start <= seg.end <= b + 1e-9 for seg in in_window)
+
+
+async def test_the_language_is_the_first_spoken_windows_in_timeline_and_file(
+    tmp_path: Path, paths: SessionPaths, webm: bytes, monkeypatch
+):
+    fake = FakeTranscriber()
+    original = fake.create
+
+    async def create(**kwargs):
+        result = await original(**kwargs)
+        if len(fake.calls) == 1:  # window 0: nothing recognised, language misdetected
+            return {"language": "welsh", "segments": [{"start": 0, "end": 1, "text": " "}]}
+        return result
+
+    fake.client.audio.transcriptions.create = create
+    run = Run(paths, settings(tmp_path), fake, monkeypatch)
+    chunks = split(webm, 2000)
+    run.store(chunks, range(len(chunks)))
+    await run.stop()
+    assert run.timeline.language == "english"
+    assert read_model(paths.live_transcript, Transcript).language == "english"
+
+
+async def test_at_most_the_configured_number_of_windows_are_transcribed_at_once(
+    tmp_path: Path, paths: SessionPaths, webm: bytes, monkeypatch
+):
+    in_flight, peak = 0, 0
+
+    async def gate(n: int) -> None:
+        nonlocal in_flight, peak
+        in_flight += 1
+        peak = max(peak, in_flight)
+        await asyncio.sleep(0.05)
+        in_flight -= 1
+
+    fake = FakeTranscriber(gate)
+    run = Run(paths, settings(tmp_path, live_transcribe_concurrency=2), fake, monkeypatch)
+    chunks = split(webm, 2000)
+    run.store(chunks, range(len(chunks)))  # a backlog: every window is ready almost at once
+    await run.stop()
+    assert peak == 2
+    assert run.chunk_events() == list(range(len(run.windows())))
+
+
+async def test_calls_are_recorded_under_the_transcribe_stage(
+    tmp_path: Path, paths: SessionPaths, webm: bytes, monkeypatch
+):
+    fake = FakeTranscriber()
+    run = Run(paths, settings(tmp_path), fake, monkeypatch, metered=True)
+    chunks = split(webm, 2000)
+    run.store(chunks, range(len(chunks)))
+    await run.stop()
+    records = usage.read_usage(paths.usage_log).records
+    assert len(records) == len(fake.calls) > 0
+    assert {r.stage for r in records} == {Stage.TRANSCRIBE}
+    assert {r.model for r in records} == {"whisper-1"}
+
+
+async def test_another_model_invalidates_the_cache_and_stale_windows_are_removed(
+    tmp_path: Path, paths: SessionPaths, webm: bytes, monkeypatch
+):
+    chunks = split(webm, 2000)
+    run = Run(paths, settings(tmp_path), FakeTranscriber(), monkeypatch)
+    run.store(chunks, range(len(chunks)))
+    await run.stop()
+    names = {p.name for p in paths.live_transcript_windows_dir.iterdir()}
+    stale = paths.live_transcript_windows_dir / "99_0_1000.json"  # e.g. from other cuts
+    stale.write_text("{}")
+
+    again = FakeTranscriber()
+    s = settings(tmp_path, transcribe_model="gpt-4o-transcribe")
+    await Run(paths, s, again, monkeypatch).stop()
+    assert len(again.calls) == len(names)  # every window paid for again with the new model
+    assert all(c["prompt"] is None for c in again.calls)  # this model gets no prompt
+    assert {p.name for p in paths.live_transcript_windows_dir.iterdir()} == names
+
+
+async def test_at_stop_a_very_short_tail_joins_the_last_window(
+    tmp_path: Path, paths: SessionPaths, monkeypatch
+):
+    s = settings(tmp_path)
+    lane = AudioLane(StageContext("s1", SourceKind.BROWSER_LIVE, paths, s), LiveTimeline())
+    speech = (8000 * np.sin(np.arange(RATE * 4) * 0.2)).astype("<i2")  # no pause anywhere
+    paths.live_pcm.parent.mkdir(parents=True, exist_ok=True)
+    speech.tofile(paths.live_pcm)
+    tail = int(2.5 * RATE) + RATE // 2  # 0.5 s past the maximum window
+    assert await lane._next_cut(0, tail, final=False) is None  # can't confirm a cut yet
+    assert await lane._next_cut(0, tail, final=True) == tail  # one window, not 2.5 s + 0.5 s
+    longer = int(2.5 * RATE) + int(1.5 * RATE)
+    assert await lane._next_cut(0, longer, final=False) == int(2.5 * RATE)
+    assert await lane._next_cut(0, longer, final=True) == int(2.5 * RATE)
