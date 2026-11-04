@@ -543,6 +543,25 @@ async def test_a_restarted_lane_reuses_its_frozen_parts(tmp_path, notes):
     assert notes.calls == calls
 
 
+async def test_parts_rewritten_once_the_language_is_known_never_lower_the_count(tmp_path, notes):
+    ctx, events = make_ctx(tmp_path)
+    tl = audio_only()
+    task = start_lane(ctx, tl, notes)
+    # Parts close before the language is known (silent first windows, say)...
+    await tl.publish_transcript([seg(i) for i in range(20)], transcribed_to=200)
+    closed = draft.plan(tl.transcript(), tl.selection(), BUDGET, tl.horizon)
+    assert len(closed) >= 2
+    await eventually(lambda: notes.calls == len(closed))
+    # ...then it is: every payload changes, so every part is written again for stop to reuse.
+    await tl.publish_transcript([seg(20)], transcribed_to=210, language="en")
+    await eventually(lambda: notes.calls >= 2 * len(closed))
+    await idle(0.1)
+    assert {p["language"] for p in notes.payloads[len(closed) :]} == {"en"}
+    counts = live_counts(events)
+    assert counts == sorted(set(counts))  # it only grows
+    await stop(tl, task)
+
+
 async def test_no_evidence_means_no_calls_and_a_prompt_stop(tmp_path, notes):
     ctx, events = make_ctx(tmp_path)
     tl = audio_only()

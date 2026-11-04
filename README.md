@@ -164,8 +164,8 @@ backend/src/iris/
                   session files, write their own)
     __init__.py   stage registry and PLAN (stage order; groups run concurrently)
   live/           processing while a live session records: audio, screen, select and draft
-                  (notes sections ahead of stop) lanes over a shared timeline; promote.py (live work promoted at stop);
-                  replay.py (`iris replay-live`, a dev tool)
+                  (notes sections ahead of stop) lanes over a shared timeline; promote.py
+                  (live work promoted at stop); replay.py (`iris replay-live`, a dev tool)
   jobs/runner.py  runs a session's PLAN as an asyncio task, publishes progress
   store/          SQLite session index + on-disk session folder layout (layout.py lists every file)
   llm/            OpenAI client; usage.py records every model call and its cost (usage.json)

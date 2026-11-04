@@ -185,9 +185,11 @@ class DraftLane(LiveLane):
         self._sections[payload] = section
 
     def _announce(self, frozen: list[str]) -> None:
-        """Emit the number of sections written so far, when it changed."""
+        """Emit the number of sections written so far, when it grew. (Payloads can change, e.g.
+        when the language becomes known, so the count can fall back while parts are rewritten;
+        the progress line keeps the most it has said.)"""
         done = sum(p in self._sections for p in frozen)
-        if done == self._announced:
+        if done <= self._announced:
             return
         self._announced = done
         self.ctx.emit(
