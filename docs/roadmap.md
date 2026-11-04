@@ -28,7 +28,9 @@ fixed release dates; revisit their scope after the MVP is in use.
   `iris cost`) with tokens, images, audio seconds, latency and cost from a price table. About
   $2.50 was spent in one day of development runs before tracking; the figure checks, screen
   reading, notes and SVG calls on `gpt-5.5` are suspected to be the main driver, alongside image
-  generation. This now needs measuring on real sessions.
+  generation. The first real measurements (below, under "Process sessions while they happen")
+  point the same way: the physics recording with 3 figures cost $0.89, against $0.12 for the
+  algebra one with none. A per-step breakdown on varied sessions is still needed.
 - Long transcripts are processed in sections and joined, then a final synthesis pass consolidates
   them (merges split worked examples, applies later corrections, drops repeats, deduplicates
   figures). Its quality on real long sessions is untested.
@@ -39,8 +41,9 @@ fixed release dates; revisit their scope after the MVP is in use.
   while recording and processing, the notes once done. First real measurements are below; long live sessions are untested.
 - The designed library, upload, live and session screens are built (light and dark themes): a
   progress view until the notes are finished, each session's model cost, and only our own failure
-  messages. Not yet checked: the whole workflow in a real browser (permission denial, interrupted
-  uploads, Firefox and Safari, real tab and system audio).
+  messages. Checked so far in headless Chrome with fake devices; not yet with real devices in a
+  headed browser (permission denial, interrupted uploads, Firefox and Safari, real tab and
+  system audio).
 - Errors are classified and handled in the backend: temporary ones are retried per unit, blocking
   ones fail the run at once, and a figure whose redraw hits an API error uses its source crop. Raw
   errors stay in the backend log and `iris show`.
@@ -130,7 +133,10 @@ capture. Live functionality and a well-designed UI are part of this milestone.
 - [x] Finalize browser audio chunks into the standard audio format and build the frame index.
 - [x] Preserve timestamps and audio/screen alignment through recording and finalization.
 - [x] Handle microphone/screen permissions, capture cancellation and screen sharing ending.
-- [x] Handle failed uploads and out-of-order or repeated chunks without silently losing content.
+- [ ] Handle failed uploads and out-of-order or repeated chunks without silently losing content.
+      Done for audio (never dropped while the tab is open) and for out-of-order or repeated chunks.
+      Not yet for frames: during a backend outage of more than about 2 minutes, frames beyond 120
+      queued are dropped to bound memory, and nobody is told. Still to do: report it.
 - [x] Flush pending audio and frames before ending a session, and retain captured data for retries.
 - [ ] State which browsers and shared-audio modes are supported and validate them manually. Stated
       in the README; checked only in headless Chrome with fake devices so far.
@@ -270,11 +276,14 @@ handling (#15).
 Next:
 
 1. **A varied set of real recordings** (slides, a meeting with screen sharing, a software demo,
-   code, a camera-filmed whiteboard, and a 30–90 minute session), each run live and as an upload.
+   code, a camera-filmed whiteboard, an architecture-diagram walkthrough and a 30–90 minute
+   session), each run live and as an upload.
    Review the notes, and measure cost and latency per hour. Everything below depends on it.
 2. **Cost controls** from those measurements: a cap on redrawn figures per hour (screenshots beyond
    it) and a cheaper figure-check model where quality holds. The 53 s physics recording cost $0.89,
-   almost all of it figure redraws, against a goal of $0.50–2 per hour.
-3. **The whole workflow in a real browser:** permission denial, interrupted uploads, Firefox and
-   Safari, real tab and system audio.
+   most of it after stop, where redrawing its 3 figures took 221 of the 242 s (the table has no
+   per-step cost). The goal is $0.50–2 per hour.
+3. **The whole workflow with real devices in a headed browser** (so far only headless Chrome
+   with fake devices): permission denial, interrupted uploads, Firefox and Safari, real tab and
+   system audio. Also report frames dropped during a long backend outage.
 4. Document the MVP's supported behaviour and known limitations.

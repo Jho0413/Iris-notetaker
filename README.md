@@ -121,7 +121,9 @@ What happens when capture is interrupted:
   is processed.
 - **Backend unreachable:** uploads are retried. Stop waits up to 30 seconds, then shows an error.
   The page then shows **Recording stopped**: **Try again** resends what is still queued, then ends
-  the session. Nothing captured is discarded while the tab stays open.
+  the session. Audio is never discarded while the tab stays open. Screen frames are queued up to
+  120 (about 2 minutes); during a longer outage the oldest queued frames are dropped to bound
+  memory, so the notes may miss what was on screen then.
 - **Closing the tab while recording:** the browser asks for confirmation. If you leave, the session
   is processed with what arrived. If the browser crashes instead, the session stays `recording`;
   finish it with
