@@ -14,7 +14,7 @@ export type Segment = Transcript['segments'][number]
 export type StepStatus = 'pending' | 'running' | 'done' | 'failed' | 'stopped'
 
 export const STAGE_ORDER: readonly Stage[] = [
-  'ingest', 'transcribe', 'detect', 'align', 'select', 'write', 'render', 'assemble',
+  'ingest', 'transcribe', 'detect', 'align', 'select', 'write', 'render', 'assemble', 'synthesize',
 ]
 
 /** Plain-language step names (docs/frontend.md §1). Internal names stay in Details. */
@@ -27,6 +27,7 @@ export const STAGE_LABELS: Record<Stage, string> = {
   write: 'Writing notes',
   render: 'Redrawing figures',
   assemble: 'Putting the notes together',
+  synthesize: 'Polishing notes',
 }
 
 export interface StageRun {
@@ -281,6 +282,7 @@ export type UiStateKind =
   | 'starting'
   | 'processing'
   | 'draft'
+  | 'polishing'
   | 'stalled'
   | 'finished'
   | 'failed'
@@ -330,6 +332,10 @@ export function uiState(
         }
       }
       const notes = run.notes
+      // This run's notes are assembled and readable; the synthesis pass will replace them.
+      if (notes?.final || run.stages.synthesize.status === 'running') {
+        return { kind: 'polishing', label: STAGE_LABELS.synthesize }
+      }
       if (notes && !notes.final && notes.completed > 0) {
         return {
           kind: 'draft',

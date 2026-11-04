@@ -37,7 +37,7 @@ step that failed and reuses the work already done (and paid for)
 ([architecture principle 4](architecture.md#principles)).
 
 The pipeline's internal stage names (ingest, transcribe, detect, align, select, write, render,
-assemble) appear only in the **Details** panel. Everywhere else the UI uses these labels:
+assemble, synthesize) appear only in the **Details** panel. Everywhere else the UI uses these labels:
 
 | Stage | Plain label |
 |---|---|
@@ -49,6 +49,12 @@ assemble) appear only in the **Details** panel. Everywhere else the UI uses thes
 | write | Writing notes |
 | render | Redrawing figures |
 | assemble | Putting the notes together |
+| synthesize | Polishing notes |
+
+**Polishing notes** is the last step. The notes are already assembled and readable when it starts
+(the chip says *Polishing notes* and a note above them says a final pass is tidying them); when it
+finishes the polished notes replace them. If polishing fails, the session still finishes with the
+assembled notes ([architecture, Synthesize](architecture.md#synthesize)).
 
 ## 2. Screens and flows
 
@@ -160,6 +166,7 @@ from the first event to the finished notes, so nothing jumps when the notes land
 │   reading column (max 68ch)                       │   ● Writing notes · 2 of 4        │
 │                                                   │   ● Redrawing figures · 3 of 5   │
 │                                                   │   ○ Putting the notes together   │
+│                                                   │   ○ Polishing notes              │
 │                                                   │  On this page (finished)         │
 │                                                   │  Cost (slot, §7)                 │
 │                                                   │  Details ▸ stages, times, errors │
@@ -215,6 +222,7 @@ states below. Each has a text label as well as a colour (§6).
 | **Starting** | `created` | Starting… (neutral) | none |
 | **Processing** | `processing`, no notes yet | Processing · current step (accent) | none |
 | **Draft** | `processing`, and at least one notes section is written | Draft · 2 of 4 sections (amber) | none |
+| **Polishing** | `processing`, and this run's notes are assembled (`notes_updated` with `final: true`) or the synthesize step is running | Polishing notes (accent) | Export (the assembled notes) |
 | **Stalled** | `processing`, but a connection attempt to the event stream delivers no event within 5 s, so the run isn't active (the backend restarted) | Stopped unexpectedly (neutral) | Resume (`POST /run?from_stage=<current_stage>`) |
 | **Finished** | `done` | Finished (green) | Export |
 | **Failed** | `failed` | Failed · step (red) | Try again (`POST /run?from_stage=<failed stage>`) |
@@ -256,12 +264,12 @@ tested function (`src/session/state.ts`).
 |---|---|---|
 | `status` | `status` | Updates the chip and actions; `processing` starts a new run (clears run state); `done` fetches the final notes; `failed` fetches the session for its error |
 | `stage_started` | `stage`, `at` | Step becomes running; records its start time for Details; the header names it |
-| `stage_finished` | `stage`, `at` | Step becomes done; duration shown in Details; after `transcribe`, fetch the full transcript |
+| `stage_finished` | `stage`, `at` | Step becomes done; duration shown in Details; after `transcribe`, fetch the full transcript; around `synthesize`, refetch the notes (the polished notes replace the assembled ones) |
 | `transcript_chunk` | `chunk`, `segments` | Segments stored by chunk index and shown in time order; ribbon shows how much is transcribed |
 | `moment_found` | `id`, `start`, `end` | Count shown in the Finding-what-was-shown step; tick on the ribbon |
 | `visual_selected` | `id`, `caption`, `frame.t`, `render_as` | Figure placeholder added; ribbon marker (hollow); render total updated |
 | `visual_rendered` | `id`, `path`, `render_as`, `verified` | Placeholder replaced by the image; badge from `verified` and `render_as`; ribbon marker filled |
-| `notes_updated` | `final`, `completed_parts`, `total_parts` | `final: false` → Draft, "2 of 4 sections", draft refetched (§7); `final: true` → fetch notes |
+| `notes_updated` | `final`, `completed_parts`, `total_parts` | `final: false` → Draft, "2 of 4 sections", draft refetched (§7); `final: true` → fetch notes, which stay readable while they are polished (Polishing) |
 | `error` | `message` | Failed banner text (the session's `error` is the source of truth) |
 | unknown type or malformed | none | Ignored (`decodeSessionEvent`) |
 

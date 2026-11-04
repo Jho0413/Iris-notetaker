@@ -1,15 +1,21 @@
 """Assemble: resolve ``[visual:<id>]`` markers into images and store the final notes.
 
-Reads:  notes_draft.json, selection.json, renders.json (when present)
+Reads:  notes_draft.json, selection.json, renders.json and notes_synthesis.json (when present)
 Writes: notes.json (Notes), notes.md
+
+The synthesized draft replaces the notes draft only while it was made from exactly that draft and
+selection; otherwise (absent, stale after a re-run, or unreadable) the notes draft is used.
 """
 
+import logging
 import re
 
 from iris.markdown import escape_text
-from iris.models import EventType, Notes, NotesDraft, Renders, Selection, Visual
+from iris.models import EventType, Notes, NotesDraft, Renders, Selection, SynthesizedDraft, Visual
 from iris.pipeline.context import StageContext
 from iris.store.layout import read_model, write_model
+
+log = logging.getLogger(__name__)
 
 MARKER = re.compile(r"\[visual:([A-Za-z0-9_\-]+)\]")
 
@@ -45,9 +51,26 @@ def drop_title_heading(markdown: str, title: str) -> str:
     return markdown
 
 
-async def run(ctx: StageContext) -> None:
+def current_draft(ctx: StageContext, selection: Selection) -> NotesDraft:
+    """The synthesized draft if it is current, else the notes draft as written."""
     draft = read_model(ctx.paths.notes_draft, NotesDraft)
+    try:
+        synthesized = read_model(ctx.paths.notes_synthesis, SynthesizedDraft)
+    except FileNotFoundError:
+        return draft
+    except ValueError:
+        log.warning("ignoring unreadable %s", ctx.paths.notes_synthesis)
+        return draft
+    if synthesized.based_on == draft and synthesized.visual_ids == sorted(
+        v.id for v in selection.visuals
+    ):
+        return synthesized.draft
+    return draft
+
+
+async def run(ctx: StageContext) -> None:
     selection = read_model(ctx.paths.selection, Selection)
+    draft = current_draft(ctx, selection)
     visuals = selection.visuals
     if ctx.paths.renders.exists():
         rendered = {r.id: r for r in read_model(ctx.paths.renders, Renders).visuals}

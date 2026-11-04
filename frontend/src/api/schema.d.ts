@@ -485,7 +485,7 @@ export interface components {
          * Stage
          * @enum {string}
          */
-        Stage: "ingest" | "transcribe" | "detect" | "align" | "select" | "write" | "render" | "assemble";
+        Stage: "ingest" | "transcribe" | "detect" | "align" | "select" | "write" | "render" | "assemble" | "synthesize";
         /** Transcript */
         Transcript: {
             /** Language */

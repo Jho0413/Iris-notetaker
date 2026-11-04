@@ -107,6 +107,10 @@ app (Tauri or Electron) wraps both, with the backend running as a bundled sideca
      marked unverified.
 7. **Assemble.** Markers are resolved to the rendered figures. The notes are stored, shown, and
    exportable as Markdown with figures embedded.
+8. **Synthesize.** While the assembled notes are readable, a pass across the whole session
+   consolidates them (a worked example split across sections, a later correction, a slide returned
+   to, a figure picked twice), and the polished notes replace them. If it fails, the assembled
+   notes stay and the session still finishes (section 2, "Synthesize").
 
 The UI receives progress events throughout (server-sent events): transcript chunks as they finish,
 moments as they are found, figures as they are rendered, and the notes as they are written.
@@ -195,7 +199,7 @@ Late data is never lost: everything captured stays on disk and the final run use
    Otherwise the full pipeline runs, as for an upload (with model caches still reused where inputs
    match); skipped input is recorded per lane, so a later version can re-run less. The draft
    lane's failure doesn't block promotion: its sections are only a cache.
-4. **Synthesis** (planned, also for long uploads): see "Final synthesis" below.
+4. **Synthesis**, as for uploads: see "Final synthesis" below.
 
 A lane whose upstream lane failed (`upstream_failed`) stops making model calls for the rest of the
 recording: nothing it makes can be promoted.
@@ -203,11 +207,11 @@ recording: nothing it makes can be promoted.
 Live processing can be turned off with `IRIS_LIVE_PROCESSING=false`; a live session is then
 processed after stop like an upload, as before.
 
-### Final synthesis (planned)
+### Final synthesis
 
-Live notes are written forwards and never look back. After the notes are assembled and shown, a
-synthesis pass consolidates them across the whole session, and its result replaces them; if it
-fails, the assembled notes stay.
+Notes are written forwards in sections (live, and for long uploads) and never look back. After the
+notes are assembled and shown, a synthesis pass consolidates them across the whole session, and
+its result replaces them; if it fails, the assembled notes stay.
 
 1. *Local sweep (no model calls):* compare moments and figures across the session to flag repeats
    (returning to an earlier slide, the same figure picked twice).
@@ -215,6 +219,8 @@ fails, the assembled notes stay.
    flagged repeats, and returns structured edits: merge a split worked example, apply a later
    correction, drop a repeated point, point duplicate figures at one. Only the sections the edits
    touch are rewritten; every visual marker must still resolve.
+
+Details, checks and cost are in section 2, "Synthesize".
 
 ### Sources are pluggable
 
@@ -237,8 +243,8 @@ is in the session, so adding a source never touches the pipeline.
 ### Open questions for later sections
 
 - Frame sampling rate for uploads: 1 fps or 2 fps? Currently 1 fps. *(section 2)*
-- Long sessions: answered for now. Notes are written per section and joined; a final synthesis pass
-  is planned (`docs/roadmap.md`). *(section 2)*
+- Long sessions: answered for now. Notes are written per section and joined, then consolidated by
+  the synthesis pass. *(section 2)*
 - Do you want speaker labels ("Alice: …") in meeting notes? *(section 5)*
 - Which OpenAI models give timestamps? Only `whisper-1` returns timestamps, so it is the default;
   whether it fits the budget is part of cost tracking (`docs/roadmap.md`). *(section 5)*
@@ -251,6 +257,10 @@ is in the session, so adding a source never touches the pipeline.
 
 *Draft: the stages with notable behaviour. Ingest, transcribe, align and assemble are described in
 their module docstrings for now.*
+
+Order (`pipeline.PLAN`): ingest → transcribe ∥ detect → align → select → write ∥ render → assemble →
+synthesize. Each stage appears once, so re-running from a stage (`plan_from`), the session's
+`current_stage` and the UI's progress list need no special cases.
 
 ### Detect
 
@@ -280,8 +290,8 @@ moment. Details are in the `detect.py` docstring.
 - All transcript text is used. Long transcripts are split into chronological sections of up to
   `IRIS_NOTES_CONTEXT_CHARS` evidence characters per call (default 24,000, range 2,000–60,000).
   Oversized speech segments are split without dropping text or inventing timestamps.
-- Sections keep the first section's title and style and are joined in order. There is no final
-  synthesis pass yet.
+- Sections keep the first section's title and style and are joined in order. Consolidating them
+  across the session is the synthesize stage's job.
 - Validated sections are cached in `notes_sections/`; damaged entries are regenerated. The draft is
   saved, and a progress event emitted, after each section. Final notes are available after
   assembly. Showing the partial draft in the UI is future work.
@@ -301,3 +311,55 @@ Runs alongside note writing and rebuilds every figure professionally.
 - Up to `IRIS_RENDER_CONCURRENCY` figures render at once. Model-written SVG is sanitized before it
   is stored. Completed renders are cached in `render_cache/`.
 - Exports embed SVG figures as PNG, since Markdown viewers reject SVG data URIs.
+
+### Synthesize
+
+The last stage. Finishing is two steps: assemble publishes the notes as written, so they can be
+read straight away (the UI shows *Polishing notes*), then synthesize consolidates them and the
+pipeline runs assemble again inside the synthesize stage, so the polished notes replace the
+assembled ones. Assemble uses `notes_synthesis.json` only while it was made from exactly the
+current `notes_draft.json` and selection, so a re-run from an earlier stage never shows a stale
+synthesis. A re-run from `synthesize` re-polishes without rewriting anything else.
+
+- **Sections** are the notes split at their top-level (`#`, `##`) headings, outside code. Writing
+  parts end at moment boundaries and usually open with a heading, so a topic split across parts
+  shows up as two sections.
+- **Local sweep** (OpenCV, in a thread, no model calls): the kept moments' representative frames
+  and the figures' source crops are compared pairwise by a 64-bit DCT perceptual hash, then
+  confirmed on blurred thumbnails (small mean difference, almost no strongly differing pixels).
+  Figures are compared more strictly (one added line of working is a different figure), must have
+  about the same shape, and are never paired within one moment, whose figures are separate builds
+  by design. Groups are not transitive: a slow build (A like B, B like C) doesn't chain A and C.
+  Groups of look-alikes are only hints for the model; unreadable images are skipped.
+- **Edit plan:** one call to `IRIS_SYNTHESIS_MODEL` (default `gpt-5.5`) at
+  `IRIS_SYNTHESIS_PLAN_REASONING_EFFORT` (default `low`) reads every section with its markers, an
+  outline and the repeats, and returns structured edits: `merge`, `correct`, `drop_repeat`,
+  `dedupe_figure`. They are validated: unknown section indexes and visual ids are dropped, a merge
+  needs two sections, only `dedupe_figure` may remove markers, only among figures the sweep
+  grouped (so image similarity alone never removes a figure, and neither does the model alone),
+  the sections it changes are the ones holding the markers (computed locally), and a figure can't
+  be both kept and dropped. A section a `drop_repeat` relies on to keep the point is never
+  rewritten by another edit, so two repeats can't each lean on the other's copy.
+- **Rewrite:** edits that touch overlapping sections are grouped, and each group is rewritten in
+  one call (up to 4 at once, effort `IRIS_SYNTHESIS_REASONING_EFFORT`, unset: the notes effort),
+  with read-only context sections. A group that only drops duplicate figures is applied locally
+  (the markers are removed), with no call. A rewrite is accepted only if each of its visual markers
+  is still there exactly once on a line of its own (minus the dropped duplicates), no images or
+  HTML appear, its length stays between 40% and 150% (+2,000 characters) of the original (a
+  section only dropped as a repeat, with a section that keeps the point and no other edit
+  rewriting it, may shrink or empty, losing no more text than that section holds), it has no
+  fewer decision, action-item, open-question or uncertainty words and task items, and any math it
+  drops still appears elsewhere. A rejected group keeps its sections as written; the others are
+  applied. Across groups, every equation in the notes must survive, and every marker must resolve
+  once to a selected visual.
+- **Cost:** write records how many parts it planned (`NotesDraft.parts`). Notes written in one part
+  make no call, since the writer saw everything at once, unless the sweep found look-alike figures;
+  then one planning call may only drop duplicates, applied locally. Notes in several parts cost one
+  cheap planning call, which may return no edits, plus one rewrite per group of touched sections.
+  A draft that doesn't record its parts (an older version) counts as one part only if it has one
+  section. Notes over 200,000 characters are left as assembled. Plans and rewrites are cached in `synthesis_cache/`, keyed by model, prompt, schema and
+  inputs; a damaged entry is regenerated and an invalid result is never stored.
+- **Safety:** any failure (API error, refusal, invalid output, missing key) is logged and recorded
+  in `synthesis.json` (`status: failed`, with the reason); the session still ends `done` with the
+  assembled notes. `synthesis.json` also records the repeats found, the edits applied and the
+  sections rewritten or rejected. `IRIS_SYNTHESIS=false` turns the pass off.
