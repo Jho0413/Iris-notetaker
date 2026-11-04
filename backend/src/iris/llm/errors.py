@@ -18,7 +18,10 @@ messages we wrote, never the exception text, which goes to the log and the sessi
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable, Iterable, Sequence
+from collections.abc import Awaitable, Callable, Iterable, Iterator, Sequence
+from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import dataclass
 from enum import StrEnum
 
 import openai
@@ -96,23 +99,58 @@ def describe(exc: BaseException) -> str:
     return f"{classify(exc)}: {type(exc).__name__}: {exc}"
 
 
+async def _sleep(delay: float) -> bool:
+    await asyncio.sleep(delay)
+    return True
+
+
+@dataclass(frozen=True)
+class RetryScope:
+    """When ``retry_temporary`` stops retrying: ``stopped()`` says no further attempt should
+    start; ``pause(delay)`` waits up to ``delay`` seconds and returns False if stopped meanwhile."""
+
+    stopped: Callable[[], bool]
+    pause: Callable[[float], Awaitable[bool]]
+
+
+NO_STOP = RetryScope(stopped=lambda: False, pause=_sleep)  # outside ``retries_until``
+_SCOPE: ContextVar[RetryScope | None] = ContextVar("retry_scope", default=None)
+
+
+@contextmanager
+def retries_until(
+    stopped: Callable[[], bool], pause: Callable[[float], Awaitable[bool]]
+) -> Iterator[None]:
+    """Within this block (and tasks started in it), ``retry_temporary`` makes no further attempt
+    once ``stopped()``. The live lanes use it so that a retry never holds up stop: a call already
+    running finishes, but no new one starts (``live/processor.py``)."""
+    token = _SCOPE.set(RetryScope(stopped, pause))
+    try:
+        yield
+    finally:
+        _SCOPE.reset(token)
+
+
 async def retry_temporary[T](
     call: Callable[[], Awaitable[T]], delays: Sequence[float], *, what: str
 ) -> T:
     """``call()``, tried again after each of ``delays`` (seconds) while it fails with a
-    ``TEMPORARY`` error. Any other error, or the last temporary one, is raised as is.
+    ``TEMPORARY`` error. Any other error, or the last temporary one, is raised as is, as is a
+    temporary one once the ``retries_until`` scope has stopped.
 
     One unit of work at a time: the SDK has already retried the request a couple of times over
     about ten seconds, so these delays are longer (``Settings.api_retry_delays_s``).
     """
+    scope = _SCOPE.get() or NO_STOP
     for delay in delays:
         try:
             return await call()
         except Exception as exc:
-            if classify(exc) is not ErrorKind.TEMPORARY:
+            if classify(exc) is not ErrorKind.TEMPORARY or scope.stopped():
                 raise
             log.warning("%s: temporary API error (%s); retrying in %gs", what, describe(exc), delay)
-        await asyncio.sleep(delay)
+            if not await scope.pause(delay):
+                raise
     return await call()
 
 

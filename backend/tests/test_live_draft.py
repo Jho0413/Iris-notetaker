@@ -16,7 +16,7 @@ from fastapi.testclient import TestClient
 
 from iris import pipeline
 from iris.config import Settings
-from iris.live import Lane, LiveTimeline, draft
+from iris.live import Lane, LiveProcessor, LiveTimeline, draft
 from iris.live.draft import DraftLane
 from iris.models import (
     BoardElement,
@@ -458,6 +458,25 @@ async def test_a_temporary_error_is_retried_within_the_call(tmp_path, notes, mon
     assert notes.payloads[0] == notes.payloads[1] == notes.payloads[2]
     assert live_counts(events)[-1] == len(closed)
     await stop(tl, task)
+
+
+async def test_stop_ends_a_retry_wait_and_starts_no_new_call(tmp_path, notes):
+    """Stop never waits for a retry of a temporary error: the processor ends the wait."""
+    ctx, _ = make_ctx(tmp_path)
+    ctx.settings.api_retry_delays_s = [30.0]
+    notes.fail_next, notes.error = 1000, connection_error()
+    processor = LiveProcessor(ctx, lambda c, t: [DraftLane(c, t)], finish_timeout_s=10)
+    notes.timeline = processor.timeline
+    processor.start()
+    await publish_speech(processor.timeline, 12)
+    await eventually(lambda: notes.calls >= 1)
+    await idle(0.05)
+    assert notes.calls == 1  # waiting 30 s to retry
+    started = time.monotonic()
+    timeline = await processor.finish()
+    assert time.monotonic() - started < 2
+    assert notes.calls == 1  # no retry after stop, and no new call
+    assert Lane.DRAFT in timeline.finished
 
 
 async def test_a_blocking_error_gives_the_payload_up_at_once(tmp_path, notes, monkeypatch):

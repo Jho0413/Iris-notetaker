@@ -25,7 +25,7 @@ Architecture section 1, "Life of a session: live":
      without it, as continuations.
   4. ``timeline.upstream_failed``: no more calls (nothing made can be promoted); wait for stop.
   5. On ``timeline.ending``: return. A call in flight is finished, since the write stage would
-     make that very call. No call starts after stop.
+     make that very call. No call starts after stop, not even a retry of a temporary error.
 
 After a backend restart a fresh lane re-plans from the timeline and its frozen parts hit the
 cache.

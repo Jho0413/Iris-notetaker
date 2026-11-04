@@ -14,6 +14,9 @@ A lane:
   and stop falls back to the full pipeline;
 - when ``timeline.upstream_failed(lane)``, stops making paid model calls (its evidence is
   incomplete and nothing it makes can be promoted) and just waits for stop;
+- retries temporary API errors like the stages (``retry_temporary``), but never once stop is
+  requested or an upstream lane has failed: the processor runs each lane in ``retries_until``, so
+  a retry's wait ends at stop and no new attempt starts (a call already running finishes);
 - must survive a backend restart mid-recording: a fresh lane starts from the captured files, and
   content-keyed caches (transcript windows, ``selection_batches/``, render and notes caches) mean
   work done before the restart is not paid for again.

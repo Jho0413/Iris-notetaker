@@ -9,6 +9,7 @@ import asyncio
 import hashlib
 import io
 import random
+import time
 import wave
 from pathlib import Path
 from types import SimpleNamespace
@@ -508,6 +509,40 @@ async def test_failing_lane_is_marked_failed_by_the_processor(
     await asyncio.wait_for(timeline.wait_until(lambda: Lane.AUDIO in timeline.failed), 10)
     timeline = await processor.finish()
     assert "WindowFailed" in timeline.failed[Lane.AUDIO]
+
+
+async def test_stop_ends_a_window_retry_wait(
+    tmp_path: Path, paths: SessionPaths, webm: bytes, monkeypatch
+):
+    """A window waiting to retry a temporary error doesn't hold up stop: the wait ends, the lane
+    fails and stop falls back (the pipeline transcribes with its own retries)."""
+
+    async def gate(n: int) -> None:
+        raise connection_error("API down")
+
+    fake = FakeTranscriber(gate)
+    monkeypatch.setattr(audio_lane, "get_openai", lambda _: fake.client)
+    ctx = StageContext(
+        "s1", SourceKind.BROWSER_LIVE, paths, settings(tmp_path, api_retry_delays_s=[30.0])
+    )
+    processor = LiveProcessor(ctx, lambda c, t: [AudioLane(c, t)], finish_timeout_s=10)
+    processor.start()
+    for seq, data in enumerate(split(webm, 2000)):
+        store_audio_chunk(paths, seq, data)
+        processor.notify_audio()
+    await asyncio.wait_for(_until(lambda: len(fake.calls) >= 1), 10)
+    await asyncio.sleep(0.05)
+    assert len(fake.calls) == 1  # waiting 30 s to retry
+    started = time.monotonic()
+    timeline = await processor.finish()
+    assert time.monotonic() - started < 3
+    assert "WindowFailed" in timeline.failed[Lane.AUDIO]
+    assert len(fake.calls) == 1
+
+
+async def _until(predicate) -> None:
+    while not predicate():
+        await asyncio.sleep(0.01)
 
 
 async def test_a_restarted_lane_reuses_every_cached_window(

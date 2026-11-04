@@ -18,6 +18,7 @@ from iris.live.lane import LiveLane
 from iris.live.screen import ScreenLane
 from iris.live.select import SelectLane
 from iris.live.timeline import Lane, LiveTimeline
+from iris.llm.errors import retries_until
 from iris.pipeline.context import StageContext
 
 log = logging.getLogger(__name__)
@@ -64,8 +65,21 @@ class LiveProcessor:
 
     async def _run_lane(self, lane: LiveLane) -> None:
         """Run one lane; however it ends, it ends finished or failed, never neither."""
+        tl = self.timeline
+
+        def stopped() -> bool:  # no more retries: stop was requested, or nothing can be promoted
+            return tl.ending or tl.upstream_failed(lane.lane)
+
+        async def pause(delay: float) -> bool:
+            try:
+                await asyncio.wait_for(tl.wait_until(stopped), delay)
+            except TimeoutError:
+                return True
+            return False
+
         try:
-            await lane.run()
+            with retries_until(stopped, pause):
+                await lane.run()
             if not self.timeline.ending:
                 raise RuntimeError("the lane returned before stop was requested")
         except asyncio.CancelledError:
