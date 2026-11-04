@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse, PlainTextResponse
 from iris.api.deps import PathsDep, RunnerDep, SessionDep, SettingsDep, StoreDep
 from iris.config import Settings
 from iris.export import export_markdown_embedded
-from iris.llm.usage import forget_total, running_total
+from iris.llm.usage import forget_total, with_cost
 from iris.models import Notes, Session, SourceKind, Stage, Transcript
 from iris.sources.upload import save_upload
 from iris.store.layout import read_model, session_paths
@@ -22,13 +22,7 @@ SERVABLE_DIRS = ("frames", "visuals")
 
 
 def _with_cost(session: Session, settings: Settings) -> Session:
-    """The session with its model cost so far (``cost_usd`` stays None until a call is made)."""
-    totals = running_total(session_paths(settings.sessions_dir, session.id).usage_log)
-    if not totals.calls:
-        return session
-    return session.model_copy(
-        update={"cost_usd": totals.cost_usd, "cost_partial": totals.unpriced_calls > 0}
-    )
+    return with_cost(session, session_paths(settings.sessions_dir, session.id).usage_log)
 
 
 @router.get("", response_model=list[Session])
@@ -87,7 +81,8 @@ async def rerun(
     if runner.is_running(session.id):
         raise HTTPException(409, "session is already processing")
     runner.start(session.id, from_stage)
-    return _with_cost(store.get(session.id), settings)  # type: ignore[arg-type]
+    session = store.get(session.id)  # type: ignore[assignment]
+    return await asyncio.to_thread(_with_cost, session, settings)
 
 
 @router.get("/{session_id}/transcript", response_model=Transcript)

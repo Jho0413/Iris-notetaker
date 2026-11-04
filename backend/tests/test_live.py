@@ -8,6 +8,7 @@ import json
 import random
 import time
 import wave
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -18,7 +19,8 @@ from fastapi.testclient import TestClient
 
 from iris.config import Settings
 from iris.live.replay import encode_webm
-from iris.models import FrameIndex, SourceKind
+from iris.llm.usage import append_record
+from iris.models import FrameIndex, SourceKind, UsageRecord
 from iris.pipeline.context import StageContext
 from iris.sources.browser_live import (
     CLUSTER_ID,
@@ -340,8 +342,16 @@ def test_end_with_allowed_gaps(client: TestClient, webm: bytes, settings: Settin
     for seq in range(len(chunks)):
         if seq != 3:
             post_audio(client, sid, seq, chunks[seq])
+    # A call made while recording (live transcription): ending returns the cost so far.
+    log = settings.sessions_dir / sid / "usage_calls.jsonl"
+    record = UsageRecord(
+        at=datetime.now(UTC), purpose="x", operation="op", model="m", latency_s=0, cost_usd=0.01
+    )
+    append_record(log, record)
     body = {"audio_chunks": len(chunks), "allow_gaps": True}
-    assert client.post(f"/api/live/{sid}/end", json=body).status_code == 200
+    r = client.post(f"/api/live/{sid}/end", json=body)
+    assert r.status_code == 200
+    assert r.json()["cost_usd"] == pytest.approx(0.01)
     wait_for_status(client, sid, {"done", "failed"})
     audio = settings.sessions_dir / sid / "audio.wav"
     assert len(read_wav(audio)) / 16_000 == pytest.approx(SECONDS, abs=0.1)

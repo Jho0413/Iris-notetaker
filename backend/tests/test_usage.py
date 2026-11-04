@@ -351,11 +351,49 @@ def test_session_list_cost_skips_damage_and_recounts_a_replaced_log(api, caplog)
 def test_deleting_a_session_forgets_its_running_total(api):
     client, settings = api
     sid, paths = new_session(client, settings)
-    usage.append_record(paths.usage_log, call(0.25))
-    assert listed(client, sid)["cost_usd"] == pytest.approx(0.25)
-    assert paths.usage_log in usage._tallies
+    for _ in range(3):
+        usage.append_record(paths.usage_log, call(0.25))
+    assert listed(client, sid)["cost_usd"] == pytest.approx(0.75)
     assert client.delete(f"/api/sessions/{sid}").status_code == 204
-    assert paths.usage_log not in usage._tallies
+    # A new log at the same path (even one as long, on a reused inode) is counted from zero.
+    paths.ensure()
+    for _ in range(3):
+        usage.append_record(paths.usage_log, call(0.1))
+    assert usage.running_total(paths.usage_log).cost_usd == pytest.approx(0.3)
+
+
+def test_one_unreadable_log_does_not_break_the_session_list(api, caplog):
+    client, settings = api
+    broken, broken_paths = new_session(client, settings)
+    broken_paths.usage_log.mkdir()  # opening it fails with an OSError other than "not found"
+    fine, fine_paths = new_session(client, settings)
+    usage.append_record(fine_paths.usage_log, call(0.25))
+    with caplog.at_level(logging.WARNING, "iris.llm.usage"):
+        response = client.get("/api/sessions")
+    assert response.status_code == 200
+    rows = {s["id"]: s for s in response.json()}
+    assert rows[broken]["cost_usd"] is None
+    assert rows[fine]["cost_usd"] == pytest.approx(0.25)
+    assert "could not read" in caplog.text
+
+
+def test_list_and_usage_agree_on_records_with_unicode_line_separators(api):
+    client, settings = api
+    sid, paths = new_session(client, settings)
+    for cost, error in ((0.25, "model said: a\u2028b"), (0.5, "c\x85d\u2029e"), (0.125, None)):
+        usage.append_record(paths.usage_log, call(cost).model_copy(update={"error": error}))
+    rail = client.get(f"/api/sessions/{sid}/usage").json()["total"]
+    assert rail["calls"] == 3 and rail["cost_usd"] == pytest.approx(0.875)
+    assert listed(client, sid)["cost_usd"] == pytest.approx(rail["cost_usd"])
+
+
+def test_rerun_returns_the_sessions_cost(api, monkeypatch):
+    client, settings = api
+    sid, paths = new_session(client, settings)
+    usage.append_record(paths.usage_log, call(0.25))
+    monkeypatch.setattr(client.app.state.runner, "start", lambda *_args, **_kwargs: None)
+    body = client.post(f"/api/sessions/{sid}/run").json()
+    assert (body["cost_usd"], body["cost_partial"]) == (0.25, False)
 
 
 # --- Recording ------------------------------------------------------------------------------------

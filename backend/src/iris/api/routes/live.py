@@ -6,12 +6,14 @@ Each handler reads the whole body first, then checks the session is still record
 the file with no ``await`` in between, so nothing is stored after ``end`` has started ingest.
 """
 
+import asyncio
 from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from iris.api.deps import PathsDep, RunnerDep, SessionDep, SettingsDep, StoreDep
+from iris.llm.usage import with_cost
 from iris.models import Session, SessionStatus, SourceKind
 from iris.sources.browser_live import (
     JPEG_MAGIC,
@@ -171,4 +173,5 @@ async def end_live(
     # Leave RECORDING before any await, so no chunk is accepted once ingest may have started.
     store.update(session.id, status=SessionStatus.PROCESSING)
     runner.start(session.id)
-    return store.get(session.id)  # type: ignore[return-value]
+    # Live work has made model calls already, so the returned session carries their cost.
+    return await asyncio.to_thread(with_cost, store.get(session.id), paths.usage_log)  # type: ignore[arg-type]

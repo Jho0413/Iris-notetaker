@@ -47,7 +47,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from iris.config import PRICES_CHECKED, ModelPrice
-from iris.models import SessionUsage, Stage, UsageRecord, UsageTotals
+from iris.models import Session, SessionUsage, Stage, UsageRecord, UsageTotals
 from iris.store.layout import write_model
 
 if TYPE_CHECKING:
@@ -321,7 +321,9 @@ def read_records(log_path: Path) -> list[UsageRecord]:
         return []
     records = []
     with _lock:
-        lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+        # Split on "\n" only: JSON leaves U+2028, NEL and the like unescaped inside strings,
+        # and ``str.splitlines`` would cut a record there (``running_total`` reads the same way).
+        lines = log_path.read_text(encoding="utf-8", errors="replace").split("\n")
     for n, line in enumerate(lines, 1):
         if not line.strip():
             continue
@@ -407,6 +409,11 @@ def running_total(log_path: Path) -> UsageTotals:
         except FileNotFoundError:
             _tallies.pop(log_path, None)
             return UsageTotals()
+        except OSError:
+            # One unreadable log must not break the session list: that session shows no cost.
+            log.warning("could not read %s", log_path, exc_info=True)
+            _tallies.pop(log_path, None)
+            return UsageTotals()
         with f:
             st = os.fstat(f.fileno())
             file = (st.st_dev, st.st_ino)
@@ -417,7 +424,7 @@ def running_total(log_path: Path) -> UsageTotals:
                 f.seek(tally.offset)
                 data = f.read(st.st_size - tally.offset)
                 complete = data.rfind(b"\n") + 1  # 0: no complete line yet
-                for line in data[:complete].splitlines():
+                for line in data[:complete].split(b"\n"):
                     if not line.strip():
                         continue
                     try:
@@ -426,6 +433,16 @@ def running_total(log_path: Path) -> UsageTotals:
                         log.warning("skipping unreadable line in %s", log_path)
                 tally.offset += complete
             return tally.totals.model_copy()
+
+
+def with_cost(session: Session, log_path: Path) -> Session:
+    """The session with its model cost so far (``cost_usd`` stays None until a call is made)."""
+    totals = running_total(log_path)
+    if not totals.calls:
+        return session
+    return session.model_copy(
+        update={"cost_usd": totals.cost_usd, "cost_partial": totals.unpriced_calls > 0}
+    )
 
 
 def forget_total(log_path: Path) -> None:
