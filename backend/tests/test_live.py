@@ -374,6 +374,7 @@ def wait_until_idle(client: TestClient, sid: str, timeout: float = 10.0) -> None
 
 def fake_openai(monkeypatch) -> None:
     """Fake every model call the pipeline makes (no network, no cost)."""
+    from iris.live import audio
     from iris.pipeline.stages import render, select, transcribe, write
     from tests.test_write import section
 
@@ -414,7 +415,7 @@ def fake_openai(monkeypatch) -> None:
         chat=SimpleNamespace(completions=SimpleNamespace(parse=parse)),
         audio=SimpleNamespace(transcriptions=SimpleNamespace(create=transcribe_audio)),
     )
-    for module in (write, select, transcribe, render):
+    for module in (write, select, transcribe, render, audio):
         monkeypatch.setattr(module, "get_openai", lambda _: fake)
 
 
