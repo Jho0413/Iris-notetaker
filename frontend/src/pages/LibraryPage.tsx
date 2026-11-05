@@ -8,7 +8,7 @@ import { NoKeyBanner } from '../components/NoKeyBanner'
 import { TitleField } from '../components/TitleField'
 import { StatusChip } from '../components/StatusChip'
 import { sessionCost } from '../session/cost'
-import { formatWhen, SOURCE_LABEL } from '../session/format'
+import { formatWhen, shownTitle, SOURCE_LABEL } from '../session/format'
 import { PDF_FAILED, UNREACHABLE } from '../session/messages'
 import { act } from '../session/request'
 import { emptyRun, failureView, libraryState } from '../session/state'
@@ -124,9 +124,10 @@ export function LibraryPage() {
           {Array.from({ length: 5 }, (_, i) => (
             <div className="library-row" key={i}>
               <div className="skeleton sk-line" style={{ width: `${60 - i * 6}%` }} />
-              <div className="skeleton sk-line" style={{ width: '70%' }} />
-              <div className="skeleton sk-line meta" style={{ width: '60%' }} />
-              <div className="skeleton sk-line meta" style={{ width: '50%', marginLeft: 'auto' }} />
+              {/* Rem, not %: these columns are as wide as what they hold, and a bar holds nothing. */}
+              <div className="skeleton sk-line" style={{ width: '6rem' }} />
+              <div className="skeleton sk-line meta" style={{ width: '7rem' }} />
+              <div className="skeleton sk-line meta" style={{ width: '3rem', marginLeft: 'auto' }} />
               <span />
             </div>
           ))}
@@ -196,7 +197,7 @@ export function LibraryPage() {
                   ) : (
                     <>
                       <Link to={`/sessions/${s.id}`} className="title-link">
-                        {s.title || 'Untitled session'}
+                        {shownTitle(s.title)}
                       </Link>
                       <span className="sub">{SOURCE_LABEL[s.source] ?? s.source}</span>
                     </>

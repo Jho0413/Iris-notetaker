@@ -26,3 +26,8 @@ export function formatBytes(n: number): string {
 }
 
 export const SOURCE_LABEL: Record<string, string> = { upload: 'Upload', browser_live: 'Live' }
+
+/** A session's title as shown: the library, its page and its PDF. */
+export function shownTitle(title: string): string {
+  return title || 'Untitled session'
+}

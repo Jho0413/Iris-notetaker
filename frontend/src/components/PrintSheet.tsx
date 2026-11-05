@@ -3,6 +3,7 @@ import type { Notes, Session, Transcript } from '../api/client'
 import {
   emptyRun, figureList, figureMeta, sessionLength, sessionMetaLine, transcriptSegments,
 } from '../session/state'
+import { shownTitle } from '../session/format'
 import { NotesView } from './NotesView'
 
 export interface Printable {
@@ -25,7 +26,7 @@ export function PrintSheet({ printable }: { printable: Printable }) {
     <div className="print-sheet" aria-hidden="true">
       <div className="session-head">
         <div className="titles">
-          <h1>{session.title}</h1>
+          <h1>{shownTitle(session.title)}</h1>
           <div className="session-meta">
             {sessionMetaLine(session, notes.session_type, length).map((part, i) => (
               <span key={i} className="num">{part}</span>

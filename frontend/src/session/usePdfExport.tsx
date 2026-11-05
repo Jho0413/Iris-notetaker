@@ -3,7 +3,9 @@ import { flushSync } from 'react-dom'
 import type { Session } from '../api/client'
 import { PrintSheet, type Printable } from '../components/PrintSheet'
 import { irisApp } from '../settings/appBridge'
+import { shownTitle } from './format'
 import { fetchNotes, fetchTranscript } from './load'
+import { browserPrint, runExport } from './printPdf'
 
 /** The sheet laid out, and its figures and fonts loaded: a PDF made earlier would leave them out.
  *  The sheet is invisible but laid out, so the fonts it uses (KaTeX's) start loading here. */
@@ -30,24 +32,25 @@ export function usePdfExport() {
     if (running.current) return true
     running.current = true
     setExporting(session.id)
-    try {
-      const [notes, transcript] = await Promise.all([fetchNotes(session.id), fetchTranscript(session.id)])
-      if (!notes) throw new Error(`the notes of session ${session.id} couldn't be loaded`)
-      flushSync(() => setPrintable({ session, notes, transcript: transcript ?? null }))
-      const sheet = document.querySelector<HTMLElement>('.print-sheet')
-      if (sheet) await loaded(sheet)
-      const app = irisApp()
-      if (app) await app.savePdf(session.title)
-      else window.print()
-      return true
-    } catch (err) {
-      console.error('Export PDF failed:', err)
-      return false
-    } finally {
-      setPrintable(null)
-      setExporting(null)
-      running.current = false
-    }
+    const ok = await runExport<Printable>({
+      load: async () => {
+        const [notes, transcript] = await Promise.all([fetchNotes(session.id), fetchTranscript(session.id)])
+        return notes && { session, notes, transcript: transcript ?? null }
+      },
+      show: (data) => {
+        flushSync(() => setPrintable(data))
+        return document.querySelector<HTMLElement>('.print-sheet')
+      },
+      ready: loaded,
+      print: () => {
+        const app = irisApp()
+        return app ? app.savePdf(shownTitle(session.title)) : browserPrint(window)
+      },
+      hide: () => setPrintable(null),
+    })
+    setExporting(null)
+    running.current = false
+    return ok
   }, [])
 
   const sheet = printable && <PrintSheet printable={printable} />

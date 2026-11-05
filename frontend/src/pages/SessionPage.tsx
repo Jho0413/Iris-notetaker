@@ -18,6 +18,7 @@ import { againLink, NOTES_EDIT, PDF_FAILED, UNREACHABLE } from '../session/messa
 import { fetchNotes, fetchTranscript } from '../session/load'
 import { usePdfExport } from '../session/usePdfExport'
 import { act } from '../session/request'
+import { shownTitle } from '../session/format'
 import {
   announcement, currentSteps, failureView, figureList, figureMeta, formatClock, progressView,
   runSeconds, sessionLength, sessionMetaLine, STAGE_LABELS, stepLine, transcriptSegments, uiState, type FigureState,
@@ -297,7 +298,7 @@ function SessionView({ id }: { id: string }) {
               <div className="title-line">
                 {/* The title is the control; the pencil gives keyboard users the same. */}
                 <h1 className="title-text" onClick={() => setRenaming(true)}>
-                  {session.title || 'Untitled session'}
+                  {shownTitle(session.title)}
                 </h1>
                 <button
                   type="button"
