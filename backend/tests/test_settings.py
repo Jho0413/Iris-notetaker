@@ -201,3 +201,26 @@ def test_failed_write_keeps_the_old_settings(tmp_path: Path, monkeypatch):
         assert "disk full" not in r.text
         assert language(client)["value"] == "en"
         assert client.app.state.runner.settings.transcribe_language == "en"
+
+
+# --- The API key (only whether one is set) ----------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("key", "expected"), [(None, False), ("", False), ("  ", False), ("sk-x", True)]
+)
+def test_reports_whether_a_key_is_set(tmp_path: Path, key, expected: bool):
+    with app_client(make_settings(tmp_path, openai_api_key=key)) as client:
+        body = client.get("/api/settings").json()
+    assert body["api_key_set"] is expected
+
+
+def test_the_key_itself_never_reaches_the_api(tmp_path: Path):
+    secret = "sk-test-do-not-leak-1234567890"
+    with app_client(make_settings(tmp_path, openai_api_key=secret)) as client:
+        for r in (
+            client.get("/api/settings"),
+            client.put("/api/settings", json={"transcribe_language": "fr"}),
+        ):
+            assert r.status_code == 200
+            assert secret not in r.text

@@ -7,8 +7,9 @@ router = APIRouter(tags=["health"])
 
 
 class Health(BaseModel):
-    """The backend is up. Setup problems (such as a missing API key) are not reported to the UI:
-    a run that hits one fails with the generic message, and the log says why."""
+    """The backend is up. Setup problems are not reported here: a run that hits one fails with the
+    generic message, and the log says why. The one exception is a missing API key, which
+    ``/api/settings`` reports as yes or no so the UI can warn before anything is run."""
 
     ok: bool
     version: str

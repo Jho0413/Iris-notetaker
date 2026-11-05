@@ -4,6 +4,7 @@ import { api, type Session } from '../api/client'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { CostText } from '../components/CostText'
 import { Icon } from '../components/Icon'
+import { NoKeyBanner } from '../components/NoKeyBanner'
 import { StatusChip } from '../components/StatusChip'
 import { sessionCost } from '../session/cost'
 import { formatWhen, SOURCE_LABEL } from '../session/format'
@@ -11,6 +12,7 @@ import { UNREACHABLE } from '../session/messages'
 import { act } from '../session/request'
 import { emptyRun, failureView, libraryState } from '../session/state'
 import { useTitle } from '../session/useTitle'
+import { useApiKeySet } from '../settings/useApiKeySet'
 
 /** While anything is processing, refresh this often so status chips stay current. */
 const REFRESH_MS = 4000
@@ -32,6 +34,7 @@ export function LibraryPage() {
   const [pendingDelete, setPendingDelete] = useState<Session | null>(null)
   const [busy, setBusy] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
+  const apiKey = useApiKeySet()
 
   const [tick, setTick] = useState(0)
   const refresh = useCallback(() => setTick((n) => n + 1), [])
@@ -87,6 +90,7 @@ export function LibraryPage() {
           <p className="lede">Notes that see what was shown.</p>
         </div>
       </div>
+      {apiKey.set === false && <NoKeyBanner onChanged={apiKey.refresh} />}
       {actionError && (
         <div className="banner banner-error" role="alert">
           <Icon name="alert" />

@@ -27,7 +27,11 @@ const fs = require('node:fs')
 const path = require('node:path')
 const { Backend, backendCommand } = require('./src/backend.cjs')
 const { registerScheme, handleAppProtocol } = require('./src/handler.cjs')
+const { checkKeyWithOpenAI } = require('./src/keycheck.cjs')
 const { createKeyStore } = require('./src/keystore.cjs')
+const { saveNewKey } = require('./src/keysave.cjs')
+const { createAppState } = require('./src/appstate.cjs')
+const { WELCOME_SHOWN, shouldWelcome } = require('./src/welcome.cjs')
 const policy = require('./src/policy.cjs')
 const { ORIGIN } = require('./src/routes.cjs')
 const { unloadPrompt } = require('./src/unload.cjs')
@@ -58,11 +62,18 @@ function log(line) {
 // ---- state -----------------------------------------------------------------------------------
 
 const keystore = createKeyStore({ safeStorage, file: path.join(USER_DATA, 'openai-key.bin') })
+const appState = createAppState(path.join(USER_DATA, 'app-state.json')) // flags such as welcomeShown
 // Decrypted once per launch: each decrypt reads the Keychain, and an app whose signature changed
 // (every rebuild, for an ad-hoc signed app) makes macOS ask the user each time.
+// A failed load is remembered too: a key macOS won't decrypt (e.g. Deny on the Keychain prompt)
+// isn't asked for again at each engine start in the same launch.
 let apiKey = null
+let keyLoaded = false
 function currentKey() {
-  apiKey ??= keystore.load()
+  if (!keyLoaded) {
+    apiKey = keystore.load()
+    keyLoaded = true
+  }
   return apiKey
 }
 const backend = new Backend({
@@ -118,7 +129,8 @@ function showMainWindow() {
     title: 'Iris',
     show: false,
     backgroundColor: background(),
-    webPreferences: WEB_PREFERENCES,
+    // The UI's bridge to the app: two key actions, checked per call (policy.fromIrisWindow).
+    webPreferences: { ...WEB_PREFERENCES, preload: path.join(PAGES, 'preload-main.cjs') },
   })
   mainWindow = win
   win.once('ready-to-show', () => win.show())
@@ -182,16 +194,19 @@ function askForKey(mode) {
   const promise = new Promise((r) => (resolve = r))
   keyPrompt = { resolve, promise }
   keyWindow = new BrowserWindow({
+    // Sized by its content area, with room for the longest message under the field (two lines),
+    // so the window never scrolls: about 460px of content plus the page's 64px of padding.
     width: 560,
-    height: 520,
+    height: 560,
+    useContentSize: true,
     resizable: false,
     minimizable: false,
     fullscreenable: false,
     title: 'OpenAI API key',
     show: false,
     backgroundColor: background(),
-    parent: mode === 'change' && mainWindow ? mainWindow : undefined,
-    modal: mode === 'change' && Boolean(mainWindow),
+    parent: mode !== 'first' && mainWindow ? mainWindow : undefined,
+    modal: mode !== 'first' && Boolean(mainWindow),
     webPreferences: { ...WEB_PREFERENCES, preload: path.join(PAGES, 'preload-key.cjs') },
   })
   const win = keyWindow
@@ -222,16 +237,28 @@ ipcMain.handle('iris-key:has', (event) => {
   return keystore.has()
 })
 
-ipcMain.handle('iris-key:save', (event, key) => {
+ipcMain.handle('iris-key:save', async (event, key) => {
   if (!fromKeyScreen(event)) throw new Error('not allowed')
-  try {
-    apiKey = keystore.save(key)
-  } catch (err) {
-    return { ok: false, error: err.message }
+  // The window and prompt that asked: the check below can take seconds, and if that window is
+  // closed meanwhile (the user cancelled) nothing is stored, nor does a newer window get answered.
+  const win = keyWindow
+  const prompt = keyPrompt
+  // Checked once with OpenAI before it is stored: a wrong key is caught here, not by a session.
+  const result = await saveNewKey(key, {
+    check: checkKeyWithOpenAI,
+    stillOpen: () => keyWindow === win && !win.isDestroyed(),
+    store: (checked) => keystore.save(checked),
+  })
+  if (!result.ok) {
+    if (result.cancelled) log('[key] the key window was closed during the check; nothing saved')
+    else if (result.reason) log(`[key] a new API key did not pass the check with OpenAI (${result.reason}); not saved`)
+    return { ok: false, error: result.error }
   }
+  apiKey = result.key
+  keyLoaded = true
   log('[key] saved a new API key')
-  keyPrompt?.resolve(true)
-  keyWindow?.close()
+  prompt?.resolve(true)
+  win?.close()
   return { ok: true }
 })
 
@@ -240,10 +267,47 @@ ipcMain.handle('iris-key:cancel', (event) => {
   keyWindow?.close()
 })
 
+/** Add or replace the key (menu, Settings, the no-key banner). Resolves true once the engine
+ * runs with the new key, false if the user cancelled. */
 async function changeKey() {
-  if (!(await confirmBusy('Change the API key?', 'Iris restarts its engine to use the new key.'))) return
-  if (await askForKey('change')) await restartBackend()
+  if (!(await confirmBusy('Change the API key?', 'Iris restarts its engine to use the new key.'))) return false
+  if (!(await askForKey(currentKey() ? 'change' : 'add'))) return false
+  await restartBackend()
+  return true
 }
+
+/** Remove the stored key after one question; the engine restarts without it. Resolves true once
+ * removed, false if the user cancelled. */
+async function removeKey() {
+  const busy = await busySessions()
+  const { response } = await dialog.showMessageBox(mainWindow ?? undefined, {
+    type: 'warning',
+    buttons: ['Remove Key', 'Cancel'],
+    defaultId: 1,
+    cancelId: 1,
+    message: 'Remove the OpenAI key?',
+    detail:
+      'Iris can’t make notes until you add a key again. Iris’s engine restarts to stop using it.' +
+      (busy.length ? `\n\n${busyDetail(busy)}` : ''),
+  })
+  if (response !== 0) return false
+  keystore.clear()
+  apiKey = null
+  keyLoaded = true
+  log('[key] removed the API key')
+  await restartBackend()
+  return true
+}
+
+ipcMain.handle('iris-app:change-key', async (event) => {
+  if (!policy.fromIrisWindow(event, mainWindow)) throw new Error('not allowed')
+  return { done: await changeKey() }
+})
+
+ipcMain.handle('iris-app:remove-key', async (event) => {
+  if (!policy.fromIrisWindow(event, mainWindow)) throw new Error('not allowed')
+  return { done: await removeKey() }
+})
 
 // ---- backend ---------------------------------------------------------------------------------
 
@@ -317,18 +381,24 @@ async function busySessions() {
 async function confirmBusy(message, detail, button = 'Continue') {
   const busy = await busySessions()
   if (!busy.length) return true
-  const names = busy.slice(0, 3).map((s) => `“${s.title || 'Untitled session'}”`).join(', ')
   const { response } = await dialog.showMessageBox(mainWindow ?? undefined, {
     type: 'warning',
     buttons: [button, 'Cancel'],
     defaultId: 1,
     cancelId: 1,
     message,
-    detail:
-      `${detail}\n\n${names}${busy.length > 3 ? ' and others' : ''} ${busy.length === 1 ? 'is' : 'are'} ` +
-      'still recording or making notes. What is recorded so far is kept: resume it from the library later.',
+    detail: `${detail}\n\n${busyDetail(busy)}`,
   })
   return response === 0
+}
+
+/** "“Lecture 3” is still recording or making notes…", for a dialog that would stop the engine. */
+function busyDetail(busy) {
+  const names = busy.slice(0, 3).map((s) => `“${s.title || 'Untitled session'}”`).join(', ')
+  return (
+    `${names}${busy.length > 3 ? ' and others' : ''} ${busy.length === 1 ? 'is' : 'are'} ` +
+    'still recording or making notes. What is recorded so far is kept: resume it from the library later.'
+  )
 }
 
 // ---- security --------------------------------------------------------------------------------
@@ -471,10 +541,18 @@ if (!app.requestSingleInstanceLock()) {
     handleAppProtocol({ protocol: session.defaultSession.protocol, distDir: DIST, backend: () => backend.info(), log })
     buildMenu()
 
-    // The packaged app needs a key; in development the repo's backend/.env can supply it.
-    if (PACKAGED && !currentKey()) {
-      if (keystore.has()) log('[key] the stored key could not be decrypted: asking again')
-      if (!(await askForKey('first'))) return app.quit()
+    // The packaged app welcomes a new install once (Welcome, then Connect), never again; in
+    // development the repo's backend/.env can supply the key. Without a key Iris still opens: the
+    // Library and Settings say notes can't be made, with Add key….
+    if (PACKAGED) {
+      const hasKey = Boolean(currentKey())
+      if (shouldWelcome({ hasKey, seen: appState.get(WELCOME_SHOWN) === true })) {
+        appState.set(WELCOME_SHOWN, true) // before asking: closing or quitting from the welcome counts too
+        if (!(await askForKey('first'))) log('[key] set up later: opening without an API key')
+      } else if (!hasKey) {
+        log(keystore.has() ? '[key] the stored key could not be decrypted: opening without one' : '[key] no API key: opening without one')
+      }
+      if (hasKey) appState.set(WELCOME_SHOWN, true) // an install that already has a key is never welcomed
     }
     showMainWindow()
     await startBackend()

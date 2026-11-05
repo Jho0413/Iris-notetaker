@@ -48,6 +48,9 @@ class AppSettings(BaseModel):
     languages: list[str]  # the Whisper codes the language can be set to (besides "auto")
     version: str
     data_dir: str  # absolute path of the data folder
+    # Whether the engine has an OpenAI API key, so the UI can warn that notes can't be made.
+    # Only this yes or no: the key itself never reaches the API.
+    api_key_set: bool
 
 
 class SettingsUpdate(BaseModel):
@@ -89,6 +92,7 @@ def _view(request: Request) -> AppSettings:
         languages=sorted(TRANSCRIBE_LANGUAGES),
         version=__version__,
         data_dir=str(current.data_dir.resolve()),
+        api_key_set=bool(current.openai_api_key and current.openai_api_key.strip()),
     )
 
 

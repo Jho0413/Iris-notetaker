@@ -510,7 +510,8 @@ Compact, quiet, and obvious about the one thing to do.
 - **Status chip:** 24px pill, 13px/500, hairline border, always a word ("Finished", "Failed ·
   Transcribing") plus an icon or dot. Processing, polishing and starting use indigo with a spinning
   icon; finished green with a check; failed red with an alert icon; recording red with a
-  pulsing dot; stalled and orphaned states stay neutral.
+  pulsing dot; stalled and orphaned states stay neutral. The amber `chip-warning` marks a missing
+  setting (no API key).
 - **Figure badge:** smaller pill (12px/500) under a figure: Verified redraw (green), Screenshot
   (neutral), Original crop · not verified (amber).
 
@@ -546,6 +547,13 @@ except one-value rows (Version) that stay on one line.
   Leaving the page with an unsaved change asks first: the confirm dialog inside Iris; closing,
   reloading or quitting asks too (the browser's prompt, or the desktop app's own dialog).
 - **Saved:** a 13px `success` line with a check, saying what now applies.
+- **API key row** (OpenAI group): a status chip (green "Key set", amber "No key") then the
+  actions: Replace… and a ghost Remove, or the primary Add key… when there is none. In the browser
+  it says where the engine reads the key, with no actions. A key change is confirmed on the status
+  line under the group, which takes no space while empty.
+- **No-key warning:** the warning banner at the top of Library and Settings, its one action
+  (Add key…, small primary) on the same line as the text (`banner-inline`). Settings leaves the
+  action to the key row right below it.
 - **Pinned by `.env`:** the control is disabled, a neutral "Set outside Iris" lock chip (20px pill)
   follows the name, and the description names the variable and how to free it.
 

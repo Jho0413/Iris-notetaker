@@ -1,18 +1,28 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useBlocker } from 'react-router-dom'
 import { api, type AppSettings } from '../api/client'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { Icon } from '../components/Icon'
+import { NoKeyBanner } from '../components/NoKeyBanner'
 import { UNREACHABLE } from '../session/messages'
 import { useTitle } from '../session/useTitle'
+import { irisApp } from '../settings/appBridge'
 import {
   asksBeforeLeaving,
+  BROWSER_KEY_NOTE,
+  KEY_ACTION_FAILED,
+  keyChanged,
   languageName,
   languageOptions,
   pendingLanguage,
   saveFailure,
   savedLanguage,
 } from '../settings/settings'
+
+/** A re-read that fails while settings are shown is tried again this often, this many times:
+ * the engine takes a few seconds to come back after a key change. */
+const REREAD_DELAY_MS = 2000
+const REREAD_TRIES = 5
 
 type Load = { kind: 'loading' } | { kind: 'error' } | { kind: 'ready'; settings: AppSettings }
 
@@ -35,14 +45,42 @@ export function SettingsPage() {
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
+  // After the app changed the key: what to confirm, or that it couldn't.
+  const [keyResult, setKeyResult] = useState<{ ok: boolean; text: string } | null>(null)
 
+  const retries = useRef(0)
+  const shown = useRef(load)
+  useEffect(() => {
+    shown.current = load
+  }, [load])
   useEffect(() => {
     let live = true
-    void fetchSettings().then((next) => live && setLoad(next))
+    let timer: number | undefined
+    void fetchSettings().then((next) => {
+      if (!live) return
+      // A failed re-read (e.g. while the engine restarts after a key change) keeps what is shown,
+      // and any unsaved change, and tries again shortly.
+      if (next.kind === 'error' && shown.current.kind === 'ready') {
+        if (retries.current < REREAD_TRIES) {
+          retries.current += 1
+          timer = window.setTimeout(() => setTick((n) => n + 1), REREAD_DELAY_MS)
+        }
+        return
+      }
+      if (next.kind === 'ready') retries.current = 0
+      setLoad(next)
+    })
     return () => {
       live = false
+      window.clearTimeout(timer)
     }
   }, [tick])
+  // Read again when the window regains focus: the key may have changed from the app's menu.
+  useEffect(() => {
+    const again = () => setTick((n) => n + 1)
+    window.addEventListener('focus', again)
+    return () => window.removeEventListener('focus', again)
+  }, [])
 
   const settings = load.kind === 'ready' ? load.settings : null
   const language = settings?.transcribe_language
@@ -112,6 +150,8 @@ export function SettingsPage() {
         </div>
       )}
 
+      {settings && !settings.api_key_set && <NoKeyBanner withAction={false} />}
+
       {settings && language && (
         <>
           <section className="settings-group" aria-labelledby="settings-transcription">
@@ -119,6 +159,26 @@ export function SettingsPage() {
             <div className="settings-rows">
               <LanguageRow settings={settings} value={draft ?? language.value} onChange={choose} changed={dirty} />
             </div>
+          </section>
+
+          <section className="settings-group" aria-labelledby="settings-openai">
+            <h2 id="settings-openai">OpenAI</h2>
+            <div className="settings-rows">
+              <ApiKeyRow
+                keySet={settings.api_key_set}
+                onResult={(result) => {
+                  setKeyResult(result)
+                  if (result.ok) setTick((n) => n + 1) // the engine restarted: read the settings again
+                }}
+              />
+            </div>
+            <p className={keyResult && !keyResult.ok ? 'error-line' : 'saved-line'} role="status">
+              {keyResult && (
+                <>
+                  <Icon name={keyResult.ok ? 'check' : 'alert'} /> {keyResult.text}
+                </>
+              )}
+            </p>
           </section>
 
           <section className="settings-group" aria-labelledby="settings-about">
@@ -186,6 +246,88 @@ export function SettingsPage() {
         onConfirm={() => blocker.proceed?.()}
         onCancel={() => blocker.reset?.()}
       />
+    </div>
+  )
+}
+
+/** The OpenAI key: managed by the desktop app (through its bridge), or read by the engine at start-up in
+ * the browser. The page only learns whether a key is set, never the key. */
+function ApiKeyRow(props: { keySet: boolean; onResult: (result: { ok: boolean; text: string }) => void }) {
+  const app = irisApp()
+  const [busy, setBusy] = useState(false)
+
+  async function run(action: 'saved' | 'removed') {
+    if (!app) return
+    setBusy(true)
+    try {
+      const { done } = action === 'saved' ? await app.changeKey() : await app.removeKey()
+      if (done) props.onResult({ ok: true, text: keyChanged(action) })
+    } catch {
+      props.onResult({ ok: false, text: KEY_ACTION_FAILED })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  let control
+  let description
+  if (!app) {
+    control = props.keySet ? (
+      <span className="lock-chip">
+        <Icon name="lock" /> Set outside Iris
+      </span>
+    ) : (
+      <span className="chip chip-warning">
+        <Icon name="alert" /> Not set
+      </span>
+    )
+    description = BROWSER_KEY_NOTE
+  } else if (props.keySet) {
+    control = (
+      <>
+        <span className="chip chip-finished">
+          <Icon name="check" /> Key set
+        </span>
+        <button type="button" className="btn btn-sm" onClick={() => void run('saved')} disabled={busy}>
+          Replace…
+        </button>
+        <button type="button" className="btn btn-sm btn-ghost" onClick={() => void run('removed')} disabled={busy}>
+          Remove
+        </button>
+      </>
+    )
+    description = (
+      <>
+        Encrypted with your Keychain; this page never sees it. A new key is checked with OpenAI before it's saved,
+        and Iris's engine restarts to use it.
+      </>
+    )
+  } else {
+    control = (
+      <>
+        <span className="chip chip-warning">
+          <Icon name="alert" /> No key
+        </span>
+        <button type="button" className="btn btn-sm btn-primary" onClick={() => void run('saved')} disabled={busy}>
+          Add key…
+        </button>
+      </>
+    )
+    description = (
+      <>
+        Iris sends the audio and what was on screen to OpenAI to write the notes, billed to your OpenAI account.
+        Create a key at platform.openai.com/api-keys.
+      </>
+    )
+  }
+
+  return (
+    <div className="settings-row">
+      <div className="settings-row-text">
+        <span className="settings-row-title">API key</span>
+        <p className="settings-row-desc">{description}</p>
+      </div>
+      <div className="settings-row-control">{control}</div>
     </div>
   )
 }
