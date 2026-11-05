@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { useEffect, useMemo, useState } from 'react'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api, type Notes, type Session, type Transcript } from '../api/client'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { FiguresGrid } from '../components/FiguresGrid'
@@ -15,12 +15,12 @@ import { TitleField } from '../components/TitleField'
 import { TranscriptList } from '../components/TranscriptList'
 import { stepCosts, usageCost, usageRefreshKey } from '../session/cost'
 import { againLink, NOTES_EDIT, PDF_FAILED, UNREACHABLE } from '../session/messages'
-import { exportPdf } from '../session/exportPdf'
+import { fetchNotes, fetchTranscript } from '../session/load'
+import { usePdfExport } from '../session/usePdfExport'
 import { act } from '../session/request'
-import { formatWhen, SOURCE_LABEL } from '../session/format'
 import {
-  announcement, currentSteps, failureView, figureList, formatClock, progressView, provenance,
-  runSeconds, sessionLength, STAGE_LABELS, stepLine, transcriptSegments, uiState, type FigureState,
+  announcement, currentSteps, failureView, figureList, figureMeta, formatClock, progressView,
+  runSeconds, sessionLength, sessionMetaLine, STAGE_LABELS, stepLine, transcriptSegments, uiState, type FigureState,
   type RunState,
 } from '../session/state'
 import type { SessionStream } from '../session/useSessionStream'
@@ -32,8 +32,6 @@ import { useTitle } from '../session/useTitle'
 type TabId = 'notes' | 'transcript' | 'figures'
 type LoadError = 'not-found' | 'unreachable' | null
 
-const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
-
 async function fetchSession(id: string): Promise<Session | 'not-found' | 'unreachable'> {
   try {
     const { data, response } = await api.GET('/api/sessions/{session_id}', {
@@ -43,20 +41,6 @@ async function fetchSession(id: string): Promise<Session | 'not-found' | 'unreac
   } catch {
     return 'unreachable'
   }
-}
-
-async function fetchNotes(id: string): Promise<Notes | undefined> {
-  const { data } = await api
-    .GET('/api/sessions/{session_id}/notes', { params: { path: { session_id: id } } })
-    .catch(() => ({ data: undefined }))
-  return data
-}
-
-async function fetchTranscript(id: string): Promise<Transcript | undefined> {
-  const { data } = await api
-    .GET('/api/sessions/{session_id}/transcript', { params: { path: { session_id: id } } })
-    .catch(() => ({ data: undefined }))
-  return data
 }
 
 /** Route entry: a fresh page per session id, so no state leaks between sessions. */
@@ -144,10 +128,7 @@ function SessionView({ id }: { id: string }) {
 
   const segments = useMemo(() => transcriptSegments(run, transcript), [run, transcript])
   const figures = useMemo(() => figureList(run, notes), [run, notes])
-  const figureMeta = useMemo(
-    () => new Map(figures.map((f) => [f.id, { t: f.t, provenance: provenance(f) }])),
-    [figures],
-  )
+  const figuresMeta = useMemo(() => figureMeta(figures), [figures])
   const transcriptKnown = transcript !== null || run.stages.transcribe.status === 'done'
   const length = session && transcriptKnown ? sessionLength(session, segments) : undefined
 
@@ -224,43 +205,12 @@ function SessionView({ id }: { id: string }) {
     }
   }
 
-  /** Export PDF: the notes tab, as printed, named after the session. One at a time: a second
-   *  click while one runs would print with the theme the first one switched to. */
-  const pdfName = session?.title ?? ''
-  const [exporting, setExporting] = useState(false)
-  const exportingNow = useRef(false)
-  const savePdf = useCallback(async () => {
-    if (exportingNow.current) return
-    exportingNow.current = true
-    setExporting(true)
-    setTab('notes')
+  const pdf = usePdfExport()
+  async function savePdf() {
+    if (!session) return
     setActionError(null)
-    try {
-      await new Promise(requestAnimationFrame) // the notes are on screen before they are printed
-      await exportPdf(pdfName)
-    } catch {
-      setActionError(PDF_FAILED)
-    } finally {
-      exportingNow.current = false
-      setExporting(false)
-    }
-  }, [pdfName])
-
-  // Export PDF from the library opens the session with ?export=pdf: export once the notes are in.
-  const [search, setSearch] = useSearchParams()
-  const exportRequested = search.get('export') === 'pdf'
-  useEffect(() => {
-    if (!exportRequested || !notes || !session || editing) return
-    let live = true
-    void Promise.resolve().then(() => {
-      if (!live) return
-      setSearch({}, { replace: true })
-      return savePdf()
-    })
-    return () => {
-      live = false
-    }
-  }, [exportRequested, notes, session, editing, setSearch, savePdf])
+    if (!(await pdf.exportPdf(session))) setActionError(PDF_FAILED)
+  }
 
   function showFigure(f: FigureState) {
     const figure = document.querySelector<HTMLElement>(`.notes [data-figure="${CSS.escape(f.id)}"]`)
@@ -319,7 +269,6 @@ function SessionView({ id }: { id: string }) {
   const finished = ui.kind === 'finished'
   const progress = progressView(ui.kind)
   const working = ui.kind === 'processing' || ui.kind === 'starting' || ui.kind === 'polishing'
-  const sessionType = notes?.session_type
   const fromLabel = ui.fromStage ? STAGE_LABELS[ui.fromStage] : 'the start'
   const failure = ui.kind === 'failed' ? failureView(session, run) : null
   const again = againLink(session.source)
@@ -361,10 +310,9 @@ function SessionView({ id }: { id: string }) {
                 </button>
               </div>
               <div className="session-meta">
-                {sessionType && <span>{capitalize(sessionType)}</span>}
-                <span>{SOURCE_LABEL[session.source] ?? session.source}</span>
-                {length !== undefined && <span className="num">{formatClock(length)}</span>}
-                <span className="num">{formatWhen(session.created_at)}</span>
+                {sessionMetaLine(session, notes?.session_type, length).map((part, i) => (
+                  <span key={i} className="num">{part}</span>
+                ))}
                 {notes?.edited && !editing && (
                   <span className="edited-meta">
                     {NOTES_EDIT.edited} ·{' '}
@@ -389,7 +337,7 @@ function SessionView({ id }: { id: string }) {
               type="button"
               className={finished ? 'btn btn-primary' : 'btn'}
               onClick={() => void savePdf()}
-              disabled={exporting}
+              disabled={pdf.exporting !== null}
             >
               <Icon name="download" /> Export PDF
             </button>
@@ -499,7 +447,7 @@ function SessionView({ id }: { id: string }) {
           ) : editing && notes ? (
             <NotesEditor
               notes={notes}
-              figures={figureMeta}
+              figures={figuresMeta}
               onSaved={(saved) => {
                 setNotes(saved)
                 setEditing(false)
@@ -527,7 +475,7 @@ function SessionView({ id }: { id: string }) {
                     title={notes.title}
                     markdown={notes.markdown}
                     visuals={notes.visuals}
-                    figures={figureMeta}
+                    figures={figuresMeta}
                     hideTitle={notes.title.trim() === session.title.trim()}
                     onOutline={setOutline}
                   />
@@ -602,6 +550,7 @@ function SessionView({ id }: { id: string }) {
         onConfirm={() => void deleteSession()}
         onCancel={() => setConfirmDelete(false)}
       />
+      {pdf.sheet}
     </div>
   )
 }

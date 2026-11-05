@@ -166,8 +166,8 @@ components:
     backgroundColor: "{colors.surface}"
     textColor: "{colors.text}"
     rounded: "{rounded.sm}"
-    padding: "0 12px"
-    height: "32px"
+    padding: "0 0.75rem"
+    height: "2rem"
     typography: "{typography.body}"
   button-secondary-hover:
     backgroundColor: "{colors.surface-2}"
@@ -177,44 +177,44 @@ components:
     backgroundColor: "{colors.accent}"
     textColor: "{colors.accent-text}"
     rounded: "{rounded.sm}"
-    padding: "0 12px"
-    height: "32px"
+    padding: "0 0.75rem"
+    height: "2rem"
   button-primary-hover:
     backgroundColor: "{colors.accent-hover}"
   button-ghost:
     backgroundColor: "transparent"
     textColor: "{colors.text-2}"
     rounded: "{rounded.sm}"
-    padding: "0 12px"
-    height: "32px"
+    padding: "0 0.75rem"
+    height: "2rem"
   button-ghost-hover:
     backgroundColor: "{colors.surface-2}"
     textColor: "{colors.text}"
   button-stop:
     backgroundColor: "{colors.recording}"
     rounded: "{rounded.sm}"
-    padding: "0 12px"
-    height: "32px"
+    padding: "0 0.75rem"
+    height: "2rem"
   button-lg:
-    padding: "0 18px"
-    height: "40px"
+    padding: "0 1.125rem"
+    height: "2.5rem"
     typography: "{typography.body-lg}"
   button-sm:
-    padding: "0 8px"
-    height: "28px"
+    padding: "0 0.5rem"
+    height: "1.75rem"
     typography: "{typography.label}"
   input:
     backgroundColor: "{colors.surface}"
     textColor: "{colors.text}"
     rounded: "{rounded.sm}"
-    padding: "0 10px"
-    height: "36px"
+    padding: "0 0.625rem"
+    height: "2.25rem"
   chip:
     backgroundColor: "{colors.surface-2}"
     textColor: "{colors.text-2}"
     rounded: "{rounded.pill}"
-    padding: "0 9px"
-    height: "24px"
+    padding: "0 0.5625rem"
+    height: "1.5rem"
     typography: "{typography.label}"
   chip-processing:
     backgroundColor: "{colors.accent-soft}"
@@ -244,16 +244,16 @@ components:
   topbar:
     backgroundColor: "{colors.surface-2}"
     textColor: "{colors.text}"
-    height: "56px"
-    padding: "0 20px"
+    height: "3.5rem"
+    padding: "0 1.25rem"
   navlink:
     textColor: "{colors.text-2}"
     rounded: "{rounded.sm}"
-    padding: "0 10px"
-    height: "32px"
+    padding: "0 0.625rem"
+    height: "2rem"
   tab:
     textColor: "{colors.text-2}"
-    height: "40px"
+    height: "2.5rem"
     typography: "{typography.body}"
   tab-selected:
     textColor: "{colors.text}"
@@ -261,11 +261,11 @@ components:
     backgroundColor: "{colors.surface-2}"
     rounded: "{rounded.md}"
     padding: "16px"
-    width: "300px"
+    width: "18.75rem"
   library-list:
     backgroundColor: "{colors.surface}"
     rounded: "{rounded.md}"
-    width: "960px"
+    width: "60rem"
   library-row-hover:
     backgroundColor: "{colors.surface-2}"
   banner-warning:
@@ -283,21 +283,21 @@ components:
   recording-bar:
     backgroundColor: "{colors.recording-soft}"
     textColor: "{colors.recording}"
-    height: "56px"
-    padding: "0 20px"
+    height: "3.5rem"
+    padding: "0 1.25rem"
   select:
     backgroundColor: "{colors.surface}"
     textColor: "{colors.text}"
     rounded: "{rounded.sm}"
-    padding: "0 32px 0 10px"
-    height: "32px"
+    padding: "0 2rem 0 0.625rem"
+    height: "2rem"
   settings-rows:
     backgroundColor: "{colors.surface}"
     rounded: "{rounded.md}"
-    width: "760px"
+    width: "47.5rem"
   settings-row:
     padding: "12px 16px"
-    height: "56px"
+    height: "3.5rem"
   save-bar:
     backgroundColor: "{colors.accent-soft}"
     rounded: "{rounded.md}"
@@ -306,15 +306,15 @@ components:
     backgroundColor: "{colors.surface-2}"
     textColor: "{colors.text-2}"
     rounded: "{rounded.pill}"
-    padding: "0 7px"
-    height: "20px"
+    padding: "0 0.4375rem"
+    height: "1.25rem"
     typography: "{typography.caption}"
   dialog:
     backgroundColor: "{colors.surface}"
     textColor: "{colors.text}"
     rounded: "{rounded.md}"
     padding: "20px"
-    width: "420px"
+    width: "26.25rem"
   notes-column:
     textColor: "{colors.text}"
     typography: "{typography.body-notes}"
@@ -471,6 +471,12 @@ and 600 (300 only for the recorder clock).
 
 ## Layout
 
+**The Relative Size Rule.** The window is resized often, so nothing is sized in fixed pixels that
+could make it overlap: controls (buttons, fields, chips, tabs, menus) are sized in rem, columns
+are sized to their content or as shares of the row (`fr`, `max-content`), page widths are in rem
+and breakpoints in em. Only hairlines, radii, shadows and the notes' own drawing stay in px. Sizes
+below are given in px at the default text size (1rem = 16px).
+
 - **Shell:** a sticky 56px top bar; main content padded 32px 24px 64px (24px 16px 48px under 560px).
 - **Widths:** library and most pages cap at 960px; settings at 760px; upload and live setup at
   600px; the session page at 1200px, centred.
@@ -478,18 +484,21 @@ and 600 (300 only for the recorder clock).
   ribbon 20px below, then a two-column grid: reading column `minmax(0, 1fr)` plus a 300px sticky
   rail, 32px apart. The notes column is capped at 68ch inside its track. Until the notes are
   finished the reading column holds the progress view instead, and there is no ribbon.
-- **Library:** one bordered list; columns
-  `title 1fr · status 260px · created 130px · cost 88px (right-aligned) · actions 150px`,
-  rows at least 56px tall, each whole row a link.
+- **Library:** one bordered list; every row shares its columns (subgrid):
+  `title minmax(0, 1fr) · status minmax(max-content, 12rem) · created · cost (right-aligned) ·
+  actions`, the last three as wide as what they hold, so no cell runs into the next at any width;
+  the title takes what is left and shortens with an ellipsis. Rows are at least 56px tall, each
+  whole row a link.
 - **Spacing rhythm:** a 4px base. Common steps are 4, 6, 8, 12, 16, 20, 24, 32, 48 and 64. 6px
   separates a label from its control and icon from text; 8px separates sibling buttons; 16–20px
   separates blocks; 48px opens a notes section.
 - **Breakpoints:**
-  - ≤1120px: the session becomes one column and the rail collapses into a summary bar above the
+  - ≤1120px (70em): the session becomes one column and the rail collapses into a summary bar above the
     tabs, expandable in place.
-  - ≤860px: the library drops its header, date and cost columns, status moves under the title; the
+  - ≤860px (53.75em): the library drops its header, date and cost columns, status moves under the title; the
     recording bar hides capture status; the session header stacks.
-  - ≤560px: tighter top bar and page padding; top-bar button labels hide to icons.
+  - ≤560px (35em): tighter top bar and page padding; top-bar button labels hide to icons.
+  - ≤400px (25em): the top bar's items close up (2px apart) so it fits a 360px phone.
 
 ## Elevation & Depth
 
@@ -591,12 +600,13 @@ except one-value rows (Version) that stay on one line.
 
 ### Export
 The app exports PDF only: "Export PDF" (primary once the session is finished, download icon) on
-the session page, and a small "Export PDF" on each finished library row, which opens the session
-and exports from there (a PDF is the notes page printed). The engine's Markdown export stays an
-API route (`GET /export`) for other apps; the UI doesn't offer it. Before printing, the notes'
-figures and fonts finish loading. Printing (Export PDF, or the browser's Print) shows only the
-session's title, its meta line and the notes, in the light theme on white whatever the app's
-theme, A4 with 16mm by 15mm margins, 11pt text at 1.55, boxes keeping their colours, and no box,
+the session page, and a small "Export PDF" on each finished library row. Both do the same thing
+and change nothing on screen: no navigation, no tab switch, no theme change. The notes are drawn
+in an invisible print sheet and printed from there. The engine's Markdown export stays an API
+route (`GET /export`) for other apps; the UI doesn't offer it. Before printing, the notes' figures
+and fonts finish loading. Printing (Export PDF, or the browser's Print) shows only the session's
+title, its meta line and the notes, in the light colours on white whatever the app's theme (dark
+applies to the screen only), A4 with 16mm by 15mm margins, 11pt text at 1.55, boxes keeping their colours, and no box,
 step, figure, table, code block or display formula split across pages. The desktop app saves the
 PDF where the user chooses (named after the session); a browser opens its print dialog.
 

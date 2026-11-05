@@ -49,5 +49,6 @@ export function saveRefused(detail: string): string {
   return `${NOTES_EDIT.saveRefused} ${detail.replace(/^Line \d+: /, '')}`
 }
 
-/** Export PDF failed in the desktop app (the reason is in its log). */
+/** Export PDF failed: the notes couldn't be loaded, or the desktop app couldn't save the file
+ *  (the reason is in the console or the app's log). */
 export const PDF_FAILED = 'The PDF couldn’t be saved. Try again.'
