@@ -175,3 +175,30 @@ def test_damaged_edits_leave_the_generated_notes_readable(client, settings, capl
     got = client.get(f"/api/sessions/{sid}/notes")
     assert got.status_code == 200 and got.json()["markdown"] == GENERATED
     assert "unreadable" in caplog.text
+
+
+def test_after_a_rerun_renumbers_a_figure_keep_is_refused_until_the_edits_are_fixed(
+    client, settings
+):
+    sid, notes = make_notes(client, settings)
+    paths = session_paths(settings.sessions_dir, sid)
+    save(client, sid, EDITED, generated_hash(notes))
+    # A re-run from select numbers the figures afresh: v1 is now v2.
+    renumbered = notes.model_copy(
+        update={
+            "markdown": GENERATED.replace("#v1", "#v2"),
+            "visuals": [notes.visuals[0].model_copy(update={"id": "v2"})],
+        }
+    )
+    write_model(paths.notes, renumbered)
+    got = client.get(f"/api/sessions/{sid}/notes").json()
+    assert got["edited"]["stale"] is True
+
+    kept = save(client, sid, got["markdown"], got["generated_hash"])
+    assert kept.status_code == 422
+    assert "no figure" in kept.json()["detail"]
+    assert client.get(f"/api/sessions/{sid}/notes").json()["edited"]["stale"] is True
+
+    # Fixed in the editor (the missing figure removed, or the new one placed): saved, not stale.
+    fixed = save(client, sid, EDITED.replace("#v1", "#v2"), got["generated_hash"]).json()
+    assert fixed["edited"]["stale"] is False

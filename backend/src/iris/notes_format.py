@@ -37,9 +37,12 @@ PALETTE = ("grey", "indigo", "blue", "teal", "green", "amber", "orange", "red", 
 COMMANDS = ("box", "step")
 MAX_DEPTH = 2  # blocks open at once: a box inside a step or box, never deeper
 
+# A title may hold brackets in pairs, one level deep ("[Interval [a, b]]", "[$x[i]$]"); an
+# unpaired ] is written \].
 OPEN = re.compile(
     r"^(?P<colons>:{3,})(?P<command>[A-Za-z][\w-]*)"
-    r"(?:\[(?P<title>(?:\\.|[^\]\\])*)\])?(?:\{(?P<attrs>[^}]*)\})?[ \t]*$"
+    r"(?:\[(?P<title>(?:\\.|[^\[\]\\]|\[(?:\\.|[^\[\]\\])*\])*)\])?"
+    r"(?:\{(?P<attrs>[^}]*)\})?[ \t]*$"
 )
 CLOSE = re.compile(r"^:{3,}[ \t]*$")
 FIGURE = re.compile(r"^::figure\{#(?P<id>[A-Za-z0-9_-]+)\}[ \t]*$")
@@ -257,9 +260,35 @@ def _lead(inline: Token | None, source: str) -> str:
     return m.group("lead").strip() if m else ""
 
 
+def escape_title(text: str) -> str:
+    """Text for between ``[ ]``: brackets in pairs stay (maths keeps its LaTeX); an unpaired
+    bracket is escaped, so the title can't end early."""
+    out: list[str] = []
+    opened: list[int] = []  # where each unclosed [ is in out
+    i = 0
+    while i < len(text):
+        c = text[i]
+        if c == "\\":
+            out.append(text[i : i + 2])
+            i += 2
+            continue
+        if c == "[":
+            opened.append(len(out))
+        elif c == "]":
+            if opened:
+                opened.pop()
+            else:
+                c = "\\]"
+        out.append(c)
+        i += 1
+    for at in opened:
+        out[at] = "\\["
+    return "".join(out)
+
+
 def _label(lead: str) -> str:
-    """A title for ``[ ]``: the label without its colon, brackets escaped."""
-    return re.sub(r"([\\\]])", r"\\\1", lead.strip().rstrip(":").strip())
+    """A title for ``[ ]``: the label without its colon."""
+    return escape_title(lead.strip().rstrip(":").strip())
 
 
 def _without_lead(text: str) -> str:

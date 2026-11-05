@@ -15,7 +15,7 @@ import { landingSpots, nearestSpot, type Measured, type Spot } from '../notes/ed
 import { toDoc, toMarkdown } from '../notes/editor/markdown'
 import { editorPlugins, flashKey, mathWithViews, selectedBlock, selectedBlockKey, type OpenMath } from '../notes/editor/plugins'
 import type { Colour } from '../notes/format'
-import { NOTES_EDIT, UNREACHABLE } from '../session/messages'
+import { NOTES_EDIT, saveRefused, UNREACHABLE } from '../session/messages'
 import { ConfirmDialog } from './ConfirmDialog'
 import { MathEditor, MenuItem, Popover, Swatches } from './EditorMenu'
 import { Icon, type IconName } from './Icon'
@@ -198,7 +198,7 @@ export function NotesEditor(props: {
         response.status === 409
           ? NOTES_EDIT.saveWhileProcessing
           : response.status === 422 && typeof detail === 'string'
-            ? `${NOTES_EDIT.saveRefused} ${detail}`
+            ? saveRefused(detail)
             : NOTES_EDIT.saveFailed,
       )
     } catch {

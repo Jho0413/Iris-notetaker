@@ -256,10 +256,31 @@ def test_upgrade_legacy_keeps_everything_else_as_written():
     assert nf.upgrade_legacy(md, []) == md
 
 
-def test_upgrade_legacy_titles_escape_brackets():
-    upgraded = nf.upgrade_legacy("**Step 1: Use [x]**\n\nText.", [])
-    assert upgraded.startswith(":::step[Use [x\\]]{color=indigo}")
-    assert nf.scan(upgraded).blocks[0].title == "Use [x\\]"
+def test_upgrade_legacy_titles_keep_brackets_and_maths():
+    upgraded = nf.upgrade_legacy("**Step 1: Use [x] and $\\alpha_{[i]}$**\n\nText.", [])
+    assert upgraded.startswith(":::step[Use [x] and $\\alpha_{[i]}$]{color=indigo}")
+    assert nf.scan(upgraded).blocks[0].title == "Use [x] and $\\alpha_{[i]}$"
+    assert nf.validate(upgraded, set()) == []
+
+
+@pytest.mark.parametrize(
+    ("text", "escaped"),
+    [
+        ("Closed interval [a, b]", "Closed interval [a, b]"),
+        ("Half-open [a, b)", "Half-open \\[a, b)"),
+        ("Ends with ]", "Ends with \\]"),
+        ("Already \\] escaped", "Already \\] escaped"),
+    ],
+)
+def test_escape_title_escapes_only_unpaired_brackets(text, escaped):
+    assert nf.escape_title(text) == escaped
+    assert nf.scan(f":::box[{escaped}]\nx\n:::").blocks[0].title == escaped
+
+
+def test_titles_may_hold_brackets_in_pairs():
+    md = ":::box[Closed interval [a, b]]{color=blue}\nx\n:::\n:::step[Interval $[a,b]$]\ny\n:::"
+    assert [b.title for b in nf.scan(md).blocks] == ["Closed interval [a, b]", "Interval $[a,b]$"]
+    assert nf.validate(md, set()) == []
 
 
 @pytest.mark.parametrize("version", [1, 2])

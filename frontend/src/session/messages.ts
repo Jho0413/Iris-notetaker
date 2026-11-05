@@ -40,7 +40,14 @@ export const NOTES_EDIT = {
   useNewBody: 'Your edits are removed and the notes Iris made again are shown. This can’t be undone.',
   keep: 'Keep my edits',
   keepFailed: 'Your edits couldn’t be kept. Try again.',
+  // A re-run can renumber or drop figures the edits place: the editor marks each one it can't find.
+  keepInvalid: 'Your edits no longer fit the notes Iris made again: a figure they use may be gone. Edit the notes to fix what’s marked, then save.',
 } as const
+
+/** A save the engine refused, in the editor's words: Markdown line numbers mean nothing there. */
+export function saveRefused(detail: string): string {
+  return `${NOTES_EDIT.saveRefused} ${detail.replace(/^Line \d+: /, '')}`
+}
 
 /** Export → PDF failed in the desktop app (the reason is in its log). */
 export const PDF_FAILED = 'The PDF couldn’t be saved. Try again.'

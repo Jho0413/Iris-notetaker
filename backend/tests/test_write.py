@@ -387,3 +387,14 @@ def test_a_steps_figures_go_inside_the_step_at_its_end():
         "\n\n[visual:v1]\n\n[visual:v2]\n\n:::\n\n"
         ":::box[Answer]{color=green}\nHeavier.\n:::\n\nAfter.\n\n[visual:v3]"
     )
+
+
+async def test_a_title_with_brackets_in_pairs_is_kept(setup):
+    ctx, _, _, generate, _ = setup
+    generate.return_value = section(
+        ["v1"],
+        ":::box[Closed interval [a, b]]{color=blue}\nShip the prototype. Alex will test it.\n:::",
+    )
+    await write.run(ctx)
+    draft = read_model(ctx.paths.notes_draft, NotesDraft)
+    assert draft.markdown.startswith(":::box[Closed interval [a, b]]{color=blue}")

@@ -31,14 +31,25 @@ export function toDoc(markdown: string): JSONContent {
   return doc.content?.length ? doc : { type: 'doc', content: [{ type: 'paragraph' }] }
 }
 
+const FENCE = /^\s*(`{3,}|~{3,})/
+
 /** Notes Markdown for an editor document, in the notes format. */
 export function toMarkdown(doc: JSONContent): string {
-  // An empty paragraph is written as &nbsp; to keep it; in notes it is only a blank line.
-  return manager
-    .serialize(doc)
-    .split('\n')
-    .map((line) => (line.trim() === '&nbsp;' ? '' : line))
-    .join('\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim()
+  // An empty paragraph is written as &nbsp; to keep it; in notes it is only a blank line, and
+  // blank lines don't pile up. Code is left exactly as written.
+  const out: string[] = []
+  let fence: string | null = null
+  for (const line of manager.serialize(doc).split('\n')) {
+    const f = line.match(FENCE)
+    if (fence !== null) {
+      if (f && f[1][0] === fence[0] && f[1].length >= fence.length && !line.trim().slice(f[1].length)) fence = null
+      out.push(line)
+      continue
+    }
+    if (f) fence = f[1]
+    const text = line.trim() === '&nbsp;' ? '' : line
+    if (!text.trim() && !out[out.length - 1]?.trim()) continue
+    out.push(text)
+  }
+  return out.join('\n').trim()
 }

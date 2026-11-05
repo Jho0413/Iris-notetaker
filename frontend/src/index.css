@@ -655,12 +655,12 @@ body.is-dragging, body.is-dragging * { cursor: grabbing !important; user-select:
   padding: 0 8px; border: 0; border-radius: 6px; background: transparent; color: var(--text);
   font: 600 0.8125rem/1 var(--font); cursor: pointer; }
 .bubble button:hover, .bubble button[aria-pressed='true'] { background: var(--surface-2); }
-.bubble .i { font-style: italic; font-family: Georgia, serif; }
+.bubble .i { font-style: italic; }
 .bubble .s { text-decoration: line-through; }
 .drag-chip { position: fixed; z-index: 40; pointer-events: none; display: flex; align-items: center; height: 28px;
   padding: 0 10px; border-radius: 6px; background: var(--text); color: var(--bg); font: 500 0.8125rem/1 var(--font);
   box-shadow: var(--shadow); transform: translate(14px, 12px); white-space: nowrap; }
-.drop-line { position: absolute; z-index: 25; display: none; height: 3px; border-radius: 2px; background: var(--accent);
+.drop-line { position: absolute; z-index: 25; display: none; height: 3px; border-radius: 999px; background: var(--accent);
   pointer-events: none; transition: top 90ms var(--ease), left 90ms var(--ease), width 90ms var(--ease); }
 .drop-line::before { content: ''; position: absolute; left: -5px; top: -3px; width: 9px; height: 9px; border-radius: 50%;
   border: 2px solid var(--accent); background: var(--bg); }

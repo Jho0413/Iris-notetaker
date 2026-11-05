@@ -210,7 +210,15 @@ function SessionView({ id }: { id: string }) {
         body: { markdown: notes.markdown, based_on: notes.generated_hash ?? '' },
       })
       if (data) setNotes(data)
-      else setActionError(response.status === 409 ? NOTES_EDIT.saveWhileProcessing : NOTES_EDIT.keepFailed)
+      else {
+        setActionError(
+          response.status === 409
+            ? NOTES_EDIT.saveWhileProcessing
+            : response.status === 422
+              ? NOTES_EDIT.keepInvalid
+              : NOTES_EDIT.keepFailed,
+        )
+      }
     } catch {
       setActionError(UNREACHABLE)
     } finally {

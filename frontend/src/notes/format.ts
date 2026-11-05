@@ -17,7 +17,9 @@ export type Colour = (typeof PALETTE)[number]
 export const COMMANDS = ['box', 'step'] as const
 const MAX_DEPTH = 2 // blocks open at once: a box inside a step or box, never deeper
 
-export const OPEN = /^(:{3,})([A-Za-z][\w-]*)(?:\[((?:\\.|[^\]\\])*)\])?(?:\{([^}]*)\})?[ \t]*$/
+// A title may hold brackets in pairs, one level deep ("[Interval [a, b]]", "[$x[i]$]"); an
+// unpaired ] is written \].
+export const OPEN = /^(:{3,})([A-Za-z][\w-]*)(?:\[((?:\\.|[^[\]\\]|\[(?:\\.|[^[\]\\])*\])*)\])?(?:\{([^}]*)\})?[ \t]*$/
 export const CLOSE = /^:{3,}[ \t]*$/
 export const FIGURE = /^::figure\{#([A-Za-z0-9_-]+)\}[ \t]*$/
 const FENCE = /^ {0,3}(`{3,}|~{3,})/

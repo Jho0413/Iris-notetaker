@@ -92,3 +92,8 @@ test('steps inside a step or box form their own path; too-deep steps are not on 
 test('empty notes', () => {
   assert.deepEqual(parseNotes(''), [])
 })
+
+test('titles may hold brackets in pairs', () => {
+  const titles = parseNotes(':::box[Closed interval [a, b]]{color=blue}\n:::\n:::box[$x[i]$ and \\]]\n:::').map((n) => block(n).title)
+  assert.deepEqual(titles, ['Closed interval [a, b]', '$x[i]$ and \\]'])
+})

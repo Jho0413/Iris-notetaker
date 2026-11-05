@@ -24,9 +24,26 @@ interface ContainerToken extends MarkdownToken {
   tokens: MarkdownToken[]
 }
 
-/** A title written back between [ ]: brackets and backslashes are escaped. */
-function titleMarkdown(rendered: string): string {
-  return rendered.replace(/\n+/g, ' ').replace(/(?<!\\)\]/g, '\\]')
+/** A title written back between [ ]: brackets in pairs stay as they are (maths keeps its
+ *  LaTeX); an unpaired ] is escaped, so the title can't end early. */
+export function titleMarkdown(rendered: string): string {
+  const out: string[] = []
+  const opened: number[] = [] // where each unclosed [ is in out
+  const text = rendered.replace(/\n+/g, ' ')
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i]
+    if (c === '\\') {
+      out.push(text.slice(i, i + 2))
+      i++
+    } else if (c === '[') {
+      opened.push(out.length)
+      out.push(c)
+    } else if (c === ']') {
+      out.push(opened.pop() === undefined ? '\\]' : c)
+    } else out.push(c)
+  }
+  for (const at of opened) out[at] = '\\['
+  return out.join('')
 }
 
 function container(name: Container) {

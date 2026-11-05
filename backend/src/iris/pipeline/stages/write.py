@@ -66,7 +66,8 @@ they never add outside knowledge.
 
 Boxes and steps: a box is a line ":::box[Title]{color=<colour>}", its content, and a line ":::".
 A step is the same with ":::step[What happens]{color=<colour>}". The title in [ ] is shown to the
-reader, in the notes' language; leave out [ ] for a box without a title. Colours: grey, indigo,
+reader, in the notes' language; leave out [ ] for a box without a title. Brackets in a title come
+in pairs ("[Interval [a, b]]"); write a ] that has no [ as \\]. Colours: grey, indigo,
 blue, teal, green, amber, orange, red, pink, violet. Steps in a row form one numbered path (the
 number is drawn for you: never write "Step 1" in a title); anything between two steps ends the
 path, so a box or figure that belongs to a step goes inside it. Each closing ":::" closes the most

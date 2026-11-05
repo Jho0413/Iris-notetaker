@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
+import { titleMarkdown } from '../src/notes/editor/extensions.ts'
 import { toDoc, toMarkdown, notesSchema } from '../src/notes/editor/markdown.ts'
 
 /** Markdown → editor document (checked against the schema) → Markdown. */
@@ -130,4 +131,33 @@ test('an image from outside the session becomes its text, in a valid document', 
 
 test('a block of a kind Iris does not know is edited as a box, as the reading view draws it', () => {
   assert.equal(roundTrip(':::warning[Careful]{color=red}\nText.\n:::'), ':::box[Careful]{color=red}\nText.\n:::')
+})
+
+test('code is saved exactly as written: blank lines and &nbsp; inside it are kept', () => {
+  const md = 'Before.\n\n```python\ndef a():\n    pass\n\n\ndef b():\n    return "&nbsp;"\n&nbsp;\n```\n\nAfter.'
+  assert.equal(roundTrip(md), md)
+  const boxed = ':::box[Code]{color=grey}\n```\nx\n\n\ny\n```\n:::'
+  assert.equal(roundTrip(boxed), boxed)
+})
+
+test('titles keep balanced brackets, inside maths too', () => {
+  const title = (md: string) => toDoc(md).content?.[0].content?.[0]
+  for (const md of [
+    ':::box[Closed interval [a, b]]{color=blue}\nx\n:::',
+    ':::box[Key idea: arr[i] is O(1)]{color=blue}\nx\n:::',
+    ':::step[Interval $[a,b]$]{color=indigo}\nx\n:::',
+  ]) {
+    const once = roundTrip(md)
+    assert.deepEqual(title(once), title(md), once) // the same title, read back
+    assert.equal(roundTrip(once), once)
+  }
+  // Maths in a title keeps its LaTeX exactly.
+  assert.equal(roundTrip(':::step[Interval $[a,b]$]{color=indigo}\nx\n:::'), ':::step[Interval $[a,b]$]{color=indigo}\nx\n:::')
+})
+
+test('only unpaired brackets in a title are escaped (as the backend does)', () => {
+  assert.equal(titleMarkdown('Closed interval [a, b]'), 'Closed interval [a, b]')
+  assert.equal(titleMarkdown('Half-open [a, b)'), 'Half-open \\[a, b)')
+  assert.equal(titleMarkdown('Ends with ]'), 'Ends with \\]')
+  assert.equal(titleMarkdown('Already \\] escaped'), 'Already \\] escaped')
 })
