@@ -1,4 +1,4 @@
-.PHONY: setup dev backend frontend gen-api test lint usage desktop
+.PHONY: setup dev backend frontend gen-api test lint usage desktop app
 
 setup:            ## Install backend, frontend and desktop app dependencies
 	cd backend && uv sync
@@ -25,6 +25,9 @@ test:             ## Run backend/frontend/desktop tests and frontend typecheck
 lint:
 	cd backend && uv run ruff check . && uv run ruff format --check .
 	cd frontend && npm run lint
+
+app:              ## Run the desktop app from the code: rebuilds the UI, no packaging (Dock: "Electron")
+	cd desktop && npm run start:fresh
 
 desktop:          ## Build the macOS app: desktop/dist/mac-arm64/Iris.app and a .dmg (Apple Silicon)
 	desktop/scripts/build-app.sh

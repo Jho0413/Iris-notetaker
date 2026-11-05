@@ -54,9 +54,10 @@ uv run iris replay-live <file>              # play a recording into the live API
 its child process. How it works: [`architecture/desktop.md`](architecture/desktop.md).
 
 ```sh
+make app                          # try a change in the app: rebuilds the UI, then runs it with the
+                                  # backend from the repo (no packaging; shows as "Electron" in the Dock)
 make desktop                      # desktop/dist/mac-arm64/Iris.app and Iris-<version>-arm64.dmg
-cd desktop && npm start           # development: the UI from frontend/dist, the backend from the repo
-cd desktop && npm run start:fresh # the same, rebuilding frontend/dist first
+cd desktop && npm start           # the same as make app, without rebuilding frontend/dist
 cd desktop && npm test            # handler, key store, backend lifecycle and policy tests (plain Node)
 ```
 
