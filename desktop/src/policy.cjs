@@ -71,4 +71,25 @@ function permissionCheckAllowed(permission, requestingOrigin) {
   return GRANTED.has(permission) && isIrisUrl(requestingOrigin)
 }
 
-module.exports = { isIrisUrl, isDesktopPage, isSessionFileUrl, externalUrl, permissionAllowed, permissionCheckAllowed }
+/**
+ * IPC from the Iris UI itself: the top frame of `win`'s page, showing app://iris. Not another
+ * window, not an iframe inside the page, and not one of the app's own pages (e.g. the starting
+ * screen) loaded in the same window. Used for the main window's bridge (pages/preload-main.cjs).
+ */
+function fromIrisWindow(event, win) {
+  const frame = event?.senderFrame
+  return Boolean(
+    win && !win.isDestroyed?.() && event.sender === win.webContents && frame && frame.parent === null &&
+      isIrisUrl(frame.url),
+  )
+}
+
+module.exports = {
+  isIrisUrl,
+  isDesktopPage,
+  isSessionFileUrl,
+  externalUrl,
+  permissionAllowed,
+  permissionCheckAllowed,
+  fromIrisWindow,
+}

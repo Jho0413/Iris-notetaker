@@ -9,26 +9,51 @@
   </head>
   <body>
     <main>
-      <img class="mark" src="iris.svg" alt="" />
-      <h1 id="title">Connect Iris to OpenAI</h1>
-      <p>
-        Iris records and processes everything on this Mac, then sends the audio and the moments that
-        matter on screen to OpenAI to write the notes. Calls are billed to your OpenAI account, about
-        $0.50–2 per hour of session.
-      </p>
-      <p class="small">
-        Create a key at <a href="https://platform.openai.com/api-keys">platform.openai.com/api-keys</a>.
-        It is stored encrypted with your macOS Keychain, and only Iris's engine on this Mac uses it.
-      </p>
-      <form id="form" novalidate>
-        <label for="key">OpenAI API key</label>
-        <input id="key" type="password" autocomplete="off" spellcheck="false" placeholder="sk-…" required />
-        <p id="error" class="error" role="alert"></p>
+      <!-- First run only: step 1 of 2. key.js shows it for mode=first. -->
+      <section id="welcome" hidden>
+        <img class="mark" src="iris.svg" alt="" />
+        <h1>Welcome to Iris</h1>
+        <p class="tagline">Notes that see what was shown.</p>
+        <ol class="steps">
+          <li>
+            <span class="step-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM12 14.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z" /></svg></span>
+            <span><strong>Record or upload a session</strong>A lecture, meeting or demo where something is shown while someone talks.</span>
+          </li>
+          <li>
+            <span class="step-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zM9 21h6M12 17v4" /></svg></span>
+            <span><strong>Iris keeps what was on screen</strong>Slides, sketches and diagrams are redrawn cleanly and checked against what was shown.</span>
+          </li>
+          <li>
+            <span class="step-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5zM14 3v5h5" /></svg></span>
+            <span><strong>Read and export the notes</strong>Each figure sits next to what was said about it. Export as Markdown.</span>
+          </li>
+        </ol>
         <div class="row">
-          <button id="cancel" type="button" hidden>Cancel</button>
-          <button id="save" class="primary" type="submit">Save key</button>
+          <button id="next" class="primary" type="button">Next</button>
         </div>
-      </form>
+      </section>
+
+      <!-- The key form: step 2 of 2 on first run; on its own to add or change the key. -->
+      <section id="connect">
+        <h1 id="title">Connect your OpenAI account</h1>
+        <p class="lede">
+          Iris sends the audio and what was on screen to OpenAI to write your notes, billed to your
+          OpenAI account: about $0.50–2 per hour of session.
+          <a href="https://platform.openai.com/api-keys">Get a key</a>
+        </p>
+        <form id="form" novalidate>
+          <label for="key" class="sr-only">OpenAI API key</label>
+          <input id="key" type="password" autocomplete="off" spellcheck="false" placeholder="Paste your key (sk-…)" required />
+          <p id="error" class="field-error" role="alert"></p>
+          <p class="hint">Stored encrypted in your Keychain.</p>
+          <div class="row">
+            <button id="back" class="quiet" type="button" hidden>Back</button>
+            <span class="spacer"></span>
+            <button id="cancel" class="quiet" type="button">Cancel</button>
+            <button id="save" class="primary" type="submit">Save key</button>
+          </div>
+        </form>
+      </section>
     </main>
   </body>
 </html>

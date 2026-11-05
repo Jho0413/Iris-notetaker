@@ -34,7 +34,11 @@ test('no developer instructions or raw error details in the UI code', () => {
     /HTTP \$\{/, // status codes in messages
     /\.error\b.*\}<|\{(session|run)\.error/, // the old raw `error` field rendered
   ]
-  const offenders = sources(new URL('../src', import.meta.url).pathname).flatMap((path) => {
+  // src/settings/settings.ts is the one exception: the browser-only API key wording, shown only
+  // when Iris runs in a browser (developers), never in the desktop app (issue #21).
+  const allowed = new URL('../src/settings/settings.ts', import.meta.url).pathname
+  const files = sources(new URL('../src', import.meta.url).pathname).filter((path) => path !== allowed)
+  const offenders = files.flatMap((path) => {
     const text = readFileSync(path, 'utf8')
     return banned.filter((re) => re.test(text)).map((re) => `${path}: ${re}`)
   })

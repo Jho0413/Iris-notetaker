@@ -65,3 +65,21 @@ test('figures open in an Iris window; other app:// URLs do not', () => {
   // And such a URL is never handed to the system browser.
   assert.equal(policy.externalUrl('app://iris/api/sessions/ab12cd/files/visuals/v1.jpg'), null)
 })
+
+test('fromIrisWindow: only the Iris page’s top frame in that window', () => {
+  const contents = {}
+  const win = { webContents: contents, isDestroyed: () => false }
+  const event = (frame, sender = contents) => ({ sender, senderFrame: frame })
+  const top = (url) => ({ url, parent: null })
+  assert.ok(policy.fromIrisWindow(event(top('app://iris/settings')), win))
+  assert.ok(policy.fromIrisWindow(event(top('app://iris/')), win))
+  // Another window's contents, an iframe, another origin, the app's own pages, no frame, no window.
+  assert.ok(!policy.fromIrisWindow(event(top('app://iris/settings'), {}), win))
+  assert.ok(!policy.fromIrisWindow(event({ url: 'app://iris/settings', parent: top('app://iris/') }), win))
+  for (const url of ['https://evil.example/', 'file:///Applications/Iris.app/pages/starting.html', 'app://iris.evil/', '']) {
+    assert.ok(!policy.fromIrisWindow(event(top(url)), win), url)
+  }
+  assert.ok(!policy.fromIrisWindow({ sender: contents, senderFrame: null }, win))
+  assert.ok(!policy.fromIrisWindow(event(top('app://iris/')), null))
+  assert.ok(!policy.fromIrisWindow(event(top('app://iris/')), { webContents: contents, isDestroyed: () => true }))
+})

@@ -74,8 +74,13 @@ A copy downloaded from elsewhere needs right-click → **Open** the first time.
   saved; a `.env` there still sets `IRIS_*` options (e.g. `IRIS_TRANSCRIBE_LANGUAGE=fr`) and wins
   over the page.
 - The OpenAI key: `openai-key.bin` in the same folder, encrypted with Electron `safeStorage` (the
-  key to it is in the macOS Keychain as "Iris Safe Storage"). Entered on the first-run screen;
-  **Iris → Change OpenAI API Key…** replaces it and restarts the engine.
+  key to it is in the macOS Keychain as "Iris Safe Storage"). Entered on the welcome shown on a new
+  install's first launch, once and never again (two steps, Welcome then Connect; **Set up later**
+  opens Iris without one; `welcomeShown` in `app-state.json` in the same folder records it) or from **Settings → OpenAI** (Add key…, Replace…, Remove)
+  or **Iris → Change OpenAI API Key…**; a new key is checked with OpenAI before it is saved, and
+  the engine restarts to use it. Without a key, the Library and Settings warn that Iris can't make
+  notes. In development (`npm start`) the engine falls back to `backend/.env`'s key when none is
+  stored, so removing the stored key doesn't make it keyless there.
 - Logs: `logs/main.log` (the app) and `logs/backend.log` (the engine, the same output as
   `iris serve`) in that folder. **Iris → Show Logs** opens it. The key is never logged.
 - `iris show` and `iris cost` work on the app's data from a checkout:

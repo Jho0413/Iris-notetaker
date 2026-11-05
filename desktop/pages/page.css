@@ -3,7 +3,7 @@
 :root {
   --bg: #f6f6f9; --surface: #ffffff; --border: #dedee6; --field-border: #8a8a99;
   --text: #17171c; --text-2: #5b5b68; --accent: #4b44d6; --accent-hover: #3d36c2;
-  --accent-text: #ffffff; --error: #c92a2a; --error-soft: #fdecec;
+  --accent-text: #ffffff; --accent-soft: #ecebff; --error: #c92a2a;
   --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
   --mono: ui-monospace, 'SF Mono', Menlo, monospace;
   color-scheme: light dark;
@@ -12,7 +12,7 @@
   :root {
     --bg: #0e0f13; --surface: #16171d; --border: #2b2c36; --field-border: #666778;
     --text: #ececf2; --text-2: #a2a2b0; --accent: #8f8cff; --accent-hover: #a7a5ff;
-    --accent-text: #0e0f13; --error: #ff6b6b; --error-soft: #3a1a1d;
+    --accent-text: #0e0f13; --accent-soft: #25244a; --error: #ff6b6b;
   }
 }
 * { box-sizing: border-box; }
@@ -32,7 +32,7 @@ input {
   -webkit-user-select: text; user-select: text;
 }
 input:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px; }
+.row { display: flex; gap: 8px; align-items: center; justify-content: flex-end; margin-top: 24px; }
 button {
   font: 600 14px var(--font); padding: 9px 16px; border-radius: 6px; cursor: pointer;
   border: 1px solid var(--border); background: var(--surface); color: var(--text);
@@ -40,7 +40,26 @@ button {
 button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
 button.primary:hover { background: var(--accent-hover); }
 button:disabled { opacity: 0.6; cursor: default; }
-.error { color: var(--error); background: var(--error-soft); border-radius: 6px; padding: 8px 12px; margin: 12px 0 0; }
-.error:empty { display: none; }
-.small { font-size: 13px; }
 .mark { width: 40px; height: 40px; margin-bottom: 16px; }
+
+/* The first-run welcome (key.html, step 1 of 2) and the key form (step 2, or on its own). */
+.tagline { margin: 0; font-size: 15px; }
+.steps { list-style: none; margin: 22px 0 0; padding: 0; display: grid; gap: 14px; }
+.steps li { display: grid; grid-template-columns: 32px 1fr; gap: 12px; align-items: start; font-size: 14px; color: var(--text-2); }
+.steps strong { display: block; color: var(--text); font-size: 15px; font-weight: 600; }
+.step-icon { width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center;
+  color: var(--accent); background: var(--accent-soft); }
+.step-icon svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.75;
+  stroke-linecap: round; stroke-linejoin: round; }
+.lede { margin: 0 0 20px; }
+.lede a { white-space: nowrap; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.field-error { color: var(--error); font-size: 13px; margin: 8px 0 0; }
+.field-error:empty { display: none; }
+.hint { font-size: 13px; margin: 8px 0 0; }
+/* One line under the field: the error replaces the hint while it shows. */
+.field-error:not(:empty) + .hint { display: none; }
+.row .spacer { flex: 1; }
+button.quiet { border-color: transparent; background: transparent; color: var(--text-2); padding-left: 10px; padding-right: 10px; }
+button.quiet:hover { color: var(--text); }
+[hidden] { display: none !important; }

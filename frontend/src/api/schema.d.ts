@@ -63,7 +63,13 @@ export interface paths {
         delete: operations["delete_session_api_sessions__session_id__delete"];
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Rename Session
+         * @description Rename a session, in any state (even while recording or making notes). The pipeline never
+         *     sets the session's title (the notes keep their own), so the name stays through re-runs, and
+         *     the exported file is named after it.
+         */
+        patch: operations["rename_session_api_sessions__session_id__patch"];
         trace?: never;
     };
     "/api/sessions/{session_id}/run": {
@@ -325,6 +331,8 @@ export interface components {
             version: string;
             /** Data Dir */
             data_dir: string;
+            /** Api Key Set */
+            api_key_set: boolean;
         };
         /** Body_create_upload_session_api_sessions_post */
         Body_create_upload_session_api_sessions_post: {
@@ -389,8 +397,9 @@ export interface components {
         };
         /**
          * Health
-         * @description The backend is up. Setup problems (such as a missing API key) are not reported to the UI:
-         *     a run that hits one fails with the generic message, and the log says why.
+         * @description The backend is up. Setup problems are not reported here: a run that hits one fails with the
+         *     generic message, and the log says why. The one exception is a missing API key, which
+         *     ``/api/settings`` reports as yes or no so the UI can warn before anything is run.
          */
         Health: {
             /** Ok */
@@ -510,6 +519,14 @@ export interface components {
              * @default false
              */
             cost_partial: boolean;
+        };
+        /**
+         * SessionRename
+         * @description A session's new name: spaces around it are trimmed, and it can't be empty.
+         */
+        SessionRename: {
+            /** Title */
+            title: string;
         };
         /**
          * SessionStatus
@@ -905,6 +922,41 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rename_session_api_sessions__session_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SessionRename"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Session"];
+                };
             };
             /** @description Validation Error */
             422: {

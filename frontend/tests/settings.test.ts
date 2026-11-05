@@ -3,8 +3,12 @@ import test from 'node:test'
 import {
   AUTO,
   asksBeforeLeaving,
+  BROWSER_KEY_NOTE,
+  KEY_ACTION_FAILED,
+  keyChanged,
   languageName,
   languageOptions,
+  noKeyWarning,
   pendingLanguage,
   saveFailure,
   savedLanguage,
@@ -64,4 +68,24 @@ test('leaving asks only with a pending change and only for another page', () => 
   assert.equal(asksBeforeLeaving('fr', '/settings', '/'), true)
   assert.equal(asksBeforeLeaving('fr', '/settings', '/settings'), false) // same page (e.g. a hash)
   assert.equal(asksBeforeLeaving(null, '/settings', '/'), false)
+})
+
+test('the no-key warning fits where Iris runs', () => {
+  const app = noKeyWarning(true)
+  const browser = noKeyWarning(false)
+  assert.equal(app.title, 'No OpenAI API key is set.')
+  assert.equal(browser.title, app.title)
+  assert.match(app.detail, /can’t make notes until you add one/)
+  assert.doesNotMatch(app.detail, /\.env|make dev/) // app users never see developer files
+  assert.match(browser.detail, /OPENAI_API_KEY.*backend\/\.env.*make dev/)
+})
+
+test('key changes are confirmed in words', () => {
+  assert.equal(keyChanged('saved'), 'Key saved. Iris’s engine restarted with it.')
+  assert.equal(keyChanged('removed'), 'Key removed. Iris’s engine restarted without it.')
+  assert.doesNotMatch(KEY_ACTION_FAILED, /error|\d{3}/i)
+})
+
+test('the browser key note says where the key comes from', () => {
+  assert.match(BROWSER_KEY_NOTE, /OPENAI_API_KEY.*backend\/\.env.*make dev/)
 })

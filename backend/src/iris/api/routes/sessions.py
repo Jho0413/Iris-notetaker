@@ -7,6 +7,7 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, PlainTextResponse
+from pydantic import BaseModel, ConfigDict, StringConstraints
 
 from iris.api.deps import PathsDep, RunnerDep, SessionDep, SettingsDep, StoreDep
 from iris.config import Settings
@@ -55,6 +56,34 @@ async def create_upload_session(
 @router.get("/{session_id}", response_model=Session)
 def get_session(session: SessionDep, settings: SettingsDep) -> Session:
     return _with_cost(session, settings)
+
+
+# Longest session name, in characters; the UI's field stops at the same length.
+TITLE_MAX_CHARS = 200
+
+
+class SessionRename(BaseModel):
+    """A session's new name: spaces around it are trimmed, and it can't be empty."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=TITLE_MAX_CHARS)
+    ]
+
+
+@router.patch("/{session_id}", response_model=Session)
+def rename_session(
+    body: SessionRename, session: SessionDep, store: StoreDep, settings: SettingsDep
+) -> Session:
+    """Rename a session, in any state (even while recording or making notes). The pipeline never
+    sets the session's title (the notes keep their own), so the name stays through re-runs, and
+    the exported file is named after it."""
+    store.update(session.id, title=body.title)
+    renamed = store.get(session.id)  # read back, so the reply's updated_at is the new one
+    if renamed is None:  # deleted meanwhile
+        raise HTTPException(404, "session not found")
+    return _with_cost(renamed, settings)
 
 
 @router.delete("/{session_id}", status_code=204)

@@ -10,6 +10,7 @@ import { SessionRibbon } from '../components/SessionRibbon'
 import { StatusChip } from '../components/StatusChip'
 import { StepList } from '../components/StepList'
 import { TabPanel, Tabs } from '../components/Tabs'
+import { TitleField } from '../components/TitleField'
 import { TranscriptList } from '../components/TranscriptList'
 import { stepCosts, usageCost, usageRefreshKey } from '../session/cost'
 import { againLink, UNREACHABLE } from '../session/messages'
@@ -23,6 +24,7 @@ import {
 import type { SessionStream } from '../session/useSessionStream'
 import { useSessionStream } from '../session/useSessionStream'
 import { useSessionUsage } from '../session/useSessionUsage'
+import { renameSession } from '../session/renameSession'
 import { useTitle } from '../session/useTitle'
 
 type TabId = 'notes' | 'transcript' | 'figures'
@@ -76,6 +78,7 @@ function SessionView({ id }: { id: string }) {
   const [actionError, setActionError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [renaming, setRenaming] = useState(false)
 
   const [reload, setReload] = useState(0)
 
@@ -255,13 +258,38 @@ function SessionView({ id }: { id: string }) {
       </nav>
       <header className="session-head">
         <div className="titles">
-          <h1>{session.title || 'Untitled session'}</h1>
-          <div className="session-meta">
-            {sessionType && <span>{capitalize(sessionType)}</span>}
-            <span>{SOURCE_LABEL[session.source] ?? session.source}</span>
-            {length !== undefined && <span className="num">{formatClock(length)}</span>}
-            <span className="num">{formatWhen(session.created_at)}</span>
-          </div>
+          {renaming ? (
+            <TitleField
+              title={session.title}
+              size="page"
+              onSave={(name) => renameSession(session.id, name, setSession)}
+              onDone={() => setRenaming(false)}
+            />
+          ) : (
+            <>
+              <div className="title-line">
+                {/* The title is the control; the pencil gives keyboard users the same. */}
+                <h1 className="title-text" onClick={() => setRenaming(true)}>
+                  {session.title || 'Untitled session'}
+                </h1>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-icon rename-btn"
+                  aria-label="Rename session"
+                  title="Rename"
+                  onClick={() => setRenaming(true)}
+                >
+                  <Icon name="pencil" />
+                </button>
+              </div>
+              <div className="session-meta">
+                {sessionType && <span>{capitalize(sessionType)}</span>}
+                <span>{SOURCE_LABEL[session.source] ?? session.source}</span>
+                {length !== undefined && <span className="num">{formatClock(length)}</span>}
+                <span className="num">{formatWhen(session.created_at)}</span>
+              </div>
+            </>
+          )}
         </div>
         <div className="head-actions">
           <StatusChip state={ui} />
@@ -497,3 +525,4 @@ function ProgressView({ view, session, run, stream }: {
     </section>
   )
 }
+
