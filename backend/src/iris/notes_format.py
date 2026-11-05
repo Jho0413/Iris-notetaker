@@ -269,7 +269,8 @@ def escape_title(text: str) -> str:
     while i < len(text):
         c = text[i]
         if c == "\\":
-            out.append(text[i : i + 2])
+            # A lone backslash at the end would escape the closing ]: it is written \\.
+            out.append(text[i : i + 2] if i + 1 < len(text) else "\\\\")
             i += 2
             continue
         if c == "[":

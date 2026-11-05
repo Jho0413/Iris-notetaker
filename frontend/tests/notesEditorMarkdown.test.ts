@@ -160,4 +160,5 @@ test('only unpaired brackets in a title are escaped (as the backend does)', () =
   assert.equal(titleMarkdown('Half-open [a, b)'), 'Half-open \\[a, b)')
   assert.equal(titleMarkdown('Ends with ]'), 'Ends with \\]')
   assert.equal(titleMarkdown('Already \\] escaped'), 'Already \\] escaped')
+  assert.equal(titleMarkdown('Ends with \\'), 'Ends with \\\\')
 })

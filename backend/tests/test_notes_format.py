@@ -270,6 +270,7 @@ def test_upgrade_legacy_titles_keep_brackets_and_maths():
         ("Half-open [a, b)", "Half-open \\[a, b)"),
         ("Ends with ]", "Ends with \\]"),
         ("Already \\] escaped", "Already \\] escaped"),
+        ("Ends with \\", "Ends with \\\\"),
     ],
 )
 def test_escape_title_escapes_only_unpaired_brackets(text, escaped):

@@ -33,7 +33,8 @@ export function titleMarkdown(rendered: string): string {
   for (let i = 0; i < text.length; i++) {
     const c = text[i]
     if (c === '\\') {
-      out.push(text.slice(i, i + 2))
+      // A lone backslash at the end would escape the closing ]: it is written \\.
+      out.push(i + 1 < text.length ? text.slice(i, i + 2) : '\\\\')
       i++
     } else if (c === '[') {
       opened.push(out.length)
