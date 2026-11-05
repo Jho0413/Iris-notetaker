@@ -26,7 +26,8 @@ it.
   clean visual: typeset maths, plotted graphs, rendered diagrams, tables, illustrations, or a
   cleaned-up screenshot where the screen is already clean. No restriction on visual type.
 - **Notes:** the style adapts to the content (meeting, lecture or demo). Worked examples are written
-  step by step, with the visual for each step. Shown in the app and exported as Markdown.
+  step by step, with the visual for each step. Shown in the app, editable there, and exported as
+  Markdown or PDF.
 - **Performance and cost:** typical sessions are 30–90 minutes. A 1-hour upload produces notes
   within a few minutes; a live session's notes are finished soon after stop. Processing costs
   $0.50–2 per hour of session.
@@ -131,12 +132,12 @@ is in the session, so adding a source never touches the pipeline.
 | **uv** | Python environment and dependencies |
 | **openapi-typescript** | Generating the UI's typed API client |
 | **react-markdown** + **remark-math** + **KaTeX** | Rendering notes in the UI, with typeset math |
+| **Tiptap** (ProseMirror) + **@tiptap/markdown** | Editing notes in place: boxes, steps, figures and formulas as nodes, read from and written back to the notes format |
 
 ## Not built yet
 
 - Accounts, hosting, sharing links
 - Meeting integrations; the desktop app on Windows, and signed for distribution
-- Editing notes inside Iris
 
 ## Open questions
 

@@ -110,10 +110,12 @@ whole request body ahead of the socket. Server-sent events stream event by event
   is never sent back to a page and never logged. Saving first checks the new key with one free
   request to OpenAI (listing the models, `src/keycheck.cjs`): rejected (401/403), unreachable, or
   OpenAI unable to check, each says so in the window and nothing is saved.
-- **The main window's bridge** (`pages/preload-main.cjs`) gives the Iris UI two actions and nothing
-  to read: `changeKey()` opens the key window (asking first if a session is busy, then restarting
-  the engine with the new key) and `removeKey()` asks once, deletes the key and restarts the engine
-  without it. The main process accepts them only from the top frame of the main window showing
+- **The main window's bridge** (`pages/preload-main.cjs`) gives the Iris UI three actions and
+  nothing to read: `changeKey()` opens the key window (asking first if a session is busy, then
+  restarting the engine with the new key), `removeKey()` asks once, deletes the key and restarts
+  the engine without it, and `savePdf(title)` asks where to save, then prints the page (its print
+  stylesheet) with `printToPDF` and writes the file there (`src/pdf.cjs` names it after the
+  session). The main process accepts them only from the top frame of the main window showing
   `app://iris` (`policy.fromIrisWindow`). Whether a key is set reaches the UI from the engine
   (`/api/settings` `api_key_set`), never from the app.
 - **The API token** is compared in constant time and guards every request, including
