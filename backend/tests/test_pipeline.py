@@ -86,7 +86,8 @@ async def test_assemble_resolves_markers_and_drops_unknown(ctx: StageContext):
     )
     await assemble.run(ctx)
     notes = read_model(ctx.paths.notes, Notes)
-    assert "![Q3 revenue chart](visuals/v1.jpg)" in notes.markdown
+    assert notes.markdown == "Intro\n\n::figure{#v1}\n\n\n"
+    assert notes.format_version == 2
     assert "nope" not in notes.markdown
     assert ctx.paths.notes_md.read_text() == notes.markdown
 

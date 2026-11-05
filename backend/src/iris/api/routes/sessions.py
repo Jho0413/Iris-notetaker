@@ -14,6 +14,7 @@ from iris.config import Settings
 from iris.export import export_markdown_embedded
 from iris.llm.usage import forget_total, with_cost
 from iris.models import Notes, Session, SourceKind, Stage, Transcript
+from iris.notes_format import upgraded
 from iris.sources.upload import save_upload
 from iris.store.layout import read_model, session_paths
 
@@ -123,9 +124,10 @@ def get_transcript(paths: PathsDep) -> Transcript:
 
 @router.get("/{session_id}/notes", response_model=Notes)
 def get_notes(paths: PathsDep) -> Notes:
+    """The notes in the current format: old notes are upgraded as they are read."""
     if not paths.notes.exists():
         raise HTTPException(404, "notes not ready")
-    return read_model(paths.notes, Notes)
+    return upgraded(read_model(paths.notes, Notes))
 
 
 @router.get("/{session_id}/export", response_class=PlainTextResponse)

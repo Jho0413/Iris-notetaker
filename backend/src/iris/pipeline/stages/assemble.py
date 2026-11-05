@@ -1,4 +1,4 @@
-"""Assemble: resolve ``[visual:<id>]`` markers into images and store the final notes.
+"""Assemble: resolve ``[visual:<id>]`` markers into figures and store the final notes.
 
 Reads:  notes_draft.json, selection.json, renders.json and notes_synthesis.json (when present)
 Writes: notes.json (Notes), notes.md
@@ -11,7 +11,6 @@ import logging
 import re
 from pathlib import Path
 
-from iris.markdown import escape_text
 from iris.models import (
     EventType,
     Notes,
@@ -22,30 +21,35 @@ from iris.models import (
     SynthesizedDraft,
     Visual,
 )
+from iris.notes_format import FORMAT_VERSION
 from iris.pipeline.context import StageContext
 from iris.store.layout import read_model, write_model
 
 log = logging.getLogger(__name__)
 
-MARKER = re.compile(r"\[visual:([A-Za-z0-9_\-]+)\]")
+# A marker and any indentation before it: a figure command is read only at the start of a line.
+MARKER = re.compile(
+    r"^[ \t]*\[visual:([A-Za-z0-9_\-]+)\]|\[visual:([A-Za-z0-9_\-]+)\]", re.MULTILINE
+)
 
 
 def resolve_markers(markdown: str, visuals: list[Visual]) -> str:
-    """Replace each marker with a markdown image.
+    """Replace each marker with a ``::figure{#<id>}`` line (``iris.notes_format``); readers take
+    the image, caption and provenance from ``Notes.visuals`` by id.
 
     Unknown ids are dropped, never invented. Each visual appears once: repeated markers for an
     already placed visual are dropped.
     """
-    by_id = {v.id: v for v in visuals}
+    known = {v.id for v in visuals}
     placed: set[str] = set()
 
     def repl(match: re.Match[str]) -> str:
-        v = by_id.get(match.group(1))
-        if v is None or v.id in placed:
+        vid = match.group(1) or match.group(2)
+        if vid not in known or vid in placed:
             return ""
-        placed.add(v.id)
-        caption = escape_text(" ".join(v.caption.splitlines()))
-        return f"![{caption}]({v.path})\n*{caption}*"
+        placed.add(vid)
+        # Write and synthesis keep markers on lines of their own; one inside text gets its own.
+        return f"::figure{{#{vid}}}" if match.group(1) else f"\n\n::figure{{#{vid}}}\n\n"
 
     return MARKER.sub(repl, markdown)
 
@@ -104,6 +108,7 @@ async def run(ctx: StageContext) -> None:
         title=draft.title,
         markdown=markdown,
         visuals=visuals,
+        format_version=FORMAT_VERSION,
     )
     write_model(ctx.paths.notes, notes)
     ctx.paths.notes_md.write_text(markdown)

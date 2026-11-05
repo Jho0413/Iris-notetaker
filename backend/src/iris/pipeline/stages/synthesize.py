@@ -18,9 +18,11 @@ Notes are written forwards in bounded sections and never look back. This pass re
    removes a figure; the model must confirm it.
 3. *Rewrite:* only the sections the edits touch are rewritten, in independent groups. A rewrite is
    accepted only if every visual marker it was given is still there exactly once (minus the
-   duplicates an edit drops), no math, decision, action item or uncertainty wording is lost, and no
-   images or HTML appear. A rejected group keeps its sections as written. A group whose edits only
-   drop duplicate figures is applied locally (the markers are removed), with no rewrite call.
+   duplicates an edit drops), no math, decision, action item or uncertainty wording is lost, no
+   images or HTML appear, and its boxes and steps are whole (``iris.notes_format``) with none
+   lost: a merge may join or move them, but every title and colour is still somewhere. A
+   rejected group keeps its sections as written. A group whose edits only drop duplicate figures
+   is applied locally (the markers are removed), with no rewrite call.
 
 Cost: notes written in one part (``NotesDraft.parts``) make no call unless the sweep found
 look-alike figures: the writer saw everything at once, so there is nothing to merge or reconcile.
@@ -51,6 +53,7 @@ from markdown_it import MarkdownIt
 from markdown_it.token import Token
 from pydantic import BaseModel
 
+from iris import notes_format
 from iris.llm import usage
 from iris.llm.client import get_openai
 from iris.llm.errors import describe, retry_temporary
@@ -156,6 +159,11 @@ Visual markers like [visual:v3] stand for figures. Keep each marker exactly once
 line between blank lines, right after the text it illustrates (move it with that text when merging).
 Remove only the markers in an edit's drop_visual_ids, and adjust any wording that pointed at a
 removed figure. Do not invent markers. Format: CommonMark with GFM tables, no raw HTML or images.
+
+Boxes and steps are a line like ":::box[Title]{color=blue}" or ":::step[Title]{color=indigo}",
+their content, and a line ":::" (each ":::" closes the most recent one still open). Keep every box
+and step with its title and colour, opened and closed within the same section; a merge may move
+them or join two halves of one worked example, never drop one.
 """
 
 
@@ -277,13 +285,20 @@ def kept_moments(moments: list[Moment], selection: Selection) -> list[Moment]:
 
 
 def split_sections(markdown: str) -> list[str]:
-    """Split notes at their top-level (# and ##) headings; text before the first is its own."""
+    """Split notes at their top-level (# and ##) headings; text before the first is its own.
+
+    A heading inside a box or step is part of it, so it never splits the block."""
     lines = markdown.splitlines(keepends=True)
+    open_at = notes_format.scan(markdown).open_at
     starts = sorted(
         {
             t.map[0]
             for t in MarkdownIt().parse(markdown)
-            if t.type == "heading_open" and t.tag in {"h1", "h2"} and t.level == 0 and t.map
+            if t.type == "heading_open"
+            and t.tag in {"h1", "h2"}
+            and t.level == 0
+            and t.map
+            and not open_at[t.map[0]]
         }
     )
     bounds = [0, *(s for s in starts if s > 0), len(lines)]
@@ -527,6 +542,13 @@ def validate_rewrite(rewrite: Rewrite, group: Group, sections: list[str]) -> dic
     outside = join_sections([s for i, s in enumerate(sections) if i not in group.indexes])
     if _math(old_text) - _math(new_text) - _math(outside):
         raise ValueError("rewrite dropped math that appears nowhere else in the notes")
+    for markdown in new.values():
+        layout = notes_format.scan(markdown)
+        if layout.figures or notes_format.structure_problems(layout):
+            raise ValueError("rewrite broke a box or step")
+    signatures = notes_format.signatures
+    if signatures(old_text) - signatures(new_text) - signatures(outside):
+        raise ValueError("rewrite dropped a box or step that appears nowhere else in the notes")
     return new
 
 

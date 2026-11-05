@@ -26,6 +26,7 @@ from markdown_it import MarkdownIt
 from markdown_it.token import Token
 from pydantic import BaseModel
 
+from iris import notes_format
 from iris.llm.client import get_openai
 from iris.llm.errors import UserFacingError, retry_temporary
 from iris.markdown import protect_math
@@ -54,30 +55,47 @@ explain concepts, reasoning and examples. For demos capture the workflow, steps,
 limitations. Write like an excellent textbook or briefing: clear headings (## and ###), short
 paragraphs, precise language, no filler, no meta commentary about the recording.
 
-Follow the discussion: whatever unfolds in stages is written step by step, each step a bold
-"Step n: <what happens>" line followed by its explanation. This covers worked examples and
-procedures, and also processes, sequences of events, and how-it-works explanations. For a worked
-example, state the problem first (bold "Problem:"), give each step's working as display math with
-one or two sentences on why, drawing on what was said, and end with the result in bold ("Answer:").
-For a process or sequence, introduce it in one or two sentences, then give each stage as a step
-with what happens and why, and place that stage's visual right after its step (a visual of one
-stage belongs to that step); end with a bold "Result:" or "Summary:" line when the speaker drew a
-conclusion. Where the speaker stressed a tip or a common mistake, add a blockquote
-starting "**Key idea:**" or "**Watch out:**". Callouts restate what was said or shown; they never
-add outside knowledge.
+Follow the discussion: whatever unfolds in stages is written step by step. This covers worked
+examples and procedures, and also processes, sequences of events, and how-it-works explanations.
+For a worked example, state the problem first, give each step's working as display math with one or
+two sentences on why, drawing on what was said, and end with the result. For a process or sequence,
+introduce it in one or two sentences, then give each stage as a step with what happens and why;
+end with the result or summary when the speaker drew a conclusion. Where the speaker stressed a
+key idea, a definition or a common mistake, put it in a box. Boxes restate what was said or shown;
+they never add outside knowledge.
+
+Boxes and steps: a box is a line ":::box[Title]{color=<colour>}", its content, and a line ":::".
+A step is the same with ":::step[What happens]{color=<colour>}". The title in [ ] is shown to the
+reader, in the notes' language; leave out [ ] for a box without a title. Colours: grey, indigo,
+blue, teal, green, amber, orange, red, pink, violet. Steps in a row form one numbered path (the
+number is drawn for you: never write "Step 1" in a title); anything between two steps ends the
+path, so a box or figure that belongs to a step goes inside it. Each closing ":::" closes the most
+recent block still open. A box may sit inside a step or box, never deeper, and a step never goes
+inside another block. Each block opens and closes its own boxes and steps. Use these:
+- worked-example problem: :::box[Problem]{color=indigo}
+- each stage of a worked example or process: :::step[<what happens>]{color=indigo}
+- answer or result: :::box[Answer]{color=green}
+- decision (meetings): :::box[Decision]{color=green}
+- definition: :::box[Definition: <term>]{color=blue}
+- key idea: :::box[Key idea]{color=blue}
+- watch out, common mistake: :::box[Watch out]{color=amber}
+- open question (meetings): :::box[Open question]{color=amber}
+- example, action items (a "- [ ]" checklist), a note: :::box[<title>]{color=grey}
+Translate the titles into the notes' language. No other commands, attributes or colours.
 
 Math: all mathematics in LaTeX, $...$ inline and $$...$$ for display on lines of their own. Plain
 quantities in prose ("about 1 billion years") are ordinary text, not math. Never
 use \\( \\) or \\[ \\], and never put math in code blocks.
 
-Format: CommonMark with GFM tables. No raw HTML, Markdown images or [visual:...] markers. Return
-blocks of markdown and the visual_ids that belong immediately after each block. Place each visual
-right after the text it illustrates, never at the end: a visual of one stage or step goes inside
-that step, attached to the block holding that step's explanation (never to the introduction or a
-previous step). Write each step as its own block, so its visual can follow it: an introduction
-block, then a "Step 1" block with visual_ids of stage 1, then a "Step 2" block with stage 2's, and
-so on; an introduction before the steps has no visual_ids. Any other visual goes after the first
-paragraph that introduces what it shows. Only use supplied visual IDs and include each exactly once.
+Format: CommonMark with GFM tables, plus the boxes and steps above. No raw HTML, Markdown images
+or [visual:...] markers. Return blocks of markdown and the visual_ids that belong immediately after
+each block. Place each visual right after the text it illustrates, never at the end. A visual of
+one stage or step goes inside that step: write each step as its own block (the whole step, from
+":::step" to its ":::") with that step's visual_ids, and they are placed inside the step, at its
+end. So: an introduction block with no visual_ids, then a block holding step 1 with the visual_ids
+of stage 1, then step 2 with stage 2's, and so on. A block that ends by closing a box gets its
+visuals inside that box. Any other visual goes after the first paragraph that introduces what it
+shows. Only use supplied visual IDs and include each exactly once.
 Captions and descriptions describe images; do not claim they were spoken.
 Long sessions are written in consecutive parts; earlier_parts and later_parts say whether parts come
 before and after this one. Write notes for this part only, without claiming that it covers the
@@ -259,6 +277,11 @@ def validate_section(
             raise ValueError("notes blocks need text and must use visual_ids for markers")
         parser = MarkdownIt()
         _check_tokens(parser.parse(protect_math(block.markdown)[0]))
+        layout = notes_format.scan(block.markdown)
+        if layout.figures:
+            raise ValueError("notes must use visual_ids instead of figure commands")
+        if problems := notes_format.structure_problems(layout):
+            raise ValueError(f"notes block has a format problem: {problems[0].message}")
         # An unclosed code fence would swallow the server-inserted visual markers.
         probe = "[visual:__iris_probe__]"
         if block.visual_ids and not any(
@@ -272,11 +295,28 @@ def validate_section(
         raise ValueError("notes must place each supplied visual exactly once")
 
 
+def repaired(section: WrittenSection) -> WrittenSection:
+    """The model's section with what needs no guessing fixed (``notes_format.repair``): a colour
+    name is never worth failing a session over."""
+    blocks = [
+        b.model_copy(update={"markdown": notes_format.repair(b.markdown)}) for b in section.blocks
+    ]
+    return section.model_copy(update={"blocks": blocks})
+
+
 def section_markdown(section: WrittenSection) -> str:
+    """The section with each block's visual markers after it, or inside it at its end when the
+    block ends by closing a step or box (a step's figure belongs in the step)."""
     blocks = []
     for block in section.blocks:
-        blocks.append(block.markdown.strip())
-        blocks.extend(f"[visual:{vid}]" for vid in block.visual_ids)
+        text = block.markdown.strip()
+        markers = [f"[visual:{vid}]" for vid in block.visual_ids]
+        close = notes_format.ends_inside_block(text) if markers else None
+        if close is None:
+            blocks += [text, *markers]
+        else:
+            lines = text.split("\n")
+            blocks += ["\n".join(lines[:close]).rstrip(), *markers, "\n".join(lines[close:])]
     return "\n\n".join(blocks)
 
 
@@ -363,6 +403,7 @@ async def write_section(
             ctx.settings.api_retry_delays_s,
             what=f"session {ctx.session_id}: notes section",
         )
+        section = repaired(section)
         validate_section(section, part, first)
         cache.parent.mkdir(exist_ok=True)
         write_model(cache, section)

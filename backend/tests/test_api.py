@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 
 from iris.config import Settings
 from iris.models import UNREADABLE_UPLOAD, Notes, SessionType, SourceKind
-from iris.store.layout import session_paths, write_model
+from iris.store.layout import read_model, session_paths, write_model
 
 
 def wait_for_status(client: TestClient, sid: str, statuses: set[str], timeout: float = 5.0) -> dict:
@@ -142,3 +142,18 @@ def test_export_filename_drops_bidi_controls_but_keeps_emoji_sequences(
     encoded = header.split("filename*=UTF-8''")[1]
     assert unquote(encoded) == "gpj.exe 👨\u200d👩\u200d👧.md"
     assert 'filename="gpj.exe.md"' in header
+
+
+def test_old_notes_are_upgraded_on_read_and_left_as_they_are_on_disk(client, settings):
+    sid = make_session_with_notes(client, settings, "Loops")
+    paths = session_paths(settings.sessions_dir, sid)
+    old = read_model(paths.notes, Notes).model_copy(
+        update={"markdown": "**Answer:** It works.", "format_version": 1}
+    )
+    write_model(paths.notes, old)
+    on_disk = paths.notes.read_text()
+
+    notes = client.get(f"/api/sessions/{sid}/notes").json()
+    assert notes["markdown"] == ":::box[Answer]{color=green}\nIt works.\n:::"
+    assert notes["format_version"] == 2
+    assert paths.notes.read_text() == on_disk

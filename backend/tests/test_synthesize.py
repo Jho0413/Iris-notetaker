@@ -160,25 +160,34 @@ Revenue grew 12% in Q1, and the formula is $r = \\frac{a}{b}$.
 
 ## Worked example, part 1
 
-**Problem:** compute the margin.
+:::box[Problem]{color=indigo}
+compute the margin.
+:::
 
-**Step 1: Subtract costs.**
-
+:::step[Subtract costs]{color=indigo}
 $$m = R - C$$
+:::
 
 ## Worked example, part 2
 
-**Step 2: Divide by revenue.**
-
+:::step[Divide by revenue]{color=indigo}
 $$\\mu = m / R$$
+:::
 
-**Answer:** 31%.
+:::box[Answer]{color=green}
+31%.
+:::
 
 [visual:v2]
 
 ## Revenue again
 
-Revenue grew 12% in Q1, as shown before. Decision: we keep the forecast. It is unclear if Q3 holds.
+:::box[Open question]{color=amber}
+## Is Q3 safe?
+It is unclear if Q3 holds.
+:::
+
+Revenue grew 12% in Q1, as shown before. Decision: we keep the forecast.
 
 [visual:v3]
 """
@@ -224,17 +233,21 @@ def edit(kind: str, sections: list[int], **kw) -> dict:
 
 MERGED = """## Worked example
 
-**Problem:** compute the margin.
+:::box[Problem]{color=indigo}
+compute the margin.
+:::
 
-**Step 1: Subtract costs.**
-
+:::step[Subtract costs]{color=indigo}
 $$m = R - C$$
+:::
 
-**Step 2: Divide by revenue.**
-
+:::step[Divide by revenue]{color=indigo}
 $$\\mu = m / R$$
+:::
 
-**Answer:** 31%.
+:::box[Answer]{color=green}
+31%.
+:::
 
 [visual:v2]"""
 
@@ -350,6 +363,12 @@ def test_sections_split_at_top_level_headings_only():
         "# Two\n\nend",
     ]
     assert synthesize.split_sections("") == []
+    # A heading inside a box or step belongs to it and never splits it.
+    boxed = "## One\n\n:::box[Key idea]{color=blue}\n## Inside\ntext\n:::\n\n## Two\n\nend"
+    assert synthesize.split_sections(boxed) == [
+        "## One\n\n:::box[Key idea]{color=blue}\n## Inside\ntext\n:::",
+        "## Two\n\nend",
+    ]
     assert synthesize.join_sections(["a", "", "b"]) == "a\n\nb"
 
 
@@ -434,7 +453,7 @@ async def test_only_touched_sections_are_rewritten_and_markers_resolve(ctx, monk
     assert "part 1" not in notes.markdown and "## Worked example" in notes.markdown
     assert "[visual:" not in notes.markdown
     for vid in ("v1", "v2", "v3"):
-        assert notes.markdown.count(f"(visuals/{vid}.jpg)") == 1
+        assert notes.markdown.count(f"::figure{{#{vid}}}") == 1
     result = report(ctx)
     assert result.status == "applied" and result.rewritten_sections == [1, 2]
     assert result.sections == 4 and len(result.repeats) == 2
@@ -449,7 +468,7 @@ async def test_a_duplicate_figure_is_dropped_locally_without_a_rewrite(ctx, monk
     assert [name for name, _ in fake.calls] == ["EditPlan"]
     hint = fake.calls[0][1]["repeats"][1]["figures"][1]
     assert hint["visual_id"] == "v3" and hint["moment_id"] == "m3" and hint["section"] == 3
-    assert "visuals/v3.jpg" not in notes.markdown and "visuals/v1.jpg" in notes.markdown
+    assert "#v3}" not in notes.markdown and "::figure{#v1}" in notes.markdown
     assert [v.id for v in notes.visuals] == ["v1", "v2", "v3"]  # still listed, just not placed
     result = report(ctx)
     assert result.edits[0].drop_visual_ids == ["v3"] and result.rewritten_sections == [3]
@@ -490,6 +509,10 @@ async def test_a_wholly_repeated_section_can_be_dropped(ctx, monkeypatch):
         "wrong_sections",
         "empty",
         "too_short",
+        "drop_box",
+        "unclosed_box",
+        "box_too_deep",
+        "figure_command",
     ],
 )
 async def test_an_invalid_rewrite_leaves_the_assembled_notes(ctx, monkeypatch, damage):
@@ -510,6 +533,14 @@ async def test_an_invalid_rewrite_leaves_the_assembled_notes(ctx, monkeypatch, d
             "wrong_sections": good,
             "empty": "",
             "too_short": "## Revenue again\n\n[visual:v3]",
+            "drop_box": good.replace(":::box[Open question]{color=amber}\n", "").replace(
+                "holds.\n:::", "holds."
+            ),
+            "unclosed_box": good.replace("holds.\n:::", "holds."),
+            "box_too_deep": good.replace(
+                "holds.\n:::", "holds.\n:::box[A]\n:::box[B]\nx\n:::\n:::\n:::"
+            ),
+            "figure_command": good + "\n\n::figure{#v1}",
         }[damage]
         index = 2 if damage == "wrong_sections" else 3
         return synthesize.Rewrite(
@@ -694,15 +725,15 @@ async def test_one_part_notes_with_look_alike_figures_cost_one_call(ctx, monkeyp
     notes = await finish(ctx)
     assert [name for name, _ in fake.calls] == ["EditPlan"]  # the merge is ignored: one part
     assert fake.calls[0][1]["one_part"] is True
-    assert "visuals/v3.jpg" not in notes.markdown
-    assert "visuals/v1.jpg" in notes.markdown and "visuals/v2.jpg" in notes.markdown
+    assert "#v3}" not in notes.markdown
+    assert "::figure{#v1}" in notes.markdown and "::figure{#v2}" in notes.markdown
     assert "## More" in notes.markdown and "収益" in notes.markdown
     result = report(ctx)
     assert result.status == "applied" and [e.kind for e in result.edits] == ["dedupe_figure"]
     # The model may also find the look-alikes different: then nothing changes.
     fake.plan = []
     shutil.rmtree(ctx.paths.synthesis_cache_dir)  # same inputs would reuse the cached plan
-    assert "visuals/v3.jpg" in (await finish(ctx)).markdown
+    assert "::figure{#v3}" in (await finish(ctx)).markdown
 
 
 async def test_one_part_notes_with_headings_and_no_look_alikes_make_no_call(ctx, monkeypatch):

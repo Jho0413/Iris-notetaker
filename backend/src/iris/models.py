@@ -269,8 +269,11 @@ class Notes(BaseModel):
     session_id: str
     session_type: SessionType
     title: str
-    markdown: str  # markers resolved to image links
+    markdown: str  # the notes format (iris.notes_format); figures as ::figure{#<id>}
     visuals: list[NotesVisual]
+    # 2: boxes, steps and figures by id. Missing means 1, notes written before that format with
+    # bold labels and image links, which readers upgrade (iris.notes_format.upgraded).
+    format_version: int = 1
 
 
 # --- Synthesize output -------------------------------------------------------------------------

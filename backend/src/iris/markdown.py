@@ -28,3 +28,9 @@ def protect_math(markdown: str) -> tuple[str, list[str]]:
 
 def restore_math(text: str, spans: list[str]) -> str:
     return re.sub(r"IRISMATH(\d{6})X", lambda m: spans[int(m.group(1))], text)
+
+
+def mask_math(markdown: str) -> str:
+    """Math spans as runs of ``x`` with their line breaks kept, so a parse of the result reads
+    the structure (and line numbers) of the original without misreading LaTeX as Markdown."""
+    return MATH.sub(lambda m: re.sub(r"[^\n]", "x", m.group(0)), markdown)

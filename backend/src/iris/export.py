@@ -1,4 +1,8 @@
-"""Export notes as standalone CommonMark with local Markdown images embedded."""
+"""Export notes as standalone Markdown with figures and local images embedded.
+
+Boxes and steps keep their ``:::`` lines as written (``iris.notes_format``): other Markdown apps
+show them as text. Each ``::figure{#<id>}`` becomes the figure's image, embedded, and its caption.
+"""
 
 import base64
 import mimetypes
@@ -12,6 +16,7 @@ from mdformat.renderer import MDRenderer, RenderContext, RenderTreeNode
 
 from iris.markdown import escape_text, protect_math, restore_math
 from iris.models import Notes
+from iris.notes_format import scan, upgraded
 from iris.svg import rasterize_svg
 
 
@@ -33,19 +38,49 @@ def export_markdown_embedded(notes: Notes, session_root: Path) -> str:
     """Embed session images; preserve external, missing and outside-session references.
 
     Parse and serialize CommonMark, so whitespace/formatting can be normalized. Code
-    examples are not images. Reference-style images are serialized as inline images.
+    examples are not images. Reference-style images are serialized as inline images. The lines
+    that open and close boxes and steps are kept as they are, between the normalized text.
     """
+    notes = upgraded(notes)
     root = session_root.resolve()
+    visuals = {v.id: v for v in notes.visuals}
+    layout = scan(notes.markdown)
+    fences = {b.line for b in layout.blocks} | {b.end for b in layout.blocks if b.end is not None}
+    figures = dict(layout.figures)
+    title = escape_text(" ".join(notes.title.splitlines()))
+    parts = [_normalized(f"# {title}", root)]
+    text: list[str] = []
+
+    def flush() -> None:
+        if any(line.strip() for line in text):
+            parts.append(_normalized("\n".join(text), root))
+        text.clear()
+
+    for i, line in enumerate(layout.lines):
+        if i in fences:
+            flush()
+            parts.append(line.strip())
+        elif i in figures:
+            flush()
+            if visual := visuals.get(figures[i]):
+                caption = escape_text(" ".join(visual.caption.splitlines()))
+                parts.append(_normalized(f"![{caption}]({visual.path})\n*{caption}*", root))
+        else:
+            text.append(line)
+    flush()
+    return "\n\n".join(parts) + "\n"
+
+
+def _normalized(markdown: str, root: Path) -> str:
+    """CommonMark serialized again, with session images embedded."""
     parser = MarkdownIt("commonmark", renderer_cls=MDRenderer)
     parser.options["parser_extension"] = [_ImageRenderer]
     env: dict = {}
-    title = escape_text(" ".join(notes.title.splitlines()))
     # Serialization would escape LaTeX (x_1 -> x\_1), so math is swapped out and restored.
-    markdown, math = protect_math(notes.markdown)
-    tokens = parser.parse(f"# {title}\n\n{markdown}", env)
-
+    protected, math = protect_math(markdown)
+    tokens = parser.parse(protected, env)
     _prepare_images(tokens, root, parser, env)
-    return restore_math(parser.renderer.render(tokens, parser.options, env), math)
+    return restore_math(parser.renderer.render(tokens, parser.options, env), math).strip()
 
 
 def _embedded_source(ref: str, root: Path) -> str:
