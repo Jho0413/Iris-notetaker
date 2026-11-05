@@ -795,7 +795,9 @@ body.is-dragging, body.is-dragging * { cursor: grabbing !important; user-select:
 @media print {
   body:has(> .print-sheet) > :not(.print-sheet) { display: none !important; }
   .print-sheet { position: static; visibility: visible; }
-  @page { size: A4; margin: 16mm 15mm; }
+  /* The page's margins are white too: left unset, the desktop app paints them in its window's
+     colour, which is dark when macOS is. (White is --plate; @page can't read the page's tokens.) */
+  @page { size: A4; margin: 16mm 15mm; background: #fff; }
   html, body { background: var(--plate); }
   * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .topbar, .skip-link, .crumbs, .head-actions, .rename-btn, .ribbon, .tabs, .rail, .banner,
