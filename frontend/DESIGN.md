@@ -606,9 +606,9 @@ in an invisible print sheet and printed from there. The engine's Markdown export
 route (`GET /export`) for other apps; the UI doesn't offer it. Before printing, the notes' figures
 and fonts finish loading. Printing (Export PDF, or the browser's Print) shows only the session's
 title, its meta line and the notes, in the light colours on white whatever the app's theme (dark
-applies to the screen only), A4 with 16mm by 15mm margins, 11pt text at 1.55, boxes keeping their colours. Steps, boxes and quotes may
-split across pages, so nothing tall leaves a big gap: a split box is drawn as two matching boxes,
-with at least 2 lines in each part, and a title always stays with what follows it. Figures,
+applies to the screen only), A4 with 16mm by 15mm margins, 11pt text at 1.55, boxes keeping their colours. Steps, boxes and quotes split
+wherever the page ends, so nothing tall leaves a big gap: a split box is drawn as two matching
+boxes, and a title always stays with what follows it. Figures,
 tables, code blocks and display formulas never split. The desktop app saves the
 PDF where the user chooses (named after the session); a browser opens its print dialog.
 
