@@ -557,6 +557,15 @@ except one-value rows (Version) that stay on one line.
 - **Pinned by `.env`:** the control is disabled, a neutral "Set outside Iris" lock chip (20px pill)
   follows the name, and the description names the variable and how to free it.
 
+### Renaming
+A session's name is edited in place, on the session page (click the title, or the pencil that
+shows on hover and to the keyboard) and in a library row (the pencil in its actions). The title
+stays text in its own type and place, marked only by a 2px indigo underline, the one place Iris
+uses an underlined field instead of a boxed one (a title isn't a form field). The line under it
+says "Enter to save · Esc to cancel" in `text-2`, or why a save failed in `recording` red. Enter or
+leaving the field saves, Esc cancels, and an empty or unchanged name keeps the old one. No Save or
+Cancel buttons.
+
 ### Navigation
 - **Top bar:** `surface-2` with a bottom hairline; wordmark (indigo iris mark plus "Iris"), nav
   links, then Upload, Record live, a 32px ghost gear button for Settings (`surface-3` while on the
