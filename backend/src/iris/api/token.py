@@ -1,4 +1,5 @@
-"""The per-launch API token (``IRIS_API_TOKEN``), set by the desktop app.
+"""The per-launch API token, set by the desktop app (on stdin: ``iris/launch_secrets.py``; also
+read from ``IRIS_API_TOKEN``).
 
 The backend listens on 127.0.0.1 with the user's OpenAI key loaded, so any local process (or a web
 page making requests to localhost) could otherwise use it. The desktop app makes a random token at

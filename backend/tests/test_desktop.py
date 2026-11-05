@@ -1,17 +1,24 @@
-"""Backend support for the desktop app: ``python -m iris``, the per-launch API token
-(``IRIS_API_TOKEN``) and the parent watcher (``IRIS_PARENT_PID``)."""
+"""Backend support for the desktop app: ``python -m iris``, the per-launch API token, the secrets
+passed on stdin (``iris serve --secrets-from-stdin``) and the parent watcher
+(``IRIS_PARENT_PID``)."""
 
 import asyncio
+import io
+import json
+import os
 import runpy
 import sys
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
 
+import iris.cli
 import iris.parent
 from iris.config import Settings
+from iris.launch_secrets import MAX_LINE_BYTES, SecretsError, read_secrets, settings_with_secrets
 from iris.main import create_app
 from iris.parent import pid_alive, watch_parent
 
@@ -106,6 +113,153 @@ def test_refused_preflight_from_another_origin(tmp_path):
             headers={"Origin": "http://localhost:5173", "Access-Control-Request-Method": "GET"},
         )
     assert res.status_code == 401
+
+
+# --- secrets on stdin -------------------------------------------------------------------------
+
+KEY = "sk-from-the-app-0123456789"
+
+
+def _line(**fields) -> bytes:
+    return (json.dumps(fields) + "\n").encode()
+
+
+@pytest.fixture
+def clean_env(monkeypatch, tmp_path):
+    """No key or token from the developer's environment or backend/.env: cwd is an empty folder."""
+    for name in ("OPENAI_API_KEY", "IRIS_OPENAI_API_KEY", "IRIS_API_TOKEN"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("IRIS_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.chdir(tmp_path)
+
+
+def test_secrets_line_sets_key_and_token(clean_env):
+    before = dict(os.environ)
+    settings = settings_with_secrets(
+        read_secrets(io.BytesIO(_line(openai_api_key=KEY, api_token=TOKEN)))
+    )
+    assert settings.openai_api_key == KEY
+    assert settings.api_token is not None and settings.api_token.get_secret_value() == TOKEN
+    assert dict(os.environ) == before  # never written into the environment
+
+
+def test_secrets_line_with_no_key(clean_env):
+    settings = settings_with_secrets(
+        read_secrets(io.BytesIO(_line(openai_api_key=None, api_token=TOKEN)))
+    )
+    assert settings.openai_api_key is None
+    assert settings.api_token is not None
+
+
+def test_key_from_the_app_wins_over_env_and_dotenv(clean_env, monkeypatch, tmp_path):
+    (tmp_path / ".env").write_text("OPENAI_API_KEY=sk-from-dotenv\nIRIS_API_TOKEN=dotenv-token\n")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-from-env")
+    secrets = read_secrets(io.BytesIO(_line(openai_api_key=KEY, api_token=TOKEN)))
+    settings = settings_with_secrets(secrets)
+    assert settings.openai_api_key == KEY
+    assert settings.api_token is not None and settings.api_token.get_secret_value() == TOKEN
+
+
+def test_no_key_from_the_app_leaves_the_dotenv_key(clean_env, tmp_path):
+    """As before: with no key stored in the app, a .env in the data folder may supply one."""
+    (tmp_path / ".env").write_text("OPENAI_API_KEY=sk-from-dotenv\n")
+    secrets = read_secrets(io.BytesIO(_line(openai_api_key=None, api_token=TOKEN)))
+    assert settings_with_secrets(secrets).openai_api_key == "sk-from-dotenv"
+
+
+def test_reads_only_the_first_line():
+    stream = io.BytesIO(_line(openai_api_key=KEY, api_token=TOKEN) + b"more input\n")
+    assert read_secrets(stream).api_token.get_secret_value() == TOKEN
+    assert stream.read() == b"more input\n"
+
+
+def test_secrets_are_hidden_in_repr():
+    secrets = read_secrets(io.BytesIO(_line(openai_api_key=KEY, api_token=TOKEN)))
+    assert KEY not in repr(secrets) and TOKEN not in repr(secrets)
+
+
+@pytest.mark.parametrize(
+    ("line", "problem"),
+    [
+        (b"", "no secrets line"),
+        (b"\n", "no secrets line"),
+        (b"   \n", "no secrets line"),
+        (f'{{"openai_api_key": "{KEY}", "api_token": '.encode(), "not valid"),  # cut short
+        (f"{KEY} {TOKEN}\n".encode(), "not valid"),
+        (_line(openai_api_key=KEY), "api_token"),  # token missing
+        (_line(openai_api_key=KEY, api_token=""), "api_token"),
+        (_line(openai_api_key=KEY, api_token="   "), "api_token"),
+        (_line(openai_api_key="", api_token=TOKEN), "openai_api_key"),
+        (_line(openai_api_key=42, api_token=TOKEN), "openai_api_key"),
+        (_line(api_token=TOKEN), "openai_api_key"),  # the key is always sent, null if none
+        (_line(openai_api_key=KEY, api_token=TOKEN, **{KEY + "x": 1}), "unknown field"),
+        (json.dumps([KEY, TOKEN]).encode() + b"\n", "not valid"),
+        (_line(openai_api_key=KEY, api_token=TOKEN + "x" * MAX_LINE_BYTES), "longer than"),
+    ],
+)
+def test_bad_secrets_line_fails_clearly_without_the_secrets(line, problem):
+    with pytest.raises(SecretsError) as exc:
+        read_secrets(io.BytesIO(line))
+    message = str(exc.value)
+    assert problem in message
+    assert KEY not in message and TOKEN not in message
+    # No chained pydantic error, whose text would hold the input.
+    assert exc.value.__cause__ is None
+    assert exc.value.__context__ is None or exc.value.__suppress_context__
+
+
+def _serve(monkeypatch, stdin: bytes, *flags: str) -> SimpleNamespace:
+    """Run ``iris serve --secrets-from-stdin`` with uvicorn replaced: what it would have served."""
+    served = SimpleNamespace(app=None, code=None)
+    monkeypatch.setattr(sys, "stdin", SimpleNamespace(buffer=io.BytesIO(stdin)))
+    monkeypatch.setattr(sys, "argv", ["iris", "serve", "--secrets-from-stdin", *flags])
+    monkeypatch.setattr("uvicorn.run", lambda app, **_: setattr(served, "app", app))
+    with pytest.raises(SystemExit) as exit_:
+        iris.cli.main()
+    served.code = exit_.value.code
+    return served
+
+
+def test_serve_with_secrets_from_stdin(clean_env, monkeypatch, tmp_path):
+    before = dict(os.environ)
+    served = _serve(monkeypatch, _line(openai_api_key=KEY, api_token=TOKEN))
+    assert served.code == 0
+    assert dict(os.environ) == before
+    with TestClient(served.app) as c:
+        assert c.get("/api/settings").status_code == 401  # the token from stdin guards the API
+        c.headers["X-Iris-Token"] = TOKEN
+        assert c.get("/api/settings").json()["api_key_set"] is True
+        # A save on the Settings page rebuilds the settings from the loaded ones: the key stays.
+        saved = c.put("/api/settings", json={"transcribe_language": "fr"})
+        assert saved.status_code == 200
+        assert saved.json()["api_key_set"] is True
+        assert served.app.state.runner.settings.openai_api_key == KEY
+        assert served.app.state.runner.settings.transcribe_language == "fr"
+
+
+def test_serve_with_no_key_from_stdin(clean_env, monkeypatch):
+    served = _serve(monkeypatch, _line(openai_api_key=None, api_token=TOKEN))
+    with TestClient(served.app, headers={"X-Iris-Token": TOKEN}) as c:
+        assert c.get("/api/settings").json()["api_key_set"] is False
+
+
+@pytest.mark.parametrize(
+    "stdin", [b"", b"not json\n", _line(openai_api_key=KEY), _line(openai_api_key=KEY, x=TOKEN)]
+)
+def test_serve_refuses_a_bad_secrets_line(clean_env, monkeypatch, capsys, stdin):
+    served = _serve(monkeypatch, stdin)
+    assert served.code == 2
+    assert served.app is None  # never started
+    err = capsys.readouterr().err
+    assert err.startswith("iris serve: ")
+    assert KEY not in err and TOKEN not in err
+
+
+def test_serve_refuses_reload_with_secrets_from_stdin(clean_env, monkeypatch, capsys):
+    served = _serve(monkeypatch, _line(openai_api_key=KEY, api_token=TOKEN), "--reload")
+    assert served.code == 2
+    assert served.app is None
+    assert "--reload" in capsys.readouterr().err
 
 
 # --- parent watcher ---------------------------------------------------------------------------

@@ -1,6 +1,8 @@
 """Command line entry point.
 
-iris serve                          run the API (http://localhost:8000)
+iris serve [--secrets-from-stdin]   run the API (http://localhost:8000); the desktop app
+                                    passes the OpenAI key and API token on stdin
+                                    (iris/launch_secrets.py)
 iris process <file>                 create a session from a recording and run the pipeline
 iris run <session_id> [--from S]    re-run a session's pipeline, optionally from stage S
 iris stage <session_id> <stage>     run one stage on its own (reads/writes session files)
@@ -23,6 +25,7 @@ from pathlib import Path
 from iris.config import get_settings
 from iris.events import EventBus
 from iris.jobs.runner import JobRunner
+from iris.launch_secrets import SecretsError, read_secrets, settings_with_secrets
 from iris.llm.usage import read_usage
 from iris.models import Session, SessionStatus, SessionUsage, SourceKind, Stage, UsageTotals
 from iris.sources.upload import save_upload
@@ -58,6 +61,26 @@ async def _stage(session_id: str, stage: Stage) -> None:
     runner = _runner()
     await runner.run_stage(runner.context(session_id), stage)
     print(f"{stage} done")
+
+
+def _serve(host: str, port: int, reload: bool, secrets_from_stdin: bool) -> int:
+    import uvicorn
+
+    if not secrets_from_stdin:
+        uvicorn.run("iris.main:app", host=host, port=port, reload=reload)
+        return 0
+    if reload:  # reload re-imports iris.main in a new process, which has no stdin line to read
+        print("iris serve: --reload can't be used with --secrets-from-stdin", file=sys.stderr)
+        return 2
+    try:
+        settings = settings_with_secrets(read_secrets(sys.stdin.buffer))
+    except SecretsError as exc:
+        print(f"iris serve: {exc}", file=sys.stderr)
+        return 2
+    from iris.main import create_app
+
+    uvicorn.run(create_app(settings), host=host, port=port)
+    return 0
 
 
 # --- iris show --------------------------------------------------------------------------------
@@ -169,6 +192,11 @@ def main() -> None:
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8000)
     serve.add_argument("--reload", action="store_true")
+    serve.add_argument(
+        "--secrets-from-stdin",
+        action="store_true",
+        help="read the OpenAI key and API token from one JSON line on stdin (the desktop app)",
+    )
 
     process = sub.add_parser("process")
     process.add_argument("file", type=Path)
@@ -194,9 +222,7 @@ def main() -> None:
 
     args = parser.parse_args()
     if args.cmd == "serve":
-        import uvicorn
-
-        uvicorn.run("iris.main:app", host=args.host, port=args.port, reload=args.reload)
+        sys.exit(_serve(args.host, args.port, args.reload, args.secrets_from_stdin))
     elif args.cmd == "process":
         asyncio.run(_process(args.file))
     elif args.cmd == "run":
