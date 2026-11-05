@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { api, type Notes, type Session, type Transcript } from '../api/client'
 import { ConfirmDialog } from '../components/ConfirmDialog'
@@ -224,16 +224,25 @@ function SessionView({ id }: { id: string }) {
     }
   }
 
-  /** Export PDF: the notes tab, as printed, named after the session. */
+  /** Export PDF: the notes tab, as printed, named after the session. One at a time: a second
+   *  click while one runs would print with the theme the first one switched to. */
   const pdfName = session?.title ?? ''
+  const [exporting, setExporting] = useState(false)
+  const exportingNow = useRef(false)
   const savePdf = useCallback(async () => {
+    if (exportingNow.current) return
+    exportingNow.current = true
+    setExporting(true)
     setTab('notes')
     setActionError(null)
-    await new Promise(requestAnimationFrame) // the notes are on screen before they are printed
     try {
+      await new Promise(requestAnimationFrame) // the notes are on screen before they are printed
       await exportPdf(pdfName)
     } catch {
       setActionError(PDF_FAILED)
+    } finally {
+      exportingNow.current = false
+      setExporting(false)
     }
   }, [pdfName])
 
@@ -376,7 +385,12 @@ function SessionView({ id }: { id: string }) {
             </button>
           )}
           {notes && !editing && (
-            <button type="button" className={finished ? 'btn btn-primary' : 'btn'} onClick={() => void savePdf()}>
+            <button
+              type="button"
+              className={finished ? 'btn btn-primary' : 'btn'}
+              onClick={() => void savePdf()}
+              disabled={exporting}
+            >
               <Icon name="download" /> Export PDF
             </button>
           )}
