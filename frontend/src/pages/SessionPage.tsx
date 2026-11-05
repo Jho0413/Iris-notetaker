@@ -4,6 +4,7 @@ import { api, type Notes, type Session, type Transcript } from '../api/client'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { FiguresGrid } from '../components/FiguresGrid'
 import { Icon } from '../components/Icon'
+import { NotesEditor } from '../components/NotesEditor'
 import { NotesView, type OutlineItem } from '../components/NotesView'
 import { ProgressRail } from '../components/ProgressRail'
 import { SessionRibbon } from '../components/SessionRibbon'
@@ -13,7 +14,7 @@ import { TabPanel, Tabs } from '../components/Tabs'
 import { TitleField } from '../components/TitleField'
 import { TranscriptList } from '../components/TranscriptList'
 import { stepCosts, usageCost, usageRefreshKey } from '../session/cost'
-import { againLink, UNREACHABLE } from '../session/messages'
+import { againLink, NOTES_EDIT, UNREACHABLE } from '../session/messages'
 import { act } from '../session/request'
 import { formatWhen, SOURCE_LABEL } from '../session/format'
 import {
@@ -79,6 +80,9 @@ function SessionView({ id }: { id: string }) {
   const [busy, setBusy] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [renaming, setRenaming] = useState(false)
+  const [editing, setEditing] = useState(false)
+  // Dropping the user's edits: "Restore generated notes", or "Use the new notes" after a re-run.
+  const [confirmDrop, setConfirmDrop] = useState<'restore' | 'use-new' | null>(null)
 
   const [reload, setReload] = useState(0)
 
@@ -109,6 +113,7 @@ function SessionView({ id }: { id: string }) {
       setNotes(null)
       setNotesLoaded(false)
       setTranscript(null)
+      setEditing(false)
     }
   }
   useEffect(() => {
@@ -179,6 +184,35 @@ function SessionView({ id }: { id: string }) {
     setConfirmDelete(false)
     if (result.ok) navigate('/')
     else setActionError(result.status === 0 ? UNREACHABLE : "Couldn't delete this session. It may be processing.")
+  }
+
+  async function dropEdits() {
+    setBusy(true)
+    setActionError(null)
+    const result = await act(api.DELETE('/api/sessions/{session_id}/notes/edits', { params: { path: { session_id: id } } }))
+    setBusy(false)
+    setConfirmDrop(null)
+    if (!result.ok) setActionError(result.status === 0 ? UNREACHABLE : NOTES_EDIT.restoreFailed)
+    setReload((n) => n + 1)
+  }
+
+  /** After a re-run: keep the edited version, now based on the new notes. */
+  async function keepEdits() {
+    if (!notes) return
+    setBusy(true)
+    setActionError(null)
+    try {
+      const { data, response } = await api.PUT('/api/sessions/{session_id}/notes/edits', {
+        params: { path: { session_id: id } },
+        body: { markdown: notes.markdown, based_on: notes.generated_hash ?? '' },
+      })
+      if (data) setNotes(data)
+      else setActionError(response.status === 409 ? NOTES_EDIT.saveWhileProcessing : NOTES_EDIT.keepFailed)
+    } catch {
+      setActionError(UNREACHABLE)
+    } finally {
+      setBusy(false)
+    }
   }
 
   function showFigure(f: FigureState) {
@@ -284,13 +318,26 @@ function SessionView({ id }: { id: string }) {
                 <span>{SOURCE_LABEL[session.source] ?? session.source}</span>
                 {length !== undefined && <span className="num">{formatClock(length)}</span>}
                 <span className="num">{formatWhen(session.created_at)}</span>
+                {notes?.edited && !editing && (
+                  <span>
+                    {NOTES_EDIT.edited} ·{' '}
+                    <button type="button" className="link-btn" onClick={() => setConfirmDrop('restore')} disabled={busy}>
+                      {NOTES_EDIT.restore}
+                    </button>
+                  </span>
+                )}
               </div>
             </>
           )}
         </div>
         <div className="head-actions">
           <StatusChip state={ui} />
-          {notes && (
+          {notes && finished && !editing && (
+            <button type="button" className="btn" onClick={() => { setTab('notes'); setEditing(true) }}>
+              <Icon name="pencil" /> Edit notes
+            </button>
+          )}
+          {notes && !editing && (
             <a className={finished ? 'btn btn-primary' : 'btn'} href={`/api/sessions/${session.id}/export`} download>
               <Icon name="download" /> Export Markdown
             </a>
@@ -373,12 +420,39 @@ function SessionView({ id }: { id: string }) {
             </div>
           )}
 
+          {notes?.edited?.stale && finished && !editing && (
+            <div className="banner banner-warning" role="status">
+              <Icon name="alert" />
+              <div className="banner-body">
+                <p>{NOTES_EDIT.stale}</p>
+                <div className="banner-actions">
+                  <button type="button" className="btn btn-sm" onClick={() => setConfirmDrop('use-new')} disabled={busy}>
+                    {NOTES_EDIT.useNew}
+                  </button>
+                  <button type="button" className="btn btn-sm btn-primary" onClick={() => void keepEdits()} disabled={busy}>
+                    {NOTES_EDIT.keep}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {progress ? (
             <ProgressView
               view={progress}
               session={session}
               run={run}
               stream={stream}
+            />
+          ) : editing && notes ? (
+            <NotesEditor
+              notes={notes}
+              figures={figureMeta}
+              onSaved={(saved) => {
+                setNotes(saved)
+                setEditing(false)
+              }}
+              onClose={() => setEditing(false)}
             />
           ) : (
             <>
@@ -456,6 +530,16 @@ function SessionView({ id }: { id: string }) {
         />
       </div>
 
+      <ConfirmDialog
+        open={confirmDrop !== null}
+        title={confirmDrop === 'use-new' ? NOTES_EDIT.useNewTitle : NOTES_EDIT.restoreTitle}
+        body={confirmDrop === 'use-new' ? NOTES_EDIT.useNewBody : NOTES_EDIT.restoreBody}
+        confirm={confirmDrop === 'use-new' ? NOTES_EDIT.useNew : NOTES_EDIT.restore}
+        danger
+        busy={busy}
+        onConfirm={() => void dropEdits()}
+        onCancel={() => setConfirmDrop(null)}
+      />
       <ConfirmDialog
         open={confirmDelete}
         title={`Delete "${session.title}"?`}

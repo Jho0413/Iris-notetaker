@@ -565,6 +565,106 @@ dialog.confirm .dialog-actions { display: flex; justify-content: flex-end; gap: 
 .notes .figure-meta { display: flex; gap: 8px; align-items: center; font-size: 0.8125rem;
   color: var(--text-2); }
 
+/* ---- Editing the notes in place (NotesEditor). The notes keep their reading look; what floats
+   (toolbar, menus, bubble, drag label) uses the Float shadow. --------------------------------- */
+
+.edit-strip { position: sticky; top: var(--topbar); z-index: 8; display: flex; align-items: center; gap: 8px;
+  margin: 0 0 20px; padding: 8px 8px 8px 16px; border: 1px solid var(--accent-line);
+  border-radius: var(--radius-m); background: var(--accent-soft); }
+.edit-strip p { flex: 1; margin: 0; }
+.edit-strip strong { font-weight: 600; }
+.edit-strip .hint, .edit-status { color: var(--text-2); font-size: 0.8125rem; }
+.edit-error { margin-bottom: 16px; }
+.link-btn { padding: 0; border: 0; background: none; color: var(--accent); font: inherit; cursor: pointer;
+  text-decoration: underline; text-underline-offset: 0.2em; text-decoration-thickness: 1px; }
+.link-btn:hover { color: var(--accent-hover); }
+.link-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.notes-editor { position: relative; }
+.notes-editable { outline: none; caret-color: var(--accent); }
+.notes-editable :is(p, h2, h3, li, td, th) { cursor: text; }
+/* Steps sit one after another in the editor (no list around them): the ends of a path get the
+   reading view's spacing, and the last ring has no line below it. */
+.notes-editable .run-item { margin: 0; }
+.notes-editable .run-item.run-first { margin-top: 16px; }
+.notes-editable .run-item.run-last { margin-bottom: 16px; padding-bottom: 0; }
+.notes-editable .run-item.run-last::after { display: none; }
+.notes-editable .blk-step > .blk-head { min-height: 1.7em; }
+/* The block the toolbar acts on. */
+.notes-editable .is-selected { outline: 1px solid var(--accent-line); outline-offset: 4px; border-radius: 6px; }
+.notes-editable .blk.is-selected { outline-offset: 2px; border-radius: var(--radius-m); }
+.notes-editable .is-empty[data-placeholder]:not([data-placeholder=''])::before { content: attr(data-placeholder);
+  float: left; height: 0; color: var(--text-2); font-weight: 400; pointer-events: none; }
+.notes-editable .m, .notes-editable .math-block { cursor: pointer; border-radius: 4px; }
+.notes-editable .m:hover, .notes-editable .ProseMirror-selectednode.m { background: var(--accent-soft); }
+.notes-editable .math-block { margin: 12px 0; padding: 4px 0; overflow-x: auto; }
+.notes-editable .math-block:hover, .notes-editable .math-block.ProseMirror-selectednode { background: var(--surface-2); }
+.notes-editable .math-empty { color: var(--text-2); font-size: 0.875rem; }
+.notes-editable .figure-node.ProseMirror-selectednode .figure img { outline: 2px solid var(--accent-line); outline-offset: 4px; }
+.is-dragging .notes-editable .is-selected { opacity: 0.35; }
+.notes-editable .flash { animation: flash 1s var(--ease); }
+@keyframes flash { 0%, 35% { box-shadow: 0 0 0 2px var(--accent); } 100% { box-shadow: 0 0 0 2px transparent; } }
+
+.blk-toolbar { position: absolute; z-index: 9; display: flex; align-items: center; gap: 2px; padding: 3px;
+  transform: translateY(calc(-100% - 8px)); border: 1px solid var(--border); border-radius: 8px;
+  background: var(--surface); box-shadow: var(--shadow); max-width: 100%; }
+.blk-toolbar .sep { width: 1px; align-self: stretch; margin: 3px 2px; background: var(--border); }
+.tb-btn { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px; border: 0;
+  border-radius: 6px; background: transparent; color: var(--text); font: 500 0.8125rem/1 var(--font);
+  white-space: nowrap; cursor: pointer; }
+.tb-btn:hover { background: var(--surface-2); }
+.tb-btn:disabled { color: var(--text-2); cursor: default; background: none; }
+.tb-btn.tb-parent { color: var(--text-2); }
+.tb-btn.tb-parent:hover { color: var(--text); }
+.tb-btn.tb-drag { color: var(--text-2); cursor: grab; touch-action: none; }
+.dot { width: 14px; height: 14px; border-radius: 50%; background: var(--k);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--k) 70%, black); }
+body.is-dragging .blk-toolbar, body.is-dragging .bubble { display: none; }
+body.is-dragging, body.is-dragging * { cursor: grabbing !important; user-select: none; }
+
+.menu { position: absolute; z-index: 30; min-width: 220px; max-width: min(360px, calc(100vw - 16px));
+  padding: 6px; border: 1px solid var(--border); border-radius: var(--radius-m); background: var(--surface);
+  box-shadow: var(--shadow); font-size: 0.875rem; }
+.menu h3 { margin: 6px 8px; font-size: 0.75rem; font-weight: 600; color: var(--text-2); }
+.menu .mi { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 32px; padding: 0 8px;
+  border: 0; border-radius: 6px; background: transparent; color: var(--text); font: 400 0.875rem/1.3 var(--font);
+  text-align: left; cursor: pointer; }
+.menu .mi:hover, .menu .mi:focus-visible { background: var(--surface-2); }
+.menu .mi:disabled { color: var(--text-2); cursor: default; background: none; }
+.menu .mi .icon { color: var(--text-2); }
+.menu .mi-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.menu .mi-note { flex: none; font-size: 0.75rem; color: var(--text-2); }
+.menu .mi-sep { height: 1px; margin: 6px 4px; background: var(--border); }
+.swatches { display: grid; grid-template-columns: repeat(5, 28px); gap: 6px; padding: 2px 8px 6px; }
+.sw { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0;
+  border: 0; border-radius: 50%; background: var(--ks); box-shadow: inset 0 0 0 1px var(--kl); cursor: pointer; }
+.sw::after { content: ''; width: 14px; height: 14px; border-radius: 50%; background: var(--k); }
+.sw[aria-checked='true'] { box-shadow: inset 0 0 0 1px var(--kl), 0 0 0 2px var(--surface), 0 0 0 4px var(--k); }
+.math-pop { min-width: 300px; padding: 10px 12px 12px; }
+.math-pop label { display: block; margin: 0 0 6px; font-size: 0.8125rem; font-weight: 500; color: var(--text-2); }
+.math-pop textarea { width: 100%; min-height: 56px; padding: 8px 10px; border: 1px solid var(--field-border);
+  border-radius: 6px; background: var(--surface); color: var(--text); font: 400 0.8125rem/1.5 var(--mono); resize: vertical; }
+.math-pop textarea:focus-visible { outline: none; border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.math-pop .math-preview { min-height: 40px; margin: 10px 0; padding: 8px 10px; border-radius: 6px;
+  background: var(--surface-2); overflow-x: auto; }
+.math-pop .math-preview .katex-display { margin: 0; }
+.math-pop .row { display: flex; justify-content: flex-end; gap: 8px; }
+.bubble { position: absolute; z-index: 30; display: flex; gap: 2px; padding: 3px; border: 1px solid var(--border);
+  border-radius: 8px; background: var(--surface); box-shadow: var(--shadow); }
+.bubble button { display: inline-flex; align-items: center; justify-content: center; min-width: 30px; height: 28px;
+  padding: 0 8px; border: 0; border-radius: 6px; background: transparent; color: var(--text);
+  font: 600 0.8125rem/1 var(--font); cursor: pointer; }
+.bubble button:hover, .bubble button[aria-pressed='true'] { background: var(--surface-2); }
+.bubble .i { font-style: italic; font-family: Georgia, serif; }
+.bubble .s { text-decoration: line-through; }
+.drag-chip { position: fixed; z-index: 40; pointer-events: none; display: flex; align-items: center; height: 28px;
+  padding: 0 10px; border-radius: 6px; background: var(--text); color: var(--bg); font: 500 0.8125rem/1 var(--font);
+  box-shadow: var(--shadow); transform: translate(14px, 12px); white-space: nowrap; }
+.drop-line { position: absolute; z-index: 25; display: none; height: 3px; border-radius: 2px; background: var(--accent);
+  pointer-events: none; transition: top 90ms var(--ease), left 90ms var(--ease), width 90ms var(--ease); }
+.drop-line::before { content: ''; position: absolute; left: -5px; top: -3px; width: 9px; height: 9px; border-radius: 50%;
+  border: 2px solid var(--accent); background: var(--bg); }
+
 /* ---- Renaming a session in place (session page and library rows) ---------------------------- */
 /* The title is the control: a click (or the pencil, shown on hover and to the keyboard) turns it
    into a field in the same type and place, marked only by an indigo underline. */
@@ -659,6 +759,13 @@ dialog.confirm .dialog-actions { display: flex; justify-content: flex-end; gap: 
   .banner.banner-inline { flex-wrap: wrap; }
   .banner.banner-inline > .btn { margin-left: 26px; }
   .save-bar p { flex-basis: 100%; }
+  .edit-strip { flex-wrap: wrap; }
+  .edit-strip p { flex-basis: 100%; }
+  .edit-strip .hint { display: none; }
+  .edit-status { margin-right: auto; }
+  /* The toolbar fits a phone: the colour shows as its dot only. */
+  .tb-btn { padding: 0 6px; }
+  .tb-btn .tb-word { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {

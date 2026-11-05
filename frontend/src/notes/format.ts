@@ -17,9 +17,9 @@ export type Colour = (typeof PALETTE)[number]
 export const COMMANDS = ['box', 'step'] as const
 const MAX_DEPTH = 2 // blocks open at once: a box inside a step or box, never deeper
 
-const OPEN = /^(:{3,})([A-Za-z][\w-]*)(?:\[((?:\\.|[^\]\\])*)\])?(?:\{([^}]*)\})?[ \t]*$/
-const CLOSE = /^:{3,}[ \t]*$/
-const FIGURE = /^::figure\{#([A-Za-z0-9_-]+)\}[ \t]*$/
+export const OPEN = /^(:{3,})([A-Za-z][\w-]*)(?:\[((?:\\.|[^\]\\])*)\])?(?:\{([^}]*)\})?[ \t]*$/
+export const CLOSE = /^:{3,}[ \t]*$/
+export const FIGURE = /^::figure\{#([A-Za-z0-9_-]+)\}[ \t]*$/
 const FENCE = /^ {0,3}(`{3,}|~{3,})/
 const COLOUR = /(?:^|\s)color=("?)([^\s"}]*)\1(?=\s|$)/
 
@@ -119,6 +119,28 @@ export function parseNotes(markdown: string): NotesNode[] {
   }
   flush()
   return root
+}
+
+/** The line closing the block opened on `lines[0]` (stack rule, code skipped), or -1. */
+export function blockEnd(lines: readonly string[]): number {
+  let depth = 0
+  let fence: string | null = null
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i]
+    if (fence !== null) {
+      const t = line.trim()
+      if (t.startsWith(fence) && !t.replaceAll(fence[0], '')) fence = null
+      continue
+    }
+    const f = line.match(FENCE)
+    if (f) fence = f[1]
+    else if (OPEN.test(line)) depth++
+    else if (CLOSE.test(line)) {
+      if (depth === 0) return i
+      depth--
+    }
+  }
+  return -1
 }
 
 export const isStep = (n: NotesNode): n is BlockNode =>

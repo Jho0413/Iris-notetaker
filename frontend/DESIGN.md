@@ -494,14 +494,17 @@ and 600 (300 only for the recorder clock).
 ## Elevation & Depth
 
 Iris is flat. Depth comes from tonal layering (`bg` → `surface` → `surface-2` → `surface-3`) and
-1px hairlines, not from shadows. Exactly two elements float: the delete-confirmation dialog and the
-fixed recording bar, which share one soft two-layer shadow (darker and wider in dark mode). Hover
-lifts are tonal (a background step), except the ribbon pin, which rises 2px.
+1px hairlines, not from shadows. Exactly two elements float in reading and recording: the
+confirmation dialog and the fixed recording bar, which share one soft two-layer shadow (darker and
+wider in dark mode). Editing the notes adds the controls that hover over the notes while you edit
+them: the block toolbar, its menus, the formatting bubble, the formula editor and the drag label.
+They take the same shadow and exist only in edit mode. Hover lifts are tonal (a background step),
+except the ribbon pin, which rises 2px.
 
 ### Shadow Vocabulary
 - **Float** (`box-shadow: 0 8px 24px -8px rgb(23 23 40 / 0.18), 0 2px 6px -2px rgb(23 23 40 / 0.08)`;
-  dark `0 12px 32px -8px rgb(0 0 0 / 0.6), 0 2px 8px -2px rgb(0 0 0 / 0.4)`): the dialog and the
-  recording bar only.
+  dark `0 12px 32px -8px rgb(0 0 0 / 0.6), 0 2px 8px -2px rgb(0 0 0 / 0.4)`): the dialog, the
+  recording bar, and the editing controls over the notes (see Editing the notes).
 
 ### Named Rules
 **The Hairline Rule.** Separate with a 1px `border` line or a tonal step. A new panel, card or
@@ -584,6 +587,42 @@ except one-value rows (Version) that stay on one line.
   action to the key row right below it.
 - **Pinned by `.env`:** the control is disabled, a neutral "Set outside Iris" lock chip (20px pill)
   follows the name, and the description names the variable and how to free it.
+
+### Editing the notes
+Edit in place: the notes keep their reading look (same column, boxes, steps and figures), and no
+Markdown is ever shown. "Edit notes" (secondary, pencil) sits beside Export once the session is
+finished.
+- **Editing strip:** sticky under the top bar, in the notes column: `accent-soft` with an
+  `accent-line` hairline, "Editing notes" (600) and a 13px `text-2` hint, the status ("No changes
+  yet", "Unsaved changes", "Saving…"), then Close (Discard once changed) and the primary Save,
+  both small. Under 560px the hint goes and the status and buttons take their own line. Leaving
+  with unsaved changes asks, as in Settings; Discard asks too (red confirm).
+- **Selected block:** clicking any part of a block (text, title, border, padding, figure) selects
+  the innermost block: a 1px `accent-line` outline 4px out (2px on boxes, following their radius).
+- **Block toolbar:** floats above the selected block's top-right corner (Float, `surface`, 8px
+  radius, 3px padding, 28px buttons of 13px 500 text, hairline separators): for a block inside a
+  box or step first "Inside step ↑" / "Inside box ↑" in `text-2` (selects the block around it), then
+  the drag handle (`text-2`, grab cursor), the colour (its dot and name; the dot alone under 560px)
+  for boxes and steps, the type ("Turn into"), move up, move down, add below and delete.
+- **Menus:** under their button (Float, 10px radius, 6px padding): a 12px `text-2` 600 heading,
+  32px rows with a `text-2` icon, a hairline between groups. Add below lists text, heading, box,
+  step, maths, then "Figures from this session" (one already placed is disabled, "Already in the
+  notes"). Up and Down move, Escape closes and returns focus.
+- **Colour swatches:** five to a row, 28px circles of the colour's wash and line with a 14px dot
+  of its label colour; the current one is ringed in its colour.
+- **Formatting bubble:** over selected text: bold, italic, strikethrough and "make maths" (Σ).
+- **Formula editor:** clicking a formula (or Enter on it) opens LaTeX in a mono textarea with a live
+  KaTeX preview on `surface-2`, then Cancel and Done. A new or empty formula reads "Empty formula"
+  in `text-2` and is left out when saved.
+- **Dragging:** by the handle, with the pointer (mouse or touch): after 5px a label ("Box · Key
+  idea", `text` on `bg`, 6px radius) follows the pointer, the dragged block dims to 35%, and one
+  3px indigo drop line with a ring at its start shows where it lands: full width between top-level
+  blocks, indented to the text inside a box or step (move the pointer left of that text to leave
+  it). Near the window's edges the page scrolls; Escape cancels; the moved block flashes once.
+  Every drag has a toolbar equivalent (move up and down, "Inside … ↑").
+- **Edited notes:** the meta line ends "Edited by you · Restore generated notes" (a link-style
+  button; red confirm). After a re-run with edits, an amber banner says so with "Use the new
+  notes" (red confirm) and the primary "Keep my edits".
 
 ### Renaming
 A session's name is edited in place, on the session page (click the title, or the pencil that
