@@ -9,6 +9,7 @@
 // Events older than the current run's start belong to an earlier run and are ignored, so replaying
 // history (all runs, in order) always lands on the latest run.
 import type { IrisEvent, Notes, Session, SessionStatus, Stage, Transcript } from '../api/client'
+import { formatWhen, SOURCE_LABEL } from './format.ts'
 
 export type FailureMessage = NonNullable<Session['failure_message']>
 export type FailureKind = NonNullable<Session['failure_kind']>
@@ -328,6 +329,21 @@ export function provenance(figure: FigureState): Provenance | undefined {
   if (!figure.rendered || figure.verified === undefined) return undefined
   if (!figure.verified) return 'unverified'
   return figure.renderAs === 'screenshot' ? 'screenshot' : 'verified'
+}
+
+/** Per figure id: when it was shown and how it was made (the figure's caption line). */
+export function figureMeta(figures: readonly FigureState[]): Map<string, { t?: number; provenance?: Provenance }> {
+  return new Map(figures.map((f) => [f.id, { t: f.t, provenance: provenance(f) }]))
+}
+
+/** The session's meta line, on its page and in its PDF: type, source, length and when it was made. */
+export function sessionMetaLine(session: Session, sessionType?: string, length?: number): string[] {
+  return [
+    sessionType ? sessionType.charAt(0).toUpperCase() + sessionType.slice(1) : '',
+    SOURCE_LABEL[session.source] ?? session.source,
+    length !== undefined ? formatClock(length) : '',
+    formatWhen(session.created_at),
+  ].filter((part) => part !== '')
 }
 
 /** Session length in seconds, from the transcript (the backend doesn't set `duration_s` yet). */

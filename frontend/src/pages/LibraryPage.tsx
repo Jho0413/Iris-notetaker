@@ -8,11 +8,12 @@ import { NoKeyBanner } from '../components/NoKeyBanner'
 import { TitleField } from '../components/TitleField'
 import { StatusChip } from '../components/StatusChip'
 import { sessionCost } from '../session/cost'
-import { formatWhen, SOURCE_LABEL } from '../session/format'
-import { UNREACHABLE } from '../session/messages'
+import { formatWhen, shownTitle, SOURCE_LABEL } from '../session/format'
+import { PDF_FAILED, UNREACHABLE } from '../session/messages'
 import { act } from '../session/request'
 import { emptyRun, failureView, libraryState } from '../session/state'
 import { renameSession } from '../session/renameSession'
+import { usePdfExport } from '../session/usePdfExport'
 import { useTitle } from '../session/useTitle'
 import { useApiKeySet } from '../settings/useApiKeySet'
 
@@ -44,6 +45,12 @@ export function LibraryPage() {
       setLoad((l) => (l.kind === 'ready' ? { ...l, sessions: l.sessions.map((x) => (x.id === updated.id ? updated : x)) } : l)),
     [],
   )
+
+  const pdf = usePdfExport()
+  async function exportPdf(s: Session) {
+    setActionError(null)
+    if (!(await pdf.exportPdf(s))) setActionError(PDF_FAILED)
+  }
 
   const [tick, setTick] = useState(0)
   const refresh = useCallback(() => setTick((n) => n + 1), [])
@@ -117,9 +124,10 @@ export function LibraryPage() {
           {Array.from({ length: 5 }, (_, i) => (
             <div className="library-row" key={i}>
               <div className="skeleton sk-line" style={{ width: `${60 - i * 6}%` }} />
-              <div className="skeleton sk-line" style={{ width: '70%' }} />
-              <div className="skeleton sk-line meta" style={{ width: '60%' }} />
-              <div className="skeleton sk-line meta" style={{ width: '50%', marginLeft: 'auto' }} />
+              {/* Rem, not %: these columns are as wide as what they hold, and a bar holds nothing. */}
+              <div className="skeleton sk-line" style={{ width: '6rem' }} />
+              <div className="skeleton sk-line meta" style={{ width: '7rem' }} />
+              <div className="skeleton sk-line meta" style={{ width: '3rem', marginLeft: 'auto' }} />
               <span />
             </div>
           ))}
@@ -189,7 +197,7 @@ export function LibraryPage() {
                   ) : (
                     <>
                       <Link to={`/sessions/${s.id}`} className="title-link">
-                        {s.title || 'Untitled session'}
+                        {shownTitle(s.title)}
                       </Link>
                       <span className="sub">{SOURCE_LABEL[s.source] ?? s.source}</span>
                     </>
@@ -206,10 +214,15 @@ export function LibraryPage() {
                 </div>
                 <div className="row-actions" role="cell">
                   {state.kind === 'finished' && (
-                    // A PDF is the notes page printed, so it is made from there.
-                    <Link className="btn btn-sm" to={`/sessions/${s.id}?export=pdf`}>
+                    <button
+                      type="button"
+                      className="btn btn-sm"
+                      onClick={() => void exportPdf(s)}
+                      disabled={pdf.exporting !== null}
+                      aria-busy={pdf.exporting === s.id}
+                    >
                       <Icon name="download" /> Export PDF
-                    </Link>
+                    </button>
                   )}
                   {/* A problem with the recording itself isn't fixed by trying again. */}
                   {state.kind === 'failed' && failureView(s, emptyRun()).kind === 'general' && (
@@ -254,6 +267,7 @@ export function LibraryPage() {
         onConfirm={() => void confirmDelete()}
         onCancel={() => setPendingDelete(null)}
       />
+      {pdf.sheet}
     </div>
   )
 }

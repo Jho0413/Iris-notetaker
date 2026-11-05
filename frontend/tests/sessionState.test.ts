@@ -2,9 +2,9 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { IrisEvent, Notes, Session } from '../src/api/client.ts'
 import {
-  announcement, currentSteps, emptyRun, eventKey, failureView, figureList, formatClock,
+  announcement, currentSteps, emptyRun, eventKey, failureView, figureList, figureMeta, formatClock,
   formatDuration, GENERIC_FAILURE, knownFailureMessage, libraryState, liveProgress, progressView,
-  provenance, reduceEvents, runSeconds, sessionLength, STAGE_ORDER, stageDetail, stageSeconds,
+  provenance, reduceEvents, runSeconds, sessionLength, sessionMetaLine, STAGE_ORDER, stageDetail, stageSeconds,
   stepLine, stepStatus,
   transcriptSegments, uiState, type UiStateKind,
 } from '../src/session/state.ts'
@@ -454,4 +454,35 @@ test('raw text from a crafted session or event is never shown', () => {
 test('a failure without a known step names none', () => {
   const view = failureView(failedSession({ current_stage: null, failure_message: GENERIC_FAILURE }), emptyRun())
   assert.equal(view.headline, "Iris couldn't finish the notes")
+})
+
+test('figure meta: when each figure was shown and how it was made, by id', () => {
+  const notes = {
+    session_id: 's1', session_type: 'lecture', title: 'Algebra', markdown: '',
+    visuals: [
+      { id: 'v1', moment_id: 'm1', frame: { t: 12, path: 'f/1.jpg' }, caption: 'A', path: 'v/1.svg', render_as: 'svg' },
+      { id: 'v2', moment_id: 'm2', frame: { t: 30, path: 'f/2.jpg' }, caption: 'B', path: 'v/2.jpg',
+        render_as: 'screenshot', verified: false },
+    ],
+  } as Notes
+  const meta = figureMeta(figureList(emptyRun(), notes))
+  assert.deepEqual(meta.get('v1'), { t: 12, provenance: 'verified' })
+  assert.deepEqual(meta.get('v2'), { t: 30, provenance: 'unverified' })
+  assert.equal(figureMeta([]).size, 0)
+})
+
+test('the meta line names the type, source, length and date, leaving out what is unknown', () => {
+  const now = new Date()
+  const today = { ...session, created_at: now.toISOString() }
+  const line = sessionMetaLine(today, 'lecture', 75)
+  assert.deepEqual(line.slice(0, 3), ['Lecture', 'Upload', '1:15'])
+  assert.match(line[3], /^Today /)
+  // No notes yet (no type), no length: just the source and date.
+  assert.equal(sessionMetaLine(today).length, 2)
+  assert.equal(sessionMetaLine(today, '', undefined)[0], 'Upload')
+  // A source the UI has no word for is shown as it is; a broken date is left out.
+  const odd = { ...session, source: 'zoom' as Session['source'], created_at: 'not a date' }
+  assert.deepEqual(sessionMetaLine(odd), ['zoom'])
+  // A zero length is a length.
+  assert.deepEqual(sessionMetaLine(odd, undefined, 0), ['zoom', '0:00'])
 })
