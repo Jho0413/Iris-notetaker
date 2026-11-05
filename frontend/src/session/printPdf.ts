@@ -27,6 +27,8 @@ export async function runExport<T>(steps: ExportSteps<T>): Promise<boolean> {
     const sheet = steps.show(data)
     if (!sheet) throw new Error("the print sheet wasn't drawn (the page closed meanwhile)")
     await steps.ready(sheet)
+    // Leaving the page while the figures load takes the sheet with it: check again, just before.
+    if (!sheet.isConnected) throw new Error('the print sheet was removed (the page closed meanwhile)')
     await steps.print()
     return true
   } catch (err) {

@@ -3,7 +3,7 @@ import test from 'node:test'
 import { browserPrint, runExport, type ExportSteps } from '../src/session/printPdf.ts'
 import { shownTitle } from '../src/session/format.ts'
 
-const SHEET = {} as HTMLElement
+const SHEET = { isConnected: true } as HTMLElement
 
 /** Steps that record what ran, with any of them replaced. */
 function steps(over: Partial<ExportSteps<string>> = {}) {
@@ -37,6 +37,18 @@ test('notes that cannot be loaded: nothing is drawn or printed, and it says so',
 test('no print sheet (the page closed meanwhile): the page underneath is never printed', async () => {
   const { ran, all } = steps({ show: () => { ran.push('show'); return null } })
   assert.equal(await runExport(all), false)
+  assert.ok(!ran.includes('print'))
+  assert.equal(ran.at(-1), 'hide')
+})
+
+test('leaving the page while the figures load: the page underneath is never printed', async () => {
+  const sheet = { isConnected: true } as { isConnected: boolean }
+  const { ran, all } = steps({
+    show: () => { ran.push('show'); return sheet as HTMLElement },
+    ready: async () => { ran.push('ready'); sheet.isConnected = false },
+  })
+  assert.equal(await runExport(all), false)
+  assert.deepEqual(ran, ['load', 'show', 'ready', 'hide'])
   assert.ok(!ran.includes('print'))
   assert.equal(ran.at(-1), 'hide')
 })
