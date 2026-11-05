@@ -808,8 +808,14 @@ body.is-dragging, body.is-dragging * { cursor: grabbing !important; user-select:
   .notes { max-width: none; font-size: 11pt; line-height: 1.55; }
   .notes h2 { margin-top: 28px; break-after: avoid; }
   .notes h3 { break-after: avoid; }
-  .notes .blk, .notes .figure, .notes pre, .notes table, .notes .katex-display, .notes blockquote,
-  .notes .run-item { break-inside: avoid; }
+  /* Steps, boxes and quotes split wherever the page ends, so nothing tall leaves most of a page
+     empty. What can't be read in two halves stays whole: figures, formulas, tables and code. A
+     split box is drawn as two matching boxes (border, wash and padding on each part); a title
+     stays with what follows it. */
+  .notes .figure, .notes pre, .notes table, .notes .katex-display { break-inside: avoid; }
+  .notes .blk:not(.blk-step), .notes blockquote { -webkit-box-decoration-break: clone;
+    box-decoration-break: clone; }
+  .notes .blk-head { break-after: avoid; }
   .notes .figure img { max-height: 110mm; }
 }
 
