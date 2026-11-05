@@ -65,8 +65,9 @@ backend/src/iris/
 frontend/src/
   api/            typed client (generated from OpenAPI) + progress events
   capture/        browser mic + screen-share capture
-  components/     notes view (Markdown, KaTeX, figures) and progress
-  notes/          rehype transform for step cards, callouts and figures
+  components/     notes view and editor (Markdown, KaTeX, figures), menus and progress
+  notes/          the notes format (boxes, steps, figures by id) and the editor's nodes,
+                  block actions and drag landing spots
   session/        session state, progress stream, upload and cost hooks
   pages/          library, upload, live, session, settings
   settings/       the Settings page's language list and wording

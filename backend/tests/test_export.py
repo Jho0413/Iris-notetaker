@@ -5,17 +5,18 @@ import pytest
 from markdown_it import MarkdownIt
 
 from iris.export import export_markdown_embedded
-from iris.models import FrameRef, Notes, SessionType, Visual
+from iris.models import FrameRef, Notes, NotesVisual, SessionType, Visual
 from iris.pipeline.stages.assemble import resolve_markers
 
 
-def notes(markdown):
+def notes(markdown, visuals=(), format_version=2):
     return Notes(
         session_id="s1",
         session_type=SessionType.MEETING,
         title="Review",
         markdown=markdown,
-        visuals=[],
+        visuals=[NotesVisual(**v.model_dump()) for v in visuals],
+        format_version=format_version,
     )
 
 
@@ -49,7 +50,7 @@ def test_assembly_to_export_preserves_caption_and_embeds(tmp_path, caption):
         path="visuals/v1.jpg",
     )
     markdown = resolve_markers("[visual:v1]", [visual])
-    exported = export_markdown_embedded(notes(markdown), tmp_path)
+    exported = export_markdown_embedded(notes(markdown, [visual]), tmp_path)
     image = images(exported)[0]
     assert (
         image.attrGet("src")
@@ -123,9 +124,8 @@ def test_export_api_embeds_captioned_image(client, settings):
         caption=r"Revenue [USD] \ Q1",
         path="visuals/v1.jpg",
     )
-    document = notes(resolve_markers("[visual:v1]", [visual]))
+    document = notes(resolve_markers("[visual:v1]", [visual]), [visual])
     document.session_id = sid
-    document.visuals = [visual]
     write_model(paths.notes, document)
 
     response = client.get(f"/api/sessions/{sid}/export")
@@ -148,8 +148,7 @@ def test_repeated_marker_places_visual_once():
         path="visuals/v1.jpg",
     )
     markdown = resolve_markers("Intro\n\n[visual:v1]\n\nMore\n\n[visual:v1]", [visual])
-    assert len(images(markdown)) == 1
-    assert markdown.index("![") < markdown.index("More")
+    assert markdown == "Intro\n\n::figure{#v1}\n\nMore\n\n"
 
 
 def test_export_keeps_latex_intact():
@@ -157,3 +156,47 @@ def test_export_keeps_latex_intact():
     exported = export_markdown_embedded(notes(markdown), Path("/nonexistent"))
     assert "$x_1 * y_2$" in exported
     assert "$$\n3\\left[(x+3)^2 - 9\\right] - 1\n$$" in exported
+
+
+def test_export_keeps_boxes_and_steps_and_embeds_figures_inside_them(tmp_path):
+    (tmp_path / "visuals").mkdir()
+    (tmp_path / "visuals/v1.jpg").write_bytes(b"image")
+    visual = Visual(
+        id="v1",
+        moment_id="m1",
+        frame=FrameRef(t=0, path="frames/1.jpg"),
+        caption="Forces [N]",
+        path="visuals/v1.jpg",
+    )
+    md = (
+        ":::step[Find the forces]{color=indigo}\nAt the bottom, $P_1 * W$ points up.\n"
+        ":::box[Key idea]{color=blue}\n- one\n- two\n:::\n::figure{#v1}\n:::\n\n"
+        "::figure{#gone}\n\n```\n:::box\n```"
+    )
+    exported = export_markdown_embedded(notes(md, [visual]), tmp_path)
+    lines = exported.split("\n")
+    assert lines[:3] == ["# Review", "", ":::step[Find the forces]{color=indigo}"]
+    assert "At the bottom, $P_1 * W$ points up." in lines
+    # A list followed by ::: stays a list: the fence is never read as part of the list item.
+    assert ":::box[Key idea]{color=blue}" in lines and "- two" in lines
+    assert lines.count(":::") == 2
+    assert [i.attrGet("src") for i in images(exported)] == ["data:image/jpeg;base64,aW1hZ2U="]
+    assert "*Forces \\[N\\]*" in exported or "*Forces [N]*" in exported
+    assert "gone" not in exported  # an unknown figure is left out
+    assert "```\n:::box\n```" in exported  # code is code
+
+
+def test_export_upgrades_old_notes(tmp_path):
+    (tmp_path / "visuals").mkdir()
+    (tmp_path / "visuals/v1.jpg").write_bytes(b"image")
+    visual = Visual(
+        id="v1",
+        moment_id="m1",
+        frame=FrameRef(t=0, path="frames/1.jpg"),
+        caption="Chart",
+        path="visuals/v1.jpg",
+    )
+    old = "**Answer:** It works.\n\n![Chart](visuals/v1.jpg)\n*Chart*"
+    exported = export_markdown_embedded(notes(old, [visual], format_version=1), tmp_path)
+    assert ":::box[Answer]{color=green}\n\nIt works." in exported
+    assert len(images(exported)) == 1

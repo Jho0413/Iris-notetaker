@@ -6,6 +6,9 @@ export interface IrisApp {
   changeKey(): Promise<{ done: boolean }>
   /** Asks, then removes the stored key; resolves once the engine restarted, or cancelled. */
   removeKey(): Promise<{ done: boolean }>
+  /** Saves the page, as printed, as a PDF named after `title`, where the user chooses; resolves
+   * once saved, or cancelled. */
+  savePdf(title: string): Promise<{ done: boolean }>
 }
 
 declare global {

@@ -1,12 +1,13 @@
 import 'katex/dist/katex.min.css'
-import type { Element } from 'hast'
-import { useEffect, useMemo, useRef } from 'react'
+import { Fragment, useEffect, useMemo, useRef } from 'react'
 import Markdown, { type Components } from 'react-markdown'
 import rehypeKatex from 'rehype-katex'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
-import { sessionFileUrl } from '../api/client'
-import { rehypeNotes } from '../notes/rehypeNotes'
+import { sessionFileUrl, type Notes } from '../api/client'
+import {
+  FORMAT_MESSAGES, parseNotes, withPaths, type BlockNode, type NotesNode, type StepPath,
+} from '../notes/format'
 import { formatClock, type Provenance } from '../session/state'
 import { ProvenanceBadge } from './FiguresGrid'
 
@@ -20,25 +21,127 @@ export interface OutlineItem {
   text: string
 }
 
+type Visual = Notes['visuals'][number]
+
 const REMARK = [remarkGfm, remarkMath]
-const REHYPE = [rehypeKatex, rehypeNotes]
+const REHYPE = [rehypeKatex]
+
+// Figures come only from the session, by id: a Markdown image is never loaded.
+const COMPONENTS: Components = {
+  img: () => <span className="blocked">{FORMAT_MESSAGES.outsideImage}</span>,
+}
+// A title is inline Markdown: its paragraph is unwrapped into the block's heading.
+const TITLE_COMPONENTS: Components = { ...COMPONENTS, p: ({ children }) => <>{children}</> }
+
+function Md({ text, title }: { text: string; title?: boolean }) {
+  return (
+    <Markdown
+      remarkPlugins={REMARK}
+      rehypePlugins={REHYPE}
+      components={title ? TITLE_COMPONENTS : COMPONENTS}
+      urlTransform={(url) => (/^(https?:|mailto:|#)/.test(url) ? url : '')}
+    >
+      {text}
+    </Markdown>
+  )
+}
+
+interface DrawProps {
+  sessionId: string
+  visuals: ReadonlyMap<string, Visual>
+  figures?: ReadonlyMap<string, FigureMeta>
+}
+
+export function FigureView({ id, sessionId, visuals, figures }: DrawProps & { id: string }) {
+  const visual = visuals.get(id)
+  if (!visual) return <p className="blk-problem-note">{FORMAT_MESSAGES.unknownFigure(id)}</p>
+  const meta = figures?.get(id)
+  return (
+    <figure className="figure" data-figure={id}>
+      <img src={sessionFileUrl(sessionId, visual.path)} alt={visual.caption} />
+      <figcaption>{visual.caption}</figcaption>
+      {meta && (meta.t !== undefined || meta.provenance) && (
+        <span className="figure-meta">
+          {meta.t !== undefined && <span className="num">Shown at {formatClock(meta.t)}</span>}
+          <ProvenanceBadge kind={meta.provenance} />
+        </span>
+      )}
+    </figure>
+  )
+}
+
+function Problems({ block }: { block: BlockNode }) {
+  const notes = [
+    !block.closed && FORMAT_MESSAGES.unclosed,
+    block.badColour !== null && FORMAT_MESSAGES.unknownColour(block.badColour),
+    block.command !== 'box' && block.command !== 'step' && FORMAT_MESSAGES.unknownCommand(block.command),
+  ].filter((n): n is string => !!n)
+  return notes.map((n) => <p key={n} className="blk-problem-note">{n}</p>)
+}
+
+function BlockView({ block, ...props }: DrawProps & { block: BlockNode }) {
+  if (block.tooDeep) {
+    return (
+      <>
+        <p className="blk-problem-note">{FORMAT_MESSAGES.tooDeep}</p>
+        {block.title && <p><strong><Md text={block.title} title /></strong></p>}
+        <Nodes nodes={block.children} {...props} />
+      </>
+    )
+  }
+  const broken = !block.closed || (block.command !== 'box' && block.command !== 'step')
+  return (
+    <section className={`blk${block.command === 'step' ? ' blk-step' : ''} c-${block.colour}${broken ? ' blk-broken' : ''}`}>
+      {block.title && <p className="blk-head"><Md text={block.title} title /></p>}
+      <Nodes nodes={block.children} {...props} />
+      <Problems block={block} />
+    </section>
+  )
+}
+
+function PathView({ path, ...props }: DrawProps & { path: StepPath }) {
+  return (
+    <ol className="step-run">
+      {path.steps.map((step, i) => (
+        <li key={i} className={`run-item c-${step.colour}`} data-n={i + 1}>
+          <span className="sr-only">Step {i + 1}: </span>
+          <BlockView block={step} {...props} />
+        </li>
+      ))}
+    </ol>
+  )
+}
+
+function Nodes({ nodes, ...props }: DrawProps & { nodes: readonly NotesNode[] }) {
+  return withPaths(nodes).map((node, i) => (
+    <Fragment key={i}>
+      {node.kind === 'markdown' && <Md text={node.text} />}
+      {node.kind === 'figure' && <FigureView id={node.id} {...props} />}
+      {node.kind === 'block' && <BlockView block={node} {...props} />}
+      {node.kind === 'path' && <PathView path={node} {...props} />}
+    </Fragment>
+  ))
+}
 
 /**
- * Renders notes markdown without raw HTML; image paths like "visuals/v1.svg" are served from the
- * session. Section headings get ids and are reported for the rail's "On this page" list.
+ * Renders notes (iris notes format: Markdown with boxes, steps and figures by id) without raw HTML.
+ * Section headings get ids and are reported for the rail's "On this page" list.
  */
 export function NotesView(props: {
   sessionId: string
   title: string
   markdown: string
-  /** Per image path (relative to the session): when it was shown and how it was produced. */
+  visuals: readonly Visual[]
+  /** Per figure id: when it was shown and how it was produced. */
   figures?: ReadonlyMap<string, FigureMeta>
   /** Hide the notes' own title when the page heading already says the same. */
   hideTitle?: boolean
   onOutline?: (items: OutlineItem[]) => void
 }) {
   const ref = useRef<HTMLElement>(null)
-  const { onOutline, figures, sessionId } = props
+  const { onOutline } = props
+  const nodes = useMemo(() => parseNotes(props.markdown), [props.markdown])
+  const visuals = useMemo(() => new Map(props.visuals.map((v) => [v.id, v])), [props.visuals])
 
   useEffect(() => {
     const root = ref.current
@@ -55,46 +158,10 @@ export function NotesView(props: {
     onOutline?.(items)
   }, [props.markdown, onOutline])
 
-  // Under each caption: when the figure was shown, and how it was produced.
-  // Figures come from rehypeNotes; their src may be relative or already resolved.
-  const components = useMemo<Components>(() => {
-    const bySrc = new Map<string, FigureMeta>()
-    for (const [path, meta] of figures ?? []) {
-      bySrc.set(path, meta)
-      bySrc.set(sessionFileUrl(sessionId, path), meta)
-    }
-    return {
-      figure({ node, children, className }) {
-        const img = node?.children.find((c): c is Element => c.type === 'element' && c.tagName === 'img')
-        const meta = bySrc.get(String(img?.properties.src ?? ''))
-        return (
-          <figure className={className}>
-            {children}
-            {meta && (meta.t !== undefined || meta.provenance) && (
-              <span className="figure-meta">
-                {meta.t !== undefined && <span className="num">Shown at {formatClock(meta.t)}</span>}
-                <ProvenanceBadge kind={meta.provenance} />
-              </span>
-            )}
-          </figure>
-        )
-      },
-    }
-  }, [figures, sessionId])
-
   return (
     <article className="notes" ref={ref}>
       {!props.hideTitle && <h1>{props.title}</h1>}
-      <Markdown
-        remarkPlugins={REMARK}
-        rehypePlugins={REHYPE}
-        components={components}
-        urlTransform={(url) =>
-          /^(https?:|data:|\/)/.test(url) ? url : sessionFileUrl(sessionId, url)
-        }
-      >
-        {props.markdown}
-      </Markdown>
+      <Nodes nodes={nodes} sessionId={props.sessionId} visuals={visuals} figures={props.figures} />
     </article>
   )
 }

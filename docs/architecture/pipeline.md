@@ -31,8 +31,9 @@ stages while recording ([`live.md`](live.md)); failures follow [`errors.md`](err
      checked by a vision model against its source crop and description. Failures are retried with
      feedback, then the other renderer is tried; if nothing passes, the source crop is used and
      marked unverified.
-7. **Assemble.** Markers are resolved to the rendered figures. The notes are stored and
-   exportable as Markdown with figures embedded.
+7. **Assemble.** Markers are resolved to figures by id (`::figure{#<id>}`). The notes are stored
+   exportable as Markdown with figures embedded (`GET /export`, for other clients); the app
+   exports them as a PDF.
 8. **Synthesize.** A pass across the whole session consolidates the assembled notes (a worked
    example split across sections, a later correction, a slide returned to, a figure picked twice),
    and the polished notes replace them. If it fails, the assembled notes are the result and the
@@ -75,8 +76,26 @@ moment. Details are in the `detect.py` docstring.
 
 - `IRIS_NOTES_MODEL` writes meeting, lecture or demo notes from what was said and what was on screen.
 - Worked examples are written step by step: problem, steps with typeset working and reasoning,
-  answer, then key-idea and watch-out callouts. All math is LaTeX (`$...$`, `$$...$$`). Each figure
-  is placed once, beside the explanation it illustrates.
+  answer, then key ideas and watch-outs. All math is LaTeX (`$...$`, `$$...$$`). Each figure is
+  placed once, beside the explanation it illustrates; a step's figure goes inside the step.
+- **The notes format** (`iris/notes_format.py`; the UI's copy is `frontend/src/notes/format.ts`):
+  Markdown plus three commands. `:::box[Title]{color=…}` … `:::` is a box and `:::step[Title]{color=…}`
+  … `:::` a step on a numbered path (steps in a row form one path; the number is drawn, never
+  written); `::figure{#<id>}` places a figure of the session by id. The word after the colons is a
+  command and is never shown; the reader sees only the writer's own title. Each closing `:::`
+  closes the most recent block still open, blocks go one level deep (a box in a step or box), and
+  colours come from a palette of ten names (grey when missing or unknown). Nothing in the notes is
+  matched by its words. The writer is asked for Iris's convention: an indigo Problem box and indigo
+  steps, a green Answer or Decision, blue Definition and Key idea, amber Watch out and Open
+  question, grey for the rest, titles in the notes' language.
+- **Model output is checked:** a section whose blocks use an unknown command, go too deep or place
+  figures by command is invalid (not cached; Try again rewrites it). What needs no guessing is
+  repaired instead: an unknown colour becomes grey, a block left open is closed at the end of its
+  section, a `:::` that closes nothing is dropped. A colour name never fails a session.
+- **Old notes** (`Notes.format_version` 1, from before the format, with bold "Problem:", "Step n:"
+  and "Answer:" labels and image links) are upgraded in memory whenever they are read (the API and
+  export), grouped exactly as the old reading view drew them (`upgrade_legacy`); files on disk are
+  never rewritten.
 - All transcript text is used. Long transcripts are split into chronological sections of up to
   `IRIS_NOTES_CONTEXT_CHARS` evidence characters per call (default 24,000, range 2,000–60,000).
   Oversized speech segments are split without dropping text or inventing timestamps.
@@ -103,7 +122,8 @@ Runs alongside note writing and rebuilds every figure professionally.
   (`Notes.visuals[].verified`).
 - Up to `IRIS_RENDER_CONCURRENCY` figures render at once. Model-written SVG is sanitized before it
   is stored. Completed renders are cached in `render_cache/`.
-- Exports embed SVG figures as PNG, since Markdown viewers reject SVG data URIs.
+- Exports embed SVG figures as PNG, since Markdown viewers reject SVG data URIs. Boxes and steps
+  keep their `:::` lines in the export (other Markdown apps show them as text).
 
 ## Synthesize
 
@@ -118,7 +138,8 @@ assembled ones. Assemble uses `notes_synthesis.json` only while it was made from
 current `notes_draft.json` and selection, so a re-run from an earlier stage never shows a stale
 synthesis. A re-run from `synthesize` re-polishes without rewriting anything else.
 
-- **Sections** are the notes split at their top-level (`#`, `##`) headings, outside code. Writing
+- **Sections** are the notes split at their top-level (`#`, `##`) headings, outside code and
+  outside boxes and steps (a heading inside a box never splits it). Writing
   parts end at moment boundaries and usually open with a heading, so a topic split across parts
   shows up as two sections.
 - **Local sweep** (OpenCV, in a thread, no model calls): the kept moments' representative frames
@@ -145,8 +166,10 @@ synthesis. A re-run from `synthesize` re-polishes without rewriting anything els
   HTML appear, its length stays between 40% and 150% (+2,000 characters) of the original (a
   section only dropped as a repeat, with a section that keeps the point and no other edit
   rewriting it, may shrink or empty, losing no more text than that section holds), it has no
-  fewer decision, action-item, open-question or uncertainty words and task items, and any math it
-  drops still appears elsewhere. A rejected group keeps its sections as written; the others are
+  fewer decision, action-item, open-question or uncertainty words and task items, any math it
+  drops still appears elsewhere, its boxes and steps open and close within each section with no
+  problem (unknown command, too deep, figure commands), and every box or step it had (by command,
+  title and colour) is still somewhere: a merge may join or move them, never lose one. A rejected group keeps its sections as written; the others are
   applied. Across groups, every equation in the notes must survive, and every marker must resolve
   once to a selected visual.
 - **Cost:** write records how many parts it planned (`NotesDraft.parts`). Notes written in one part
@@ -162,3 +185,16 @@ synthesis. A re-run from `synthesize` re-polishes without rewriting anything els
   `synthesis.json` (`status: failed`, with the reason); the session still ends `done` with the
   assembled notes. `synthesis.json` also records the repeats found, the edits applied and the
   sections rewritten or rejected. `IRIS_SYNTHESIS=false` turns the pass off.
+
+## Edited notes
+
+The user's edits never change the generated notes. The latest save is kept beside them in
+`notes_edits.json` (`NotesEdits`: the markdown, `based_on` and `saved_at`), written by the API only
+(`PUT /api/sessions/{id}/notes/edits`, checked with `notes_format.validate`: 422 names the first
+problem in plain words, 409 while the session is processing), so a re-run, whose stages write
+only their own files, keeps them by construction. `GET /notes` returns the edited version while
+one exists, with `edited: {saved_at, stale}`, and `generated_hash`, which names the generated
+notes the response is based on. An edit is `stale` once a re-run made different notes than it
+started from (`based_on` ≠ `generated_hash`); the UI then lets the user keep the edits (saved again
+on the new notes) or use the new notes (`DELETE …/notes/edits`, which is also "Restore generated
+notes"). Export uses the edited notes when there are any.

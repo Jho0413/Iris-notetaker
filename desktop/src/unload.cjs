@@ -2,8 +2,9 @@
 // (tested in test/unload.test.cjs). main.cjs shows the answer from will-prevent-unload, since
 // Electron would otherwise cancel the close or reload without a word.
 //
-// Two pages refuse, each for one reason: the live page while it records, and the Settings page
-// while a change is unsaved. The page is told apart by its path, so no bridge to the page is needed.
+// Pages refuse for one of two reasons: the live page while it records; the Settings page, or a
+// session page whose notes are being edited, while a change is unsaved. The page is told apart by
+// its path, so no bridge to the page is needed.
 
 /** The path of an app://iris URL ("/live"), or null if it can't be parsed. */
 function pagePath(url) {

@@ -116,11 +116,42 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get Notes */
+        /**
+         * Get Notes
+         * @description The notes in the current format (old notes are upgraded as they are read): the user's
+         *     edited version when there is one, with ``edited`` set, else the generated notes.
+         */
         get: operations["get_notes_api_sessions__session_id__notes_get"];
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sessions/{session_id}/notes/edits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Save Notes Edits
+         * @description Save the user's edited notes, replacing any earlier save; the generated notes are kept.
+         *
+         *     The markdown is checked like the writer's (``iris.notes_format.validate``): 422 names the
+         *     first problem in plain words. 409 while the session is processing.
+         */
+        put: operations["save_notes_edits_api_sessions__session_id__notes_edits_put"];
+        post?: never;
+        /**
+         * Delete Notes Edits
+         * @description Restore the generated notes: the user's edits are removed.
+         */
+        delete: operations["delete_notes_edits_api_sessions__session_id__notes_edits_delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -135,7 +166,8 @@ export interface paths {
         };
         /**
          * Export Notes
-         * @description Markdown with visuals embedded as data URIs, so the file stands alone.
+         * @description Markdown with visuals embedded as data URIs, so the file stands alone. The user's edited
+         *     notes are exported when there are any.
          */
         get: operations["export_notes_api_sessions__session_id__export_get"];
         put?: never;
@@ -450,6 +482,37 @@ export interface components {
             markdown: string;
             /** Visuals */
             visuals: components["schemas"]["NotesVisual"][];
+            /**
+             * Format Version
+             * @default 1
+             */
+            format_version: number;
+            /** Generated Hash */
+            generated_hash?: string | null;
+            edited?: components["schemas"]["NotesEdited"] | null;
+        };
+        /**
+         * NotesEdited
+         * @description Set by the API when the user's edits replace the generated notes in a response.
+         */
+        NotesEdited: {
+            /**
+             * Saved At
+             * Format: date-time
+             */
+            saved_at: string;
+            /** Stale */
+            stale: boolean;
+        };
+        /**
+         * NotesSave
+         * @description Edited notes to save. ``based_on`` is the ``generated_hash`` the edits started from.
+         */
+        NotesSave: {
+            /** Markdown */
+            markdown: string;
+            /** Based On */
+            based_on: string;
         };
         /**
          * NotesVisual
@@ -1052,6 +1115,70 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Notes"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_notes_edits_api_sessions__session_id__notes_edits_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NotesSave"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Notes"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_notes_edits_api_sessions__session_id__notes_edits_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

@@ -36,7 +36,8 @@ the original crop is shown and marked unverified.
   no hosting.
 - Sessions last 30–90 minutes. A one-hour upload should produce notes within a few minutes, with
   progress shown until they're finished; only finished notes are shown. Processing costs $0.50–2 per hour of session.
-- Notes are read in the app and exported as Markdown with the figures embedded.
+- Notes are read and edited in the app, and exported from it as a PDF. The engine's API also
+  gives them as Markdown with the figures embedded, for other apps.
 
 ## Capabilities and Constraints
 
@@ -45,9 +46,9 @@ the original crop is shown and marked unverified.
   speaks in plain language and keeps the stage names in an on-demand details view.
 - Progress arrives as server-sent events. Event history is kept in memory, so it is lost when the
   backend restarts.
-- Notes contain KaTeX math, step-by-step cards (problem, step, answer), callouts (key idea, watch
-  out) and captioned figures.
-- Not in v1: editing notes, accounts, sharing, a desktop app or a meeting bot.
+- Notes contain KaTeX math, boxes with the writer's own titles in ten colours, numbered steps and
+  captioned figures (the notes format, `backend/src/iris/notes_format.py`).
+- Not in v1: accounts, sharing, a desktop app or a meeting bot.
 - Per-session cost depends on the cost-tracking API (in progress). Live incremental processing is
   in progress too.
 

@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
-import { api, sessionFileUrl, type Notes, type Session, type Transcript } from '../api/client'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { api, type Notes, type Session, type Transcript } from '../api/client'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { FiguresGrid } from '../components/FiguresGrid'
 import { Icon } from '../components/Icon'
+import { NotesEditor } from '../components/NotesEditor'
 import { NotesView, type OutlineItem } from '../components/NotesView'
 import { ProgressRail } from '../components/ProgressRail'
 import { SessionRibbon } from '../components/SessionRibbon'
@@ -13,7 +14,8 @@ import { TabPanel, Tabs } from '../components/Tabs'
 import { TitleField } from '../components/TitleField'
 import { TranscriptList } from '../components/TranscriptList'
 import { stepCosts, usageCost, usageRefreshKey } from '../session/cost'
-import { againLink, UNREACHABLE } from '../session/messages'
+import { againLink, NOTES_EDIT, PDF_FAILED, UNREACHABLE } from '../session/messages'
+import { exportPdf } from '../session/exportPdf'
 import { act } from '../session/request'
 import { formatWhen, SOURCE_LABEL } from '../session/format'
 import {
@@ -79,6 +81,9 @@ function SessionView({ id }: { id: string }) {
   const [busy, setBusy] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [renaming, setRenaming] = useState(false)
+  const [editing, setEditing] = useState(false)
+  // Dropping the user's edits: "Restore generated notes", or "Use the new notes" after a re-run.
+  const [confirmDrop, setConfirmDrop] = useState<'restore' | 'use-new' | null>(null)
 
   const [reload, setReload] = useState(0)
 
@@ -109,6 +114,7 @@ function SessionView({ id }: { id: string }) {
       setNotes(null)
       setNotesLoaded(false)
       setTranscript(null)
+      setEditing(false)
     }
   }
   useEffect(() => {
@@ -139,7 +145,7 @@ function SessionView({ id }: { id: string }) {
   const segments = useMemo(() => transcriptSegments(run, transcript), [run, transcript])
   const figures = useMemo(() => figureList(run, notes), [run, notes])
   const figureMeta = useMemo(
-    () => new Map(figures.filter((f) => f.path).map((f) => [f.path!, { t: f.t, provenance: provenance(f) }])),
+    () => new Map(figures.map((f) => [f.id, { t: f.t, provenance: provenance(f) }])),
     [figures],
   )
   const transcriptKnown = transcript !== null || run.stages.transcribe.status === 'done'
@@ -181,13 +187,85 @@ function SessionView({ id }: { id: string }) {
     else setActionError(result.status === 0 ? UNREACHABLE : "Couldn't delete this session. It may be processing.")
   }
 
+  async function dropEdits() {
+    setBusy(true)
+    setActionError(null)
+    const result = await act(api.DELETE('/api/sessions/{session_id}/notes/edits', { params: { path: { session_id: id } } }))
+    setBusy(false)
+    setConfirmDrop(null)
+    if (!result.ok) setActionError(result.status === 0 ? UNREACHABLE : NOTES_EDIT.restoreFailed)
+    setReload((n) => n + 1)
+  }
+
+  /** After a re-run: keep the edited version, now based on the new notes. */
+  async function keepEdits() {
+    if (!notes) return
+    setBusy(true)
+    setActionError(null)
+    try {
+      const { data, response } = await api.PUT('/api/sessions/{session_id}/notes/edits', {
+        params: { path: { session_id: id } },
+        body: { markdown: notes.markdown, based_on: notes.generated_hash ?? '' },
+      })
+      if (data) setNotes(data)
+      else {
+        setActionError(
+          response.status === 409
+            ? NOTES_EDIT.saveWhileProcessing
+            : response.status === 422
+              ? NOTES_EDIT.keepInvalid
+              : NOTES_EDIT.keepFailed,
+        )
+      }
+    } catch {
+      setActionError(UNREACHABLE)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /** Export PDF: the notes tab, as printed, named after the session. One at a time: a second
+   *  click while one runs would print with the theme the first one switched to. */
+  const pdfName = session?.title ?? ''
+  const [exporting, setExporting] = useState(false)
+  const exportingNow = useRef(false)
+  const savePdf = useCallback(async () => {
+    if (exportingNow.current) return
+    exportingNow.current = true
+    setExporting(true)
+    setTab('notes')
+    setActionError(null)
+    try {
+      await new Promise(requestAnimationFrame) // the notes are on screen before they are printed
+      await exportPdf(pdfName)
+    } catch {
+      setActionError(PDF_FAILED)
+    } finally {
+      exportingNow.current = false
+      setExporting(false)
+    }
+  }, [pdfName])
+
+  // Export PDF from the library opens the session with ?export=pdf: export once the notes are in.
+  const [search, setSearch] = useSearchParams()
+  const exportRequested = search.get('export') === 'pdf'
+  useEffect(() => {
+    if (!exportRequested || !notes || !session || editing) return
+    let live = true
+    void Promise.resolve().then(() => {
+      if (!live) return
+      setSearch({}, { replace: true })
+      return savePdf()
+    })
+    return () => {
+      live = false
+    }
+  }, [exportRequested, notes, session, editing, setSearch, savePdf])
+
   function showFigure(f: FigureState) {
-    const img = f.path && notes
-      ? document.querySelector<HTMLImageElement>(`.notes img[src="${CSS.escape(sessionFileUrl(notes.session_id, f.path))}"]`)
-      : null
-    if (img) {
+    const figure = document.querySelector<HTMLElement>(`.notes [data-figure="${CSS.escape(f.id)}"]`)
+    if (figure) {
       setTab('notes')
-      const figure = img.closest('figure') ?? img
       requestAnimationFrame(() => {
         figure.scrollIntoView({ behavior: 'smooth', block: 'center' })
         figure.classList.add('flash')
@@ -287,16 +365,34 @@ function SessionView({ id }: { id: string }) {
                 <span>{SOURCE_LABEL[session.source] ?? session.source}</span>
                 {length !== undefined && <span className="num">{formatClock(length)}</span>}
                 <span className="num">{formatWhen(session.created_at)}</span>
+                {notes?.edited && !editing && (
+                  <span className="edited-meta">
+                    {NOTES_EDIT.edited} ·{' '}
+                    <button type="button" className="link-btn" onClick={() => setConfirmDrop('restore')} disabled={busy}>
+                      {NOTES_EDIT.restore}
+                    </button>
+                  </span>
+                )}
               </div>
             </>
           )}
         </div>
         <div className="head-actions">
           <StatusChip state={ui} />
-          {notes && (
-            <a className={finished ? 'btn btn-primary' : 'btn'} href={`/api/sessions/${session.id}/export`} download>
-              <Icon name="download" /> Export Markdown
-            </a>
+          {notes && finished && !editing && (
+            <button type="button" className="btn" onClick={() => { setTab('notes'); setEditing(true) }}>
+              <Icon name="pencil" /> Edit notes
+            </button>
+          )}
+          {notes && !editing && (
+            <button
+              type="button"
+              className={finished ? 'btn btn-primary' : 'btn'}
+              onClick={() => void savePdf()}
+              disabled={exporting}
+            >
+              <Icon name="download" /> Export PDF
+            </button>
           )}
           {(failure?.kind === 'general' || ui.kind === 'stalled') && (
             <button type="button" className="btn btn-primary" onClick={() => void rerun()} disabled={busy}>
@@ -376,12 +472,39 @@ function SessionView({ id }: { id: string }) {
             </div>
           )}
 
+          {notes?.edited?.stale && finished && !editing && (
+            <div className="banner banner-warning" role="status">
+              <Icon name="alert" />
+              <div className="banner-body">
+                <p>{NOTES_EDIT.stale}</p>
+                <div className="banner-actions">
+                  <button type="button" className="btn btn-sm" onClick={() => setConfirmDrop('use-new')} disabled={busy}>
+                    {NOTES_EDIT.useNew}
+                  </button>
+                  <button type="button" className="btn btn-sm btn-primary" onClick={() => void keepEdits()} disabled={busy}>
+                    {NOTES_EDIT.keep}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {progress ? (
             <ProgressView
               view={progress}
               session={session}
               run={run}
               stream={stream}
+            />
+          ) : editing && notes ? (
+            <NotesEditor
+              notes={notes}
+              figures={figureMeta}
+              onSaved={(saved) => {
+                setNotes(saved)
+                setEditing(false)
+              }}
+              onClose={() => setEditing(false)}
             />
           ) : (
             <>
@@ -403,6 +526,7 @@ function SessionView({ id }: { id: string }) {
                     sessionId={session.id}
                     title={notes.title}
                     markdown={notes.markdown}
+                    visuals={notes.visuals}
                     figures={figureMeta}
                     hideTitle={notes.title.trim() === session.title.trim()}
                     onOutline={setOutline}
@@ -458,6 +582,16 @@ function SessionView({ id }: { id: string }) {
         />
       </div>
 
+      <ConfirmDialog
+        open={confirmDrop !== null}
+        title={confirmDrop === 'use-new' ? NOTES_EDIT.useNewTitle : NOTES_EDIT.restoreTitle}
+        body={confirmDrop === 'use-new' ? NOTES_EDIT.useNewBody : NOTES_EDIT.restoreBody}
+        confirm={confirmDrop === 'use-new' ? NOTES_EDIT.useNew : NOTES_EDIT.restore}
+        danger
+        busy={busy}
+        onConfirm={() => void dropEdits()}
+        onCancel={() => setConfirmDrop(null)}
+      />
       <ConfirmDialog
         open={confirmDelete}
         title={`Delete "${session.title}"?`}

@@ -265,12 +265,38 @@ class NotesVisual(Visual):
     verified: bool | None = None
 
 
+class NotesEdited(BaseModel):
+    """Set by the API when the user's edits replace the generated notes in a response."""
+
+    saved_at: datetime
+    # True when Iris made the notes again after the edits started (a re-run): the generated
+    # notes they were based on are no longer the current ones.
+    stale: bool
+
+
 class Notes(BaseModel):
     session_id: str
     session_type: SessionType
     title: str
-    markdown: str  # markers resolved to image links
+    markdown: str  # the notes format (iris.notes_format); figures as ::figure{#<id>}
     visuals: list[NotesVisual]
+    # 2: boxes, steps and figures by id. Missing means 1, notes written before that format with
+    # bold labels and image links, which readers upgrade (iris.notes_format.upgraded).
+    format_version: int = 1
+    # Set by the API only, never stored by a stage. ``generated_hash`` names the generated notes
+    # (send it back as ``based_on`` when saving edits); ``edited`` is set when ``markdown`` is the
+    # user's edited version rather than the generated one.
+    generated_hash: str | None = None
+    edited: NotesEdited | None = None
+
+
+class NotesEdits(BaseModel):
+    """The user's edited notes (notes_edits.json): the latest save only. Written by the API,
+    never by a stage, so a re-run keeps them."""
+
+    markdown: str
+    based_on: str  # generated_hash of the generated notes the edits started from
+    saved_at: datetime
 
 
 # --- Synthesize output -------------------------------------------------------------------------

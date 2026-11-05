@@ -85,9 +85,19 @@ every change; the reviewer says which sections it checked.
 - Stale rendered visuals from earlier runs are removed; source crops are kept.
 
 **Assemble / export**
-- Notes link to rendered visuals, never to `*.source.jpg` directly.
-- Markdown export embeds every figure (SVG as PNG), keeps LaTeX intact, and image paths can't
-  escape the session folder.
+- Notes place figures by id (`::figure{#id}`) and `Notes.visuals` points at rendered visuals,
+  never at `*.source.jpg` directly.
+- Markdown export embeds every figure (SVG as PNG), keeps LaTeX and the `:::` lines of boxes and
+  steps intact, and image paths can't escape the session folder.
+
+**Notes format and edits**
+- Model output and saved edits are checked with `notes_format` (unknown command or colour, too
+  deep, unclosed, unknown figure, raw HTML, outside images); only the writer repairs, and only what
+  needs no guessing. Old notes (`format_version` 1) still display, upgraded on read.
+- The UI's parser (`notes/format.ts`) and the editor's Markdown (`notes/editor/`) follow the same
+  rules as the backend; a round trip through the editor keeps every construct.
+- Edits live in `notes_edits.json` only: no stage writes it, a re-run marks it stale, never drops
+  it, and leaving the editor with unsaved changes asks first.
 
 **Errors (all stages)**
 - Model calls go through the error policy (`docs/architecture/errors.md`): a unit

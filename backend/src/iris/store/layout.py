@@ -44,6 +44,8 @@ sessions/<id>/
     synthesis.json        SynthesisReport: what synthesis did, or why it skipped or failed
     notes.json            Notes
     notes.md              final markdown (for export)
+    notes_edits.json      NotesEdits: the user's edited notes, latest save only. Written by the
+                          API, never by a stage, so re-runs keep them
     usage_calls.jsonl     one UsageRecord per model call, appended by iris.llm.usage
     usage.json            SessionUsage: those records with totals, refreshed after each stage
 """
@@ -169,6 +171,11 @@ class SessionPaths:
     @property
     def notes_md(self) -> Path:
         return self.root / "notes.md"
+
+    # Written by the API (the user's edits), never by a stage.
+    @property
+    def notes_edits(self) -> Path:
+        return self.root / "notes_edits.json"
 
     # Cost tracking: written by iris.llm.usage around every model call, not by one stage.
     @property

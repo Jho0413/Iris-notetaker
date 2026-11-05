@@ -1,6 +1,8 @@
 import asyncio
+import logging
 import shutil
 import unicodedata
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
 from urllib.parse import quote
@@ -13,9 +15,13 @@ from iris.api.deps import PathsDep, RunnerDep, SessionDep, SettingsDep, StoreDep
 from iris.config import Settings
 from iris.export import export_markdown_embedded
 from iris.llm.usage import forget_total, with_cost
-from iris.models import Notes, Session, SourceKind, Stage, Transcript
+from iris.models import Notes, NotesEdits, Session, SourceKind, Stage, Transcript
+from iris.notes_edits import MAX_EDITED_CHARS, as_read
+from iris.notes_format import validate
 from iris.sources.upload import save_upload
-from iris.store.layout import read_model, session_paths
+from iris.store.layout import SessionPaths, read_model, session_paths, write_model
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
@@ -121,20 +127,76 @@ def get_transcript(paths: PathsDep) -> Transcript:
     return read_model(paths.transcript, Transcript)
 
 
-@router.get("/{session_id}/notes", response_model=Notes)
-def get_notes(paths: PathsDep) -> Notes:
+def _read_edits(paths: SessionPaths) -> NotesEdits | None:
+    try:
+        return read_model(paths.notes_edits, NotesEdits)
+    except FileNotFoundError:
+        return None
+    except ValueError:
+        # Written atomically, so this is damage from outside Iris. The session stays readable
+        # with its generated notes; the next save replaces the file.
+        log.error("ignoring unreadable %s", paths.notes_edits, exc_info=True)
+        return None
+
+
+def _notes(paths: SessionPaths) -> Notes:
+    """The notes as a reader gets them: the user's edits when there are any (iris.notes_edits)."""
     if not paths.notes.exists():
         raise HTTPException(404, "notes not ready")
-    return read_model(paths.notes, Notes)
+    return as_read(read_model(paths.notes, Notes), _read_edits(paths))
+
+
+@router.get("/{session_id}/notes", response_model=Notes)
+def get_notes(paths: PathsDep) -> Notes:
+    """The notes in the current format (old notes are upgraded as they are read): the user's
+    edited version when there is one, with ``edited`` set, else the generated notes."""
+    return _notes(paths)
+
+
+class NotesSave(BaseModel):
+    """Edited notes to save. ``based_on`` is the ``generated_hash`` the edits started from."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    markdown: Annotated[str, StringConstraints(max_length=MAX_EDITED_CHARS)]
+    based_on: Annotated[str, StringConstraints(min_length=1, max_length=128)]
+
+
+@router.put("/{session_id}/notes/edits", response_model=Notes)
+def save_notes_edits(
+    body: NotesSave, session: SessionDep, paths: PathsDep, runner: RunnerDep
+) -> Notes:
+    """Save the user's edited notes, replacing any earlier save; the generated notes are kept.
+
+    The markdown is checked like the writer's (``iris.notes_format.validate``): 422 names the
+    first problem in plain words. 409 while the session is processing.
+    """
+    if not paths.notes.exists():
+        raise HTTPException(404, "notes not ready")
+    if runner.is_running(session.id):
+        raise HTTPException(409, "session is processing")
+    generated = read_model(paths.notes, Notes)
+    if problems := validate(body.markdown, {v.id for v in generated.visuals}):
+        first = problems[0]
+        raise HTTPException(422, f"Line {first.line}: {first.message}")
+    edits = NotesEdits(markdown=body.markdown, based_on=body.based_on, saved_at=datetime.now(UTC))
+    write_model(paths.notes_edits, edits)
+    return as_read(generated, edits)
+
+
+@router.delete("/{session_id}/notes/edits", status_code=204)
+def delete_notes_edits(session: SessionDep, paths: PathsDep, runner: RunnerDep) -> None:
+    """Restore the generated notes: the user's edits are removed."""
+    if runner.is_running(session.id):
+        raise HTTPException(409, "session is processing")
+    paths.notes_edits.unlink(missing_ok=True)
 
 
 @router.get("/{session_id}/export", response_class=PlainTextResponse)
 def export_notes(session: SessionDep, paths: PathsDep) -> PlainTextResponse:
-    """Markdown with visuals embedded as data URIs, so the file stands alone."""
-    if not paths.notes.exists():
-        raise HTTPException(404, "notes not ready")
-    notes = read_model(paths.notes, Notes)
-    body = export_markdown_embedded(notes, paths.root)
+    """Markdown with visuals embedded as data URIs, so the file stands alone. The user's edited
+    notes are exported when there are any."""
+    body = export_markdown_embedded(_notes(paths), paths.root)
     return PlainTextResponse(
         body,
         media_type="text/markdown",

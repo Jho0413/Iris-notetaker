@@ -282,7 +282,7 @@ def test_a_live_session_is_finished_at_stop_with_only_the_open_work_left(
     # The live lanes left no notes draft for the run to keep or drop.
     assert draft_at_promotion == [False]
     notes = client.get(f"/api/sessions/{sid}/notes").json()
-    assert len(notes["visuals"]) == 4 and "visuals/v000004" in notes["markdown"]
+    assert len(notes["visuals"]) == 4 and "::figure{#v000004}" in notes["markdown"]
 
     # Promoted: the stages the live lanes did report as promoted, the rest ran.
     assert timeline.complete

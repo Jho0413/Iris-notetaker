@@ -317,7 +317,8 @@ async def test_an_api_error_gives_the_source_crop_unverified_and_uncached(
     assert cached == ["v2"]  # the fallback is not cached
     notes = read_model(ctx.paths.notes, Notes)
     assert {v.id: v.verified for v in notes.visuals} == {"v1": False, "v2": True}
-    assert "visuals/v1.jpg" in notes.markdown
+    assert "::figure{#v1}" in notes.markdown
+    assert {v.id: v.path for v in notes.visuals}["v1"] == "visuals/v1.jpg"
     rendered = [e.data for e in runner.bus.history(sid) if e.type == EventType.VISUAL_RENDERED]
     assert {d["id"]: d["verified"] for d in rendered} == {"v1": False, "v2": True}
     assert all("problems" not in d for d in rendered)

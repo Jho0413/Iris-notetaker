@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import test from 'node:test'
-import { againLink, PROVENANCE_LABELS, UNREACHABLE } from '../src/session/messages.ts'
+import { againLink, PROVENANCE_LABELS, saveRefused, UNREACHABLE } from '../src/session/messages.ts'
 
 test('an unreachable backend is described in Iris’s own words', () => {
   assert.equal(UNREACHABLE, "Iris isn't responding. Try again in a moment.")
@@ -43,4 +43,11 @@ test('no developer instructions or raw error details in the UI code', () => {
     return banned.filter((re) => re.test(text)).map((re) => `${path}: ${re}`)
   })
   assert.deepEqual(offenders, [])
+})
+
+test('a refused save is told without Markdown line numbers', () => {
+  assert.equal(
+    saveRefused('Line 47: There\'s no figure "v9" in this session.'),
+    'Your changes couldn’t be saved. There\'s no figure "v9" in this session.',
+  )
 })

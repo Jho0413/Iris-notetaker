@@ -75,7 +75,7 @@ async def test_writes_draft_assembles_and_reuses_cache(setup):
     assert payload["records"][1]["caption"] == "Prototype [UI]"
     await assemble.run(ctx)
     notes = read_model(ctx.paths.notes, Notes)
-    assert "visuals/v1.jpg" in notes.markdown
+    assert "::figure{#v1}" in notes.markdown
     assert "[visual:" not in notes.markdown
     assert notes.session_type == SessionType.MEETING
     assert events[0] == (
@@ -142,6 +142,10 @@ async def test_long_transcript_preserved_and_failed_parts_resume(setup):
         section(["v1"], "<img src='a.jpg'>"),
         section(["v1"], "[visual:v1]"),
         section(["v1"], "```python\nprint(1)"),
+        section(["v1"], ":::warning[Careful]{color=red}\nText.\n:::"),
+        section(["v1"], ":::box[A]\n:::box[B]\n:::box[C]\nToo deep.\n:::\n:::\n:::"),
+        section(["v1"], "Text.\n\n::figure{#v1}"),
+        section(["v1"], "Text.\n\n::chart{#v1}"),
         write.WrittenSection(session_type=SessionType.DEMO, title="", blocks=[]),
     ],
 )
@@ -347,3 +351,50 @@ async def test_screen_content_is_evidence_and_visuals_are_placed_once(setup):
 
 def _inputs(ctx):
     return read_model(ctx.paths.transcript, Transcript), read_model(ctx.paths.selection, Selection)
+
+
+async def test_fixable_format_slips_are_repaired_not_failed(setup):
+    ctx, _, _, generate, _ = setup
+    generate.return_value = section(
+        ["v1"], ":::\n:::box[Decision]{color=purple}\nShip the prototype. Alex will test it."
+    )
+    await write.run(ctx)
+    draft = read_model(ctx.paths.notes_draft, NotesDraft)
+    assert draft.markdown == (
+        ":::box[Decision]{color=grey}\nShip the prototype. Alex will test it.\n\n[visual:v1]\n\n:::"
+    )
+    # The repaired section is what is cached, so a re-run reads it without a call.
+    await write.run(ctx)
+    assert generate.await_count == 1
+
+
+def test_a_steps_figures_go_inside_the_step_at_its_end():
+    step = ":::step[Find the forces]{color=indigo}\nAt the bottom.\n:::box[Key idea]\nP.\n:::\n:::"
+    written = write.WrittenSection(
+        session_type=SessionType.LECTURE,
+        title="Loops",
+        blocks=[
+            write.NoteBlock(markdown="Intro.", visual_ids=[]),
+            write.NoteBlock(markdown=step, visual_ids=["v1", "v2"]),
+            write.NoteBlock(
+                markdown=":::box[Answer]{color=green}\nHeavier.\n:::\n\nAfter.", visual_ids=["v3"]
+            ),
+        ],
+    )
+    assert write.section_markdown(written) == (
+        "Intro.\n\n"
+        ":::step[Find the forces]{color=indigo}\nAt the bottom.\n:::box[Key idea]\nP.\n:::"
+        "\n\n[visual:v1]\n\n[visual:v2]\n\n:::\n\n"
+        ":::box[Answer]{color=green}\nHeavier.\n:::\n\nAfter.\n\n[visual:v3]"
+    )
+
+
+async def test_a_title_with_brackets_in_pairs_is_kept(setup):
+    ctx, _, _, generate, _ = setup
+    generate.return_value = section(
+        ["v1"],
+        ":::box[Closed interval [a, b]]{color=blue}\nShip the prototype. Alex will test it.\n:::",
+    )
+    await write.run(ctx)
+    draft = read_model(ctx.paths.notes_draft, NotesDraft)
+    assert draft.markdown.startswith(":::box[Closed interval [a, b]]{color=blue}")

@@ -22,16 +22,37 @@ function apply(choice: ThemeChoice) {
   document.documentElement.dataset.theme = dark ? 'dark' : 'light'
 }
 
+/** Run `print` with the light theme: printed notes are on white paper, and the notes palette's
+ *  light colours are the ones made for it. The theme comes back afterwards. */
+export async function inLight<T>(print: () => Promise<T>): Promise<T> {
+  const root = document.documentElement
+  const theme = root.dataset.theme
+  root.dataset.theme = 'light'
+  try {
+    return await print()
+  } finally {
+    if (theme) root.dataset.theme = theme
+  }
+}
+
 export function useTheme(): [ThemeChoice, (choice: ThemeChoice) => void] {
   const [choice, setChoice] = useState<ThemeChoice>(stored)
 
   useEffect(() => {
     apply(choice)
-    if (choice !== 'system') return
+    // The browser's own Print (and Export PDF in a browser) prints in light too.
+    const light = () => (document.documentElement.dataset.theme = 'light')
+    const back = () => apply(choice)
+    window.addEventListener('beforeprint', light)
+    window.addEventListener('afterprint', back)
     const media = query()
     const onChange = () => apply('system')
-    media.addEventListener('change', onChange)
-    return () => media.removeEventListener('change', onChange)
+    if (choice === 'system') media.addEventListener('change', onChange)
+    return () => {
+      window.removeEventListener('beforeprint', light)
+      window.removeEventListener('afterprint', back)
+      media.removeEventListener('change', onChange)
+    }
   }, [choice])
 
   function update(next: ThemeChoice) {

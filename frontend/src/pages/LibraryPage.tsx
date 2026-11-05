@@ -206,9 +206,10 @@ export function LibraryPage() {
                 </div>
                 <div className="row-actions" role="cell">
                   {state.kind === 'finished' && (
-                    <a className="btn btn-sm" href={`/api/sessions/${s.id}/export`} download>
-                      <Icon name="download" /> Export
-                    </a>
+                    // A PDF is the notes page printed, so it is made from there.
+                    <Link className="btn btn-sm" to={`/sessions/${s.id}?export=pdf`}>
+                      <Icon name="download" /> Export PDF
+                    </Link>
                   )}
                   {/* A problem with the recording itself isn't fixed by trying again. */}
                   {state.kind === 'failed' && failureView(s, emptyRun()).kind === 'general' && (

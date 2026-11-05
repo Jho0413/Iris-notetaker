@@ -153,7 +153,7 @@ async def test_assemble_uses_rendered_visuals(setup):
     )
     await assemble.run(ctx)
     notes = read_model(ctx.paths.notes, Notes)
-    assert "(visuals/v1.svg)" in notes.markdown
+    assert "::figure{#v1}" in notes.markdown
     assert notes.visuals[0].path == "visuals/v1.svg"
 
 
