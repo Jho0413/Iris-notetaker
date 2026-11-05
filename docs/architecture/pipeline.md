@@ -32,7 +32,8 @@ stages while recording ([`live.md`](live.md)); failures follow [`errors.md`](err
      feedback, then the other renderer is tried; if nothing passes, the source crop is used and
      marked unverified.
 7. **Assemble.** Markers are resolved to figures by id (`::figure{#<id>}`). The notes are stored
-   and exportable as Markdown with figures embedded, or as a PDF from the app.
+   exportable as Markdown with figures embedded (`GET /export`, for other clients); the app
+   exports them as a PDF.
 8. **Synthesize.** A pass across the whole session consolidates the assembled notes (a worked
    example split across sections, a later correction, a slide returned to, a figure picked twice),
    and the polished notes replace them. If it fails, the assembled notes are the result and the

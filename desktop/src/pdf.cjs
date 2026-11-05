@@ -1,4 +1,4 @@
-// Saving the notes as a PDF (Export → PDF in the desktop app). The page prints itself with its
+// Saving the notes as a PDF (Export PDF in the desktop app). The page prints itself with its
 // print stylesheet (frontend/src/index.css, @media print); main.cjs asks where to save it.
 
 /** A file name for the notes of a session called `title`: path separators and characters macOS

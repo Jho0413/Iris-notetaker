@@ -310,7 +310,7 @@ ipcMain.handle('iris-app:remove-key', async (event) => {
   return { done: await removeKey() }
 })
 
-// Export → PDF: the page as printed (its print stylesheet), saved where the user chooses.
+// Export PDF: the page as printed (its print stylesheet), saved where the user chooses.
 ipcMain.handle('iris-app:save-pdf', async (event, title) => {
   if (!policy.fromIrisWindow(event, mainWindow)) throw new Error('not allowed')
   const win = mainWindow

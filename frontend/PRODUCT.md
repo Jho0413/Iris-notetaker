@@ -36,8 +36,8 @@ the original crop is shown and marked unverified.
   no hosting.
 - Sessions last 30–90 minutes. A one-hour upload should produce notes within a few minutes, with
   progress shown until they're finished; only finished notes are shown. Processing costs $0.50–2 per hour of session.
-- Notes are read and edited in the app, and exported as Markdown with the figures embedded or as
-  a PDF.
+- Notes are read and edited in the app, and exported from it as a PDF. The engine's API also
+  gives them as Markdown with the figures embedded, for other apps.
 
 ## Capabilities and Constraints
 

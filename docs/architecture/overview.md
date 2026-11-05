@@ -26,8 +26,8 @@ it.
   clean visual: typeset maths, plotted graphs, rendered diagrams, tables, illustrations, or a
   cleaned-up screenshot where the screen is already clean. No restriction on visual type.
 - **Notes:** the style adapts to the content (meeting, lecture or demo). Worked examples are written
-  step by step, with the visual for each step. Shown in the app, editable there, and exported as
-  Markdown or PDF.
+  step by step, with the visual for each step. Shown in the app, editable there, and exported from
+  it as a PDF; other clients get Markdown from the engine's API.
 - **Performance and cost:** typical sessions are 30–90 minutes. A 1-hour upload produces notes
   within a few minutes; a live session's notes are finished soon after stop. Processing costs
   $0.50–2 per hour of session.

@@ -590,9 +590,11 @@ except one-value rows (Version) that stay on one line.
   follows the name, and the description names the variable and how to free it.
 
 ### Export
-One Export button (primary once the session is finished, download icon) opens a menu: **Markdown
-(.md)**, the engine's file with figures embedded and boxes and steps kept as their `:::` lines,
-and **PDF**, the notes as printed. Printing (Export → PDF, or the browser's Print) shows only the
+The app exports PDF only: "Export PDF" (primary once the session is finished, download icon) on
+the session page, and a small "Export PDF" on each finished library row, which opens the session
+and exports from there (a PDF is the notes page printed). The engine's Markdown export stays an
+API route (`GET /export`) for other apps; the UI doesn't offer it. Before printing, the notes'
+figures and fonts finish loading. Printing (Export PDF, or the browser's Print) shows only the
 session's title, its meta line and the notes, in the light theme on white whatever the app's
 theme, A4 with 16mm by 15mm margins, 11pt text at 1.55, boxes keeping their colours, and no box,
 step, figure, table, code block or display formula split across pages. The desktop app saves the

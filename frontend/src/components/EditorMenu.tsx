@@ -29,7 +29,7 @@ export function Popover(props: {
       top: r.bottom + window.scrollY + 6,
       left: Math.max(8, Math.min(r.left + window.scrollX, window.scrollX + document.documentElement.clientWidth - width - 8)),
     })
-    const first = menu.querySelector<HTMLElement>('[aria-checked="true"], button:not([disabled]), a[href], textarea')
+    const first = menu.querySelector<HTMLElement>('[aria-checked="true"], button:not([disabled]), textarea')
     first?.focus({ preventScroll: true })
   }, [anchor])
 
@@ -58,7 +58,7 @@ export function Popover(props: {
           return
         }
         if ((e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'ArrowLeft' || e.key === 'ArrowRight') && props.role !== 'dialog') {
-          const items = [...(ref.current?.querySelectorAll<HTMLElement>('button:not([disabled]), a[href]') ?? [])]
+          const items = [...(ref.current?.querySelectorAll<HTMLElement>('button:not([disabled])') ?? [])]
           const at = items.indexOf(document.activeElement as HTMLElement)
           const step = e.key === 'ArrowDown' || e.key === 'ArrowRight' ? 1 : -1
           items[(at + step + items.length) % items.length]?.focus()

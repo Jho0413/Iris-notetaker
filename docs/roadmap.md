@@ -15,7 +15,7 @@ stay as they are until an integration needs more.
 - **Live:** record mic and screen in the browser; the session is processed while it records, so
   stop only does what was still open.
 - **Web app:** library, upload, live and finished-notes screens with progress, cost per session,
-  clear failure messages with retry, Markdown and PDF export, and editing the notes in place
+  clear failure messages with retry, PDF export (Markdown from the API), and editing the notes in place
   (boxes, numbered steps and figures in an explicit notes format; edits kept apart from the
   generated notes and through re-runs).
 - **Cost tracking:** every model call is recorded per session (`usage.json`, API, `iris cost`),

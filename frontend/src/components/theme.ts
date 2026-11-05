@@ -40,7 +40,7 @@ export function useTheme(): [ThemeChoice, (choice: ThemeChoice) => void] {
 
   useEffect(() => {
     apply(choice)
-    // The browser's own Print (and Export → PDF in a browser) prints in light too.
+    // The browser's own Print (and Export PDF in a browser) prints in light too.
     const light = () => (document.documentElement.dataset.theme = 'light')
     const back = () => apply(choice)
     window.addEventListener('beforeprint', light)
