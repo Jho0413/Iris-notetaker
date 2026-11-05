@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { api, sessionFileUrl, type Notes, type Session, type Transcript } from '../api/client'
+import { api, type Notes, type Session, type Transcript } from '../api/client'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { FiguresGrid } from '../components/FiguresGrid'
 import { Icon } from '../components/Icon'
@@ -139,7 +139,7 @@ function SessionView({ id }: { id: string }) {
   const segments = useMemo(() => transcriptSegments(run, transcript), [run, transcript])
   const figures = useMemo(() => figureList(run, notes), [run, notes])
   const figureMeta = useMemo(
-    () => new Map(figures.filter((f) => f.path).map((f) => [f.path!, { t: f.t, provenance: provenance(f) }])),
+    () => new Map(figures.map((f) => [f.id, { t: f.t, provenance: provenance(f) }])),
     [figures],
   )
   const transcriptKnown = transcript !== null || run.stages.transcribe.status === 'done'
@@ -182,12 +182,9 @@ function SessionView({ id }: { id: string }) {
   }
 
   function showFigure(f: FigureState) {
-    const img = f.path && notes
-      ? document.querySelector<HTMLImageElement>(`.notes img[src="${CSS.escape(sessionFileUrl(notes.session_id, f.path))}"]`)
-      : null
-    if (img) {
+    const figure = document.querySelector<HTMLElement>(`.notes [data-figure="${CSS.escape(f.id)}"]`)
+    if (figure) {
       setTab('notes')
-      const figure = img.closest('figure') ?? img
       requestAnimationFrame(() => {
         figure.scrollIntoView({ behavior: 'smooth', block: 'center' })
         figure.classList.add('flash')
@@ -403,6 +400,7 @@ function SessionView({ id }: { id: string }) {
                     sessionId={session.id}
                     title={notes.title}
                     markdown={notes.markdown}
+                    visuals={notes.visuals}
                     figures={figureMeta}
                     hideTitle={notes.title.trim() === session.title.trim()}
                     onOutline={setOutline}

@@ -32,6 +32,20 @@ colors:
   info-soft: "#eaf0fd"
   info-line: "#c4d4f6"
   plate: "#ffffff"
+  # The notes palette's own hues; its other six names reuse grey (text-2), indigo (accent),
+  # blue (info), green (success), amber (warning) and red (recording)
+  teal: "#0f6b64"
+  teal-soft: "#e5f5f2"
+  teal-line: "#b5e0d9"
+  orange: "#b23c0a"
+  orange-soft: "#fff0e6"
+  orange-line: "#f8cfb3"
+  pink: "#b0175a"
+  pink-soft: "#fdebf3"
+  pink-line: "#f4c2d7"
+  violet: "#6d28d9"
+  violet-soft: "#f3edff"
+  violet-line: "#ddd0fb"
   scrim: "rgb(14 15 19 / 0.45)"
   # Dark theme (:root[data-theme='dark']); plate stays white
   bg-dark: "#0e0f13"
@@ -61,6 +75,18 @@ colors:
   info-dark: "#7fa6ff"
   info-soft-dark: "#172240"
   info-line-dark: "#2c3f70"
+  teal-dark: "#5fd4c4"
+  teal-soft-dark: "#112e2b"
+  teal-line-dark: "#1f5650"
+  orange-dark: "#ffa36b"
+  orange-soft-dark: "#36210f"
+  orange-line-dark: "#6a3c1d"
+  pink-dark: "#ff8cc0"
+  pink-soft-dark: "#3a1a2b"
+  pink-line-dark: "#6a2c4b"
+  violet-dark: "#c2a8ff"
+  violet-soft-dark: "#2a2142"
+  violet-line-dark: "#4b3b7a"
   scrim-dark: "rgb(0 0 0 / 0.6)"
 typography:
   display:
@@ -293,20 +319,12 @@ components:
     textColor: "{colors.text}"
     typography: "{typography.body-notes}"
     width: "68ch"
-  card-problem:
-    backgroundColor: "{colors.accent-soft}"
+  notes-box:
+    backgroundColor: "the box colour's wash (--ks)"
     rounded: "{rounded.md}"
     padding: "14px 18px"
-  card-answer:
-    backgroundColor: "{colors.success-soft}"
-    rounded: "{rounded.md}"
-    padding: "14px 18px"
-  callout-key:
-    backgroundColor: "{colors.info-soft}"
-    rounded: "{rounded.md}"
-    padding: "12px 16px"
-  callout-warn:
-    backgroundColor: "{colors.warning-soft}"
+  notes-quote:
+    backgroundColor: "{colors.surface-2}"
     rounded: "{rounded.md}"
     padding: "12px 16px"
   figure-plate:
@@ -361,19 +379,28 @@ strong / soft / line triplet.
 
 ### Primary
 - **Iris Indigo** (`accent`; dark `accent-dark`): primary buttons, links, the focus ring, the
-  selected-tab underline, the running step's spinner, ribbon pins, the wordmark, and the labels of
-  problem and step cards. `accent-hover` darkens it in light and lightens it in dark. Text on it is
+  selected-tab underline, the running step's spinner, ribbon pins and the wordmark. `accent-hover` darkens it in light and lightens it in dark. Text on it is
   `accent-text` (white in light, near-black in dark).
-- **Indigo Wash** (`accent-soft`) with **Indigo Hairline** (`accent-line`): the problem card,
-  processing chip, hovered drop zone and choice tiles, text selection, and the step path.
+- **Indigo Wash** (`accent-soft`) with **Indigo Hairline** (`accent-line`): the processing chip, hovered drop zone and choice tiles, text selection, and the step path.
 
 ### Secondary (state colours)
 - **Recording Red** (`recording`, `-soft`, `-line`): the recording dot, recording bar and stop
   button; failed chips and error banners; destructive actions; invalid LaTeX shown as source.
-- **Finished Green** (`success`, `-soft`, `-line`): the Finished chip, finished steps, the answer
-  card and the Verified redraw badge.
-- **Warning Amber** (`warning`, `-soft`, `-line`): warning banners, the Watch out callout, unverified original crops (badge and ribbon pin), capture warnings in the recording bar.
-- **Key-idea Blue** (`info`, `-soft`, `-line`): the Key idea callout only.
+- **Finished Green** (`success`, `-soft`, `-line`): the Finished chip, finished steps and the
+  Verified redraw badge.
+- **Warning Amber** (`warning`, `-soft`, `-line`): warning banners, unverified original crops (badge and ribbon pin), capture warnings in the recording bar.
+- **Info Blue** (`info`, `-soft`, `-line`): no app state of its own; the notes palette's blue.
+
+### The notes palette
+Colours inside the notes belong to the writer, not to the app: each box and step names one of ten
+colours (`{color=…}` in the notes format, `src/notes/format.ts`), and a missing or unknown name is
+grey. Each name is a text / wash / line triplet in both themes, set on the block as `--k`, `--ks`
+and `--kl` by its `.c-<name>` class: **grey** (`text-2`, `surface-2`, `border`), **indigo**
+(`accent`), **blue** (`info`), **teal** (`teal`), **green** (`success`), **amber** (`warning`),
+**orange** (`orange`), **red** (`recording`), **pink** (`pink`) and **violet** (`violet`). Every
+label colour is at least 4.6:1 on its own wash in both themes. Iris's writer uses indigo for a
+problem and its steps, green for an answer or decision, blue for a definition or key idea, amber
+for watch out and open questions and grey for the rest; the user can change any of them.
 
 ### Neutral
 - **Cool Ground** (`bg`): the page behind everything.
@@ -395,9 +422,10 @@ strong / soft / line triplet.
 focus, the current step, the selected tab. It is never used as decoration or as a background fill
 for whole regions.
 
-**The One Meaning Rule.** Red is recording, failure and deletion; green is finished; amber is warning
-and unverified; blue is the Key idea callout. No state colour borrows another's job, and none ever
-appears without a word that says the same thing.
+**The One Meaning Rule.** In the app (chips, banners, buttons, badges, the ribbon) red is
+recording, failure and deletion; green is finished; amber is warning and unverified. No state
+colour borrows another's job, and none ever appears without a word that says the same thing.
+Inside the notes, colour is the writer's (the notes palette) and carries no app meaning.
 
 **The Token-Only Rule.** Themes differ only in custom-property values. Components reference tokens,
 never literal colours, so a new component is dark-mode ready by construction.
@@ -482,7 +510,7 @@ row gets a hairline, never a shadow.
 ## Shapes
 
 Gently rounded, never soft. Controls (buttons, inputs, nav links, tooltips) use 6px; panels
-(rail, library list, banners, dialog, notes cards and callouts, code blocks, drop zone) use 10px;
+(rail, library list, banners, dialog, notes boxes and quotes, code blocks, drop zone) use 10px;
 figure plates use 8px; inline code and the focus ring use 4px. Status chips, figure badges and tab
 counts are full pills, which sets state apart from controls. The only non-rectangular forms are the
 recording dot, the step-path rings and the ribbon pins (a 10×18 tab, rounded on top).
@@ -592,16 +620,25 @@ hairline box (the rail's step rows), and one `text-2` line saying the notes appe
 page can be left. Each line keeps its height while empty, so nothing moves as steps advance.
 
 ### Notes Column
-- **Worked examples:** the Problem card is an indigo-washed box; steps are unboxed, joined by a 1px
-  `accent-line` path with an 11px indigo ring at each step and an indigo step title; the Answer card
-  is green-washed. Card labels are the bold first word in the card's colour.
-- **Callouts:** Key idea (blue wash) and Watch out (amber wash), 10px radius, bold coloured label,
-  no icon.
+- **Boxes** (`:::box[Title]{color=…}`): the colour's wash with its 1px line, 10px radius, 14px 18px
+  padding; the title (the writer's own words, never a matched label) in 600 weight in the label
+  colour. No title, no heading line. A box inside a step or box sits 12px below what precedes it;
+  blocks go one level deep.
+- **Steps** (`:::step[Title]{color=…}`): unboxed. Steps in a row form one numbered path: a 23px
+  ring in the step colour with the number inside (tabular, 12px 600; never the word "Step"), a 1px
+  path in the colour's line token down to the next ring, and the title in `text`. Anything between
+  two steps ends the path; the next starts at 1. A box or figure inside a step stays on its path.
+  The path is an `ol.step-run` (avoid `.step`: the progress list owns it).
+- **Quotes** (`>`): a neutral box, `surface-2` with a hairline.
+- **Problems** the notes can't be drawn as written (no end, unknown colour or kind of block, a
+  third level, an unknown figure): one 14px line in `recording` red, in plain words, inside or in
+  place of the block; a box with no end or of an unknown kind has a dashed edge. An image from
+  outside the session is never loaded: a `text-2` line says so.
 - **Math:** inline on the baseline; display math 12px above and below and scrolls sideways; invalid
   LaTeX shows as red mono source.
 - **Tables and code:** hairline rows with a `surface-2` header, sideways scroll; code blocks on
   `surface-2` in mono at 14px, 10px radius.
-- **Figures:** centred on a white plate (8px radius, hairline, 12px padding, max height 520px);
+- **Figures** (`::figure{#id}`, resolved from the session's visuals): centred on a white plate (8px radius, hairline, 12px padding, max height 520px);
   caption below at 14px `text-2` (max 56ch), then "Shown at m:ss" and a provenance badge. A
   figure the ribbon jumps to flashes a 2px indigo outline.
 

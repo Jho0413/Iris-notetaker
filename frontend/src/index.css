@@ -33,6 +33,20 @@
   --info-soft: #eaf0fd;
   --info-line: #c4d4f6;
   --plate: #ffffff;
+  /* The notes palette's own hues (the other six names reuse the tokens above): text, wash, line.
+     Each text colour is at least 4.6:1 on its wash, in both themes. */
+  --teal: #0f6b64;
+  --teal-soft: #e5f5f2;
+  --teal-line: #b5e0d9;
+  --orange: #b23c0a;
+  --orange-soft: #fff0e6;
+  --orange-line: #f8cfb3;
+  --pink: #b0175a;
+  --pink-soft: #fdebf3;
+  --pink-line: #f4c2d7;
+  --violet: #6d28d9;
+  --violet-soft: #f3edff;
+  --violet-line: #ddd0fb;
   --shadow: 0 8px 24px -8px rgb(23 23 40 / 0.18), 0 2px 6px -2px rgb(23 23 40 / 0.08);
   --scrim: rgb(14 15 19 / 0.45);
 
@@ -74,6 +88,18 @@
   --info: #7fa6ff;
   --info-soft: #172240;
   --info-line: #2c3f70;
+  --teal: #5fd4c4;
+  --teal-soft: #112e2b;
+  --teal-line: #1f5650;
+  --orange: #ffa36b;
+  --orange-soft: #36210f;
+  --orange-line: #6a3c1d;
+  --pink: #ff8cc0;
+  --pink-soft: #3a1a2b;
+  --pink-line: #6a2c4b;
+  --violet: #c2a8ff;
+  --violet-soft: #2a2142;
+  --violet-line: #4b3b7a;
   --shadow: 0 12px 32px -8px rgb(0 0 0 / 0.6), 0 2px 8px -2px rgb(0 0 0 / 0.4);
   --scrim: rgb(0 0 0 / 0.6);
 }
@@ -459,7 +485,7 @@ dialog.confirm h2 { margin: 0 0 6px; font-size: 1.0625rem; font-weight: 600; }
 dialog.confirm p { margin: 0 0 20px; color: var(--text-2); }
 dialog.confirm .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
 
-/* ---- Notes (Read surface). Cards come from rehypeNotes: problem, step, answer. ----------------- */
+/* ---- Notes (Read surface): Markdown with boxes, steps and figures (src/notes/format.ts). ------- */
 
 .notes { font-size: 1.0625rem; line-height: 1.7; max-width: 68ch; overflow-wrap: break-word; }
 .notes h1 { font-size: 1.5rem; font-weight: 600; margin: 0 0 24px; }
@@ -481,25 +507,43 @@ dialog.confirm .dialog-actions { display: flex; justify-content: flex-end; gap: 
   border-radius: var(--radius-m); overflow-x: auto; font-size: 0.875rem; line-height: 1.55; }
 .notes pre code { background: none; padding: 0; font-size: inherit; }
 
-.notes .card { margin: 16px 0; }
-.notes .card > :first-child { margin-top: 0; }
-.notes .card > :last-child { margin-bottom: 0; }
-.notes .card-problem, .notes .card-answer { padding: 14px 18px; border-radius: var(--radius-m);
-  border: 1px solid var(--accent-line); background: var(--accent-soft); }
-.notes .card-problem > p:first-child strong:first-child { color: var(--accent); }
-.notes .card-answer { border-color: var(--success-line); background: var(--success-soft); }
-.notes .card-answer > p:first-child strong:first-child { color: var(--success); }
-/* Steps are joined by a hairline path with a node at each step, so a worked example reads as one
-   sequence rather than a stack of boxes. */
-.notes .card-step { position: relative; margin: 0; padding: 4px 0 20px 30px; }
-.notes .card-step::before { content: ''; position: absolute; left: 4px; top: 13px; width: 11px;
-  height: 11px; border-radius: 50%; border: 2px solid var(--accent); background: var(--bg); z-index: 1; }
-.notes .card-step::after { content: ''; position: absolute; left: 9px; top: 13px; bottom: -13px;
-  width: 1px; background: var(--accent-line); }
-.notes .card-step:has(+ :not(.card-step))::after, .notes .card-step:last-child::after { display: none; }
-.notes .card-step > p:first-child strong:first-child { color: var(--accent); }
-.notes * + .card-step { margin-top: 16px; }
-.notes .card-step + .card-step { margin-top: 0; }
+/* The notes palette: colours inside the notes belong to the writer, one name each. --k is the
+   label colour, --ks the wash, --kl the line. */
+.c-grey { --k: var(--text-2); --ks: var(--surface-2); --kl: var(--border); }
+.c-indigo { --k: var(--accent); --ks: var(--accent-soft); --kl: var(--accent-line); }
+.c-blue { --k: var(--info); --ks: var(--info-soft); --kl: var(--info-line); }
+.c-teal { --k: var(--teal); --ks: var(--teal-soft); --kl: var(--teal-line); }
+.c-green { --k: var(--success); --ks: var(--success-soft); --kl: var(--success-line); }
+.c-amber { --k: var(--warning); --ks: var(--warning-soft); --kl: var(--warning-line); }
+.c-orange { --k: var(--orange); --ks: var(--orange-soft); --kl: var(--orange-line); }
+.c-red { --k: var(--recording); --ks: var(--recording-soft); --kl: var(--recording-line); }
+.c-pink { --k: var(--pink); --ks: var(--pink-soft); --kl: var(--pink-line); }
+.c-violet { --k: var(--violet); --ks: var(--violet-soft); --kl: var(--violet-line); }
+
+.notes .blk { margin: 16px 0; padding: 14px 18px; border: 1px solid var(--kl); border-radius: var(--radius-m);
+  background: var(--ks); }
+.notes .blk > :first-child { margin-top: 0; }
+.notes .blk > :last-child { margin-bottom: 0; }
+.notes .blk-head { margin: 0 0 6px; font-weight: 600; color: var(--k); }
+.notes .blk .blk { margin: 12px 0 0; }
+.notes .blk-broken { border-style: dashed; }
+.notes .blk-problem-note { margin: 8px 0 0; font-size: 0.875rem; line-height: 1.5; color: var(--recording); }
+.notes .blocked { font-size: 0.875rem; color: var(--text-2); }
+/* A run of steps is one path: the step's number sits in its ring, never the word "Step", so the
+   title is the writer's own. A box or figure inside a step stays on the path. */
+.notes .step-run { margin: 16px 0; padding: 0; list-style: none; }
+.notes .step-run > li + li { margin-top: 0; }
+.notes .run-item { position: relative; padding: 0 0 18px 36px; }
+.notes .run-item:last-child { padding-bottom: 0; }
+.notes .run-item::after { content: ''; position: absolute; left: 11px; top: 8px; bottom: 0; width: 1px;
+  background: var(--kl); }
+.notes .run-item:last-child::after { display: none; }
+.notes .run-item::before { content: attr(data-n); position: absolute; left: 0; top: 6px; z-index: 1;
+  width: 23px; height: 23px; display: flex; align-items: center; justify-content: center;
+  border-radius: 50%; border: 1.5px solid var(--k); background: var(--bg); color: var(--k);
+  font: 600 0.75rem/1 var(--font); font-variant-numeric: tabular-nums; }
+.notes .blk-step { margin: 0; padding: 4px 0 0; border: 0; border-radius: 0; background: none; }
+.notes .blk-step > .blk-head { color: var(--text); }
 
 .notes blockquote { margin: 16px 0; padding: 12px 16px; border-radius: var(--radius-m);
   background: var(--surface-2); border: 1px solid var(--border); }

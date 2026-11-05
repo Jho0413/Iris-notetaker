@@ -19,7 +19,7 @@ the user, ``repair`` fixes what can be fixed without guessing (for model output)
 in the notes, and only to read old notes (``Notes.format_version`` 1).
 
 The UI reads the same format with its own parser (``frontend/src/notes/format.ts``); the two
-follow the rules above and are tested against the same cases.
+follow the rules above.
 """
 
 import re
