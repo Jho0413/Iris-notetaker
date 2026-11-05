@@ -626,7 +626,7 @@ body.is-dragging, body.is-dragging * { cursor: grabbing !important; user-select:
   padding: 6px; border: 1px solid var(--border); border-radius: var(--radius-m); background: var(--surface);
   box-shadow: var(--shadow); font-size: 0.875rem; }
 .menu h3 { margin: 6px 8px; font-size: 0.75rem; font-weight: 600; color: var(--text-2); }
-.menu .mi { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 32px; padding: 0 8px;
+.menu .mi { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 32px; padding: 0 8px; text-decoration: none;
   border: 0; border-radius: 6px; background: transparent; color: var(--text); font: 400 0.875rem/1.3 var(--font);
   text-align: left; cursor: pointer; }
 .menu .mi:hover, .menu .mi:focus-visible { background: var(--surface-2); }
@@ -766,6 +766,25 @@ body.is-dragging, body.is-dragging * { cursor: grabbing !important; user-select:
   /* The toolbar fits a phone: the colour shows as its dot only. */
   .tb-btn { padding: 0 6px; }
   .tb-btn .tb-word { display: none; }
+}
+
+/* Export → PDF and the browser's Print: the session's title and its notes, nothing to act on.
+   Printed in the light theme (theme.ts), on white, with the boxes' colours kept. */
+@media print {
+  @page { size: A4; margin: 16mm 15mm; }
+  html, body { background: var(--plate); }
+  * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .topbar, .skip-link, .crumbs, .head-actions, .rename-btn, .ribbon, .tabs, .rail, .banner,
+  .edit-strip, .edited-meta, .menu, .sr-only { display: none !important; }
+  .main { padding: 0; }
+  .session-head { margin-bottom: 16px; }
+  .session-body { display: block; }
+  .notes { max-width: none; font-size: 11pt; line-height: 1.55; }
+  .notes h2 { margin-top: 28px; break-after: avoid; }
+  .notes h3 { break-after: avoid; }
+  .notes .blk, .notes .figure, .notes pre, .notes table, .notes .katex-display, .notes blockquote,
+  .notes .run-item { break-inside: avoid; }
+  .notes .figure img { max-height: 110mm; }
 }
 
 @media (prefers-reduced-motion: reduce) {

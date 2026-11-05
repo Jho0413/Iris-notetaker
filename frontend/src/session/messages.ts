@@ -41,3 +41,6 @@ export const NOTES_EDIT = {
   keep: 'Keep my edits',
   keepFailed: 'Your edits couldn’t be kept. Try again.',
 } as const
+
+/** Export → PDF failed in the desktop app (the reason is in its log). */
+export const PDF_FAILED = 'The PDF couldn’t be saved. Try again.'

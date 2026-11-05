@@ -35,6 +35,7 @@ const { WELCOME_SHOWN, shouldWelcome } = require('./src/welcome.cjs')
 const policy = require('./src/policy.cjs')
 const { ORIGIN } = require('./src/routes.cjs')
 const { unloadPrompt } = require('./src/unload.cjs')
+const { pdfFileName, PDF_OPTIONS } = require('./src/pdf.cjs')
 
 const PACKAGED = app.isPackaged
 const REPO = path.resolve(__dirname, '..')
@@ -307,6 +308,26 @@ ipcMain.handle('iris-app:change-key', async (event) => {
 ipcMain.handle('iris-app:remove-key', async (event) => {
   if (!policy.fromIrisWindow(event, mainWindow)) throw new Error('not allowed')
   return { done: await removeKey() }
+})
+
+// Export → PDF: the page as printed (its print stylesheet), saved where the user chooses.
+ipcMain.handle('iris-app:save-pdf', async (event, title) => {
+  if (!policy.fromIrisWindow(event, mainWindow)) throw new Error('not allowed')
+  const win = mainWindow
+  const { canceled, filePath } = await dialog.showSaveDialog(win, {
+    defaultPath: path.join(app.getPath('downloads'), pdfFileName(title)),
+    filters: [{ name: 'PDF', extensions: ['pdf'] }],
+  })
+  if (canceled || !filePath) return { done: false }
+  try {
+    const data = await win.webContents.printToPDF(PDF_OPTIONS)
+    await fs.promises.writeFile(filePath, data)
+    log(`[pdf] saved ${data.length} bytes`)
+    return { done: true }
+  } catch (err) {
+    log(`[pdf] couldn't save: ${err.message}`) // the page says it in its own words
+    throw err
+  }
 })
 
 // ---- backend ---------------------------------------------------------------------------------

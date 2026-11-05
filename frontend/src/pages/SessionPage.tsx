@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api, type Notes, type Session, type Transcript } from '../api/client'
 import { ConfirmDialog } from '../components/ConfirmDialog'
+import { MenuItem, Popover } from '../components/EditorMenu'
 import { FiguresGrid } from '../components/FiguresGrid'
 import { Icon } from '../components/Icon'
 import { NotesEditor } from '../components/NotesEditor'
@@ -14,7 +15,8 @@ import { TabPanel, Tabs } from '../components/Tabs'
 import { TitleField } from '../components/TitleField'
 import { TranscriptList } from '../components/TranscriptList'
 import { stepCosts, usageCost, usageRefreshKey } from '../session/cost'
-import { againLink, NOTES_EDIT, UNREACHABLE } from '../session/messages'
+import { againLink, NOTES_EDIT, PDF_FAILED, UNREACHABLE } from '../session/messages'
+import { exportPdf } from '../session/exportPdf'
 import { act } from '../session/request'
 import { formatWhen, SOURCE_LABEL } from '../session/format'
 import {
@@ -81,6 +83,7 @@ function SessionView({ id }: { id: string }) {
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [renaming, setRenaming] = useState(false)
   const [editing, setEditing] = useState(false)
+  const [exportMenu, setExportMenu] = useState<HTMLElement | null>(null)
   // Dropping the user's edits: "Restore generated notes", or "Use the new notes" after a re-run.
   const [confirmDrop, setConfirmDrop] = useState<'restore' | 'use-new' | null>(null)
 
@@ -215,6 +218,19 @@ function SessionView({ id }: { id: string }) {
     }
   }
 
+  /** Export → PDF: the notes tab, as printed. */
+  async function savePdf() {
+    setExportMenu(null)
+    setTab('notes')
+    setActionError(null)
+    await new Promise(requestAnimationFrame) // the notes are on screen before they are printed
+    try {
+      await exportPdf(session?.title ?? '')
+    } catch {
+      setActionError(PDF_FAILED)
+    }
+  }
+
   function showFigure(f: FigureState) {
     const figure = document.querySelector<HTMLElement>(`.notes [data-figure="${CSS.escape(f.id)}"]`)
     if (figure) {
@@ -319,7 +335,7 @@ function SessionView({ id }: { id: string }) {
                 {length !== undefined && <span className="num">{formatClock(length)}</span>}
                 <span className="num">{formatWhen(session.created_at)}</span>
                 {notes?.edited && !editing && (
-                  <span>
+                  <span className="edited-meta">
                     {NOTES_EDIT.edited} ·{' '}
                     <button type="button" className="link-btn" onClick={() => setConfirmDrop('restore')} disabled={busy}>
                       {NOTES_EDIT.restore}
@@ -338,9 +354,15 @@ function SessionView({ id }: { id: string }) {
             </button>
           )}
           {notes && !editing && (
-            <a className={finished ? 'btn btn-primary' : 'btn'} href={`/api/sessions/${session.id}/export`} download>
-              <Icon name="download" /> Export Markdown
-            </a>
+            <button
+              type="button"
+              className={finished ? 'btn btn-primary' : 'btn'}
+              aria-haspopup="menu"
+              aria-expanded={exportMenu !== null}
+              onClick={(e) => setExportMenu(e.currentTarget)}
+            >
+              <Icon name="download" /> Export
+            </button>
           )}
           {(failure?.kind === 'general' || ui.kind === 'stalled') && (
             <button type="button" className="btn btn-primary" onClick={() => void rerun()} disabled={busy}>
@@ -530,6 +552,17 @@ function SessionView({ id }: { id: string }) {
         />
       </div>
 
+      {exportMenu && notes && (
+        <Popover anchor={exportMenu} label="Export" onClose={() => setExportMenu(null)}>
+          <a role="menuitem" className="mi" href={`/api/sessions/${session.id}/export`} download onClick={() => setExportMenu(null)}>
+            <Icon name="file" />
+            <span className="mi-label">Markdown (.md)</span>
+          </a>
+          <MenuItem icon={<Icon name="file" />} onSelect={() => void savePdf()}>
+            PDF
+          </MenuItem>
+        </Popover>
+      )}
       <ConfirmDialog
         open={confirmDrop !== null}
         title={confirmDrop === 'use-new' ? NOTES_EDIT.useNewTitle : NOTES_EDIT.restoreTitle}

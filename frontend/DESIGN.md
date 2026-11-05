@@ -531,7 +531,8 @@ Compact, quiet, and obvious about the one thing to do.
 - **Secondary (default):** `surface` fill with a `border-strong` outline and `text` label.
 - **Ghost:** no fill or border, `text-2` label; used for row actions and rail toggles.
 - **Stop / destructive:** solid recording red with `on-recording` text; the recording bar's Stop and the confirm button of
-  the delete dialog. Nowhere else.
+  a dialog that removes something (deleting a session; discarding, restoring over or replacing
+  edited notes). Nowhere else.
 - **Sizes:** large 40px (18px padding, 15px text) for the start-recording action; small 28px (8px
   padding, 13px text).
 - **Hover / Focus:** a 160ms tonal step (`surface-2`, or `accent-hover`); pressed steps to
@@ -587,6 +588,15 @@ except one-value rows (Version) that stay on one line.
   action to the key row right below it.
 - **Pinned by `.env`:** the control is disabled, a neutral "Set outside Iris" lock chip (20px pill)
   follows the name, and the description names the variable and how to free it.
+
+### Export
+One Export button (primary once the session is finished, download icon) opens a menu: **Markdown
+(.md)**, the engine's file with figures embedded and boxes and steps kept as their `:::` lines,
+and **PDF**, the notes as printed. Printing (Export → PDF, or the browser's Print) shows only the
+session's title, its meta line and the notes, in the light theme on white whatever the app's
+theme, A4 with 16mm by 15mm margins, 11pt text at 1.55, boxes keeping their colours, and no box,
+step, figure, table, code block or display formula split across pages. The desktop app saves the
+PDF where the user chooses (named after the session); a browser opens its print dialog.
 
 ### Editing the notes
 Edit in place: the notes keep their reading look (same column, boxes, steps and figures), and no
