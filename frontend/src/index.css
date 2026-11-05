@@ -815,8 +815,14 @@ body.is-dragging, body.is-dragging * { cursor: grabbing !important; user-select:
   .notes .figure, .notes pre, .notes table, .notes .katex-display { break-inside: avoid; }
   .notes .blk:not(.blk-step), .notes blockquote { -webkit-box-decoration-break: clone;
     box-decoration-break: clone; }
-  .notes p, .notes li { orphans: 2; widows: 2; }
   .notes .blk-head { break-after: avoid; }
+  /* A box never splits off its first or last line alone: its first piece after the title (or its
+     first piece, untitled) stays with the next, and its last with the one before. Inside a
+     paragraph, the browser already keeps 2 lines each side (orphans and widows). */
+  .notes .blk:not(.blk-step) > .blk-head + :not(:last-child),
+  .notes :is(.blk:not(.blk-step), blockquote) > :first-child:not(.blk-head):not(:last-child) {
+    break-after: avoid; }
+  .notes :is(.blk:not(.blk-step), blockquote) > :last-child:not(:first-child) { break-before: avoid; }
   .notes .figure img { max-height: 110mm; }
 }
 
