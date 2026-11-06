@@ -111,6 +111,17 @@ test('in the desktop app, blocked capture points at System Settings for Iris, no
   assert.match(describeCaptureError(denied, 'screen', false), /for your browser/)
 })
 
+test("in the desktop app, a cancelled picker says so: Electron refuses it as AbortError", () => {
+  const refused = new DOMException('Invalid capture constraints', 'AbortError')
+  assert.equal(
+    describeCaptureError(refused, 'screen', true),
+    describeCaptureError(new DOMException('', 'NotAllowedError'), 'screen', true),
+  )
+  // Elsewhere an AbortError is still an interruption.
+  assert.match(describeCaptureError(refused, 'screen', false), /interrupted/)
+  assert.match(describeCaptureError(refused, 'microphone', true), /interrupted/)
+})
+
 test('audio format: WebM/Opus preferred, nothing if WebM is unsupported', () => {
   assert.equal(pickAudioMimeType(() => true), 'audio/webm;codecs=opus')
   assert.equal(pickAudioMimeType((t) => t === 'audio/webm'), 'audio/webm')
