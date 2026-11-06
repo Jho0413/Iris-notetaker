@@ -30,6 +30,9 @@ but it is still proven to work (step 4).
 - **Keep it simple.** Build the smallest thing that does the job. No options, layers or
   abstractions "for later": add them when a second real use appears. Between two designs, pick the
   one with fewer moving parts.
+- **Best practice over quick fixes.** Fix a problem the way the platform or library documents it,
+  even when a workaround is quicker: simple means fewer moving parts, not least effort. If the
+  right fix is bigger than the task, say so and let the user choose; never ship the shortcut quietly.
 - **Reuse, don't rebuild.** Before writing something new, look for what Iris already has
   (components, CSS classes and tokens in `index.css`, helpers like `act()`, `write_model`,
   `ConfirmDialog`) and then for a well-kept library. Extend what exists instead of making a
