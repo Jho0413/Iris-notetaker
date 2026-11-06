@@ -22,6 +22,8 @@ How it works (docs/architecture/live.md):
      render that raises (a blocking error) is logged and leaves no cache entry; the next model
      call (a batch here, or the run at stop) fails on the same error.
   4. ``selected_to`` advances to the end of the last moment read, never past ``closed_to``.
+     With every closed moment read, it follows ``closed_to``: that moves on its own while no
+     screen is shared (an audio-only recording), and the horizon then follows the transcript.
   5. When ``timeline.upstream_failed``: no more model calls; renders still running are
      cancelled (they leave no cache entry). Wait for stop.
   6. Batches depend on timing, so the lane records each batch's moment ids. A fresh lane (after
@@ -104,6 +106,11 @@ class SelectLane(LiveLane):
                 return gated[:n]
         return gated[:size]
 
+    def _caught_up(self) -> bool:
+        """Every closed moment is read, and ``closed_to`` has moved past ``selected_to``."""
+        tl = self.timeline
+        return self.read == len(tl.moments) and tl.closed_to > tl.selected_to
+
     def _drained(self) -> bool:
         """Stop was requested, the screen lane will close no more moments and all are read."""
         tl = self.timeline
@@ -118,7 +125,12 @@ class SelectLane(LiveLane):
         try:
             while True:
                 await tl.wait_until(
-                    lambda: self._halted() or bool(self._next_batch()) or self._drained()
+                    lambda: (
+                        self._halted()
+                        or bool(self._next_batch())
+                        or self._caught_up()
+                        or self._drained()
+                    )
                 )
                 if self._halted():
                     log.warning(
@@ -126,10 +138,12 @@ class SelectLane(LiveLane):
                         self.ctx.session_id,
                     )
                     break
-                batch = self._next_batch()
-                if not batch:
+                if batch := self._next_batch():
+                    await self._read(batch)
+                elif self._caught_up():
+                    await tl.advance_selected_to(tl.closed_to)
+                else:
                     break  # drained
-                await self._read(batch)
             if self._halted():
                 # Nothing made from here on can be promoted: stop paying for renders too. A
                 # render writes its cache entry without awaiting, so cancelling leaves none half

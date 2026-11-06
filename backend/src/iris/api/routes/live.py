@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 
 from iris.api.deps import PathsDep, RunnerDep, SessionDep, SettingsDep, StoreDep
 from iris.llm.usage import with_cost
-from iris.models import Session, SessionStatus, SourceKind
+from iris.models import LiveCapture, Session, SessionStatus, SourceKind
 from iris.sources.browser_live import (
     JPEG_MAGIC,
     MAX_AUDIO_SEQ,
@@ -23,7 +23,9 @@ from iris.sources.browser_live import (
     WEBM_MAGIC,
     ChunkConflict,
     missing_audio_chunks,
+    read_capture,
     store_audio_chunk,
+    store_capture,
     store_frame,
 )
 from iris.store.db import SessionStore
@@ -37,6 +39,10 @@ MAX_LISTED_MISSING = 100
 
 class LiveStart(BaseModel):
     title: str = "Live session"
+    screen: bool = Field(
+        default=True,
+        description="Whether the browser shares a screen and posts frames. False: audio only.",
+    )
 
 
 class LiveEnd(BaseModel):
@@ -82,7 +88,9 @@ async def start_live(
     body: LiveStart, store: StoreDep, settings: SettingsDep, runner: RunnerDep
 ) -> Session:
     session = store.create(body.title, SourceKind.BROWSER_LIVE)
-    session_paths(settings.sessions_dir, session.id).ensure()
+    paths = session_paths(settings.sessions_dir, session.id).ensure()
+    # Before the processor starts: its screen lane reads it.
+    store_capture(paths, LiveCapture(screen=body.screen))
     store.update(session.id, status=SessionStatus.RECORDING)
     runner.live.ensure(session.id)
     return store.get(session.id)  # type: ignore[return-value]
@@ -125,12 +133,15 @@ async def post_frame(
 ) -> None:
     """Body: one JPEG screen frame. ``t`` is seconds since recording started (the audio's clock).
 
-    Posting the same frame again is a no-op; a different body for a stored ``t`` is a 409.
+    Posting the same frame again is a no-op; a different body for a stored ``t`` is a 409, and so
+    is any frame for an audio-only recording.
     """
     data = await _read_body(request)
     if not data.startswith(JPEG_MAGIC):
         raise HTTPException(415, "frame must be a JPEG")
     _require_recording(store, session.id)
+    if not read_capture(paths).screen:
+        raise HTTPException(409, "this recording is audio only")
     try:
         store_frame(paths, t, data)
     except ChunkConflict as e:

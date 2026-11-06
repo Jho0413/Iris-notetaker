@@ -15,10 +15,10 @@ import pytest
 from iris.config import Settings
 from iris.live.screen import ScreenLane
 from iris.live.timeline import Lane, LiveTimeline
-from iris.models import EventType, FrameIndex, Moments, SourceKind
+from iris.models import EventType, FrameIndex, LiveCapture, Moments, SourceKind
 from iris.pipeline.context import StageContext
 from iris.pipeline.stages.detect import detect_moments, moment_event
-from iris.sources.browser_live import finalize_frames, store_frame
+from iris.sources.browser_live import finalize_frames, read_capture, store_capture, store_frame
 from iris.store.layout import SessionPaths, read_model
 from tests.test_detect import SLIDE_A, SLIDE_B, Deck, three_slides
 from tests.test_live import COLOURS, jpeg
@@ -184,6 +184,33 @@ async def test_no_frames_gives_empty_outputs(ctx: StageContext, events: list):
     )
     assert read_model(ctx.paths.live_moments, Moments) == Moments(moments=[])
     assert timeline.moments == [] and events == []
+
+
+async def test_with_no_screen_closed_to_follows_the_transcript(ctx: StageContext, events: list):
+    store_capture(ctx.paths, LiveCapture(screen=False))
+    tl = LiveTimeline()
+    task = asyncio.create_task(ScreenLane(ctx, tl).run())
+    await tl.publish_transcript([], transcribed_to=7.5)
+    await asyncio.wait_for(tl.wait_until(lambda: tl.closed_to >= 7.5), 5)
+    await tl.publish_transcript([], transcribed_to=19.0)
+    await asyncio.wait_for(tl.wait_until(lambda: tl.closed_to >= 19.0), 5)
+    assert tl.closed_to == 19.0
+    await tl.request_end()
+    await asyncio.wait_for(task, 5)
+    assert tl.moments == [] and events == []
+    assert read_model(ctx.paths.live_moments, Moments) == Moments(moments=[])
+
+
+async def test_a_recording_without_a_capture_file_shares_its_screen(ctx: StageContext):
+    """A recording started before capture.json existed, or with an unreadable one."""
+    assert read_capture(ctx.paths) == LiveCapture(screen=True)
+    ctx.paths.live_capture.parent.mkdir(parents=True, exist_ok=True)
+    ctx.paths.live_capture.write_text("{not json")
+    assert read_capture(ctx.paths) == LiveCapture(screen=True)
+    driver = await Driver(ctx).start()
+    await driver.deliver(*((float(t), encode(f)) for t, f in enumerate(three_slides().frames)))
+    timeline = await driver.stop()
+    assert timeline.moments and timeline.closed_to == timeline.moments[-1].end
 
 
 async def test_a_fresh_lane_replays_the_captured_frames(ctx: StageContext):

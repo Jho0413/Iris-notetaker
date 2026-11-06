@@ -1,6 +1,6 @@
 """Screen lane: captured frames -> moments, while recording.
 
-Reads:  live/frames/<t_ms>.jpg
+Reads:  live/capture.json, live/frames/<t_ms>.jpg
 Writes: frames/<t_ms>.jpg (the same names and bytes ingest writes), live/frames.json (the
         frames fed so far, rewritten at most every ``INDEX_SAVE_S`` and at stop),
         live/moments.json
@@ -23,6 +23,10 @@ How it works (docs/architecture/live.md):
      moment at the last frame's time plus one grid step (as ``detect_moments`` does), and the
      lane returns.
 
+An audio-only recording (``live/capture.json``) has no frames and no moments: the lane advances
+``closed_to`` with ``transcribed_to`` instead, so the select lane, and so the horizon, follow the
+transcript and notes are written while recording.
+
 A fresh lane (after a backend restart) clears ``frames/`` and replays every captured frame, so
 its output is the same as if it had run all along.
 """
@@ -44,6 +48,7 @@ from iris.sources.browser_live import (
     GridSampler,
     captured_frames,
     clear_frames,
+    read_capture,
 )
 from iris.store.layout import SessionPaths, write_model
 
@@ -141,9 +146,18 @@ class ScreenLane(LiveLane):
     async def run(self) -> None:
         s = self.ctx.settings
         paths = self.ctx.paths
-        holdback_ms = round(s.live_frame_holdback_s * 1000)
         feed = ScreenFeed(paths, s.frame_fps, s.frame_max_width, self.params)
         await asyncio.to_thread(clear_frames, paths)
+        if (await asyncio.to_thread(read_capture, paths)).screen:
+            await self._feed_frames(feed)
+        else:
+            await self._follow_transcript()
+        await self._publish(await asyncio.to_thread(feed.finish))
+
+    async def _feed_frames(self, feed: ScreenFeed) -> None:
+        """Feed captured frames in time order as they arrive, until stop (steps 1 to 3)."""
+        holdback_ms = round(self.ctx.settings.live_frame_holdback_s * 1000)
+        paths = self.ctx.paths
         seen: set[int] = set()  # captured frames already handled, by time in ms
         held: list[tuple[int, Path]] = []  # captured but not fed yet
         latest_ms = -1
@@ -174,7 +188,16 @@ class ScreenLane(LiveLane):
             if ending:
                 break
             await self.wait_for_input()
-        await self._publish(await asyncio.to_thread(feed.finish))
+
+    async def _follow_transcript(self) -> None:
+        """No screen is shared, so no moment can open: every moment that ends by the latest time
+        the recording is known up to (``transcribed_to``) is closed. Until stop."""
+        tl = self.timeline
+        while True:
+            await tl.wait_until(lambda: tl.ending or tl.transcribed_to > tl.closed_to)
+            if tl.ending:
+                return
+            await tl.advance_closed_to(tl.transcribed_to)
 
     async def _too_late(self, feed: ScreenFeed, t: float) -> None:
         if feed.would_sample(t):

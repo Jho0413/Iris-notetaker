@@ -96,6 +96,16 @@ class Session(BaseModel):
     cost_partial: bool = False
 
 
+# --- Live capture ------------------------------------------------------------------------------
+
+
+class LiveCapture(BaseModel):
+    """What a live recording captures, chosen when it starts (``POST /live``)."""
+
+    # False: audio only. No frames are posted, so the live lanes don't wait for a screen.
+    screen: bool = True
+
+
 # --- Ingest output -----------------------------------------------------------------------------
 
 

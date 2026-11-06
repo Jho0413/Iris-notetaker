@@ -4,10 +4,13 @@ Lanes never call each other. Each publishes its results here and advances its wa
 downstream wait on the watermarks they depend on (docs/architecture/live.md):
 
 - ``transcribed_to`` (T_a): the transcript is complete up to here. Audio lane.
-- ``closed_to`` (T_m): every moment that ends by here is closed. Screen lane.
-- ``selected_to`` (T_s): every closed moment that ends by here has been read. Select lane.
+- ``closed_to`` (T_m): every moment that ends by here is closed. Screen lane. With no screen
+  shared (an audio-only recording) no moment can open, so it follows ``transcribed_to``.
+- ``selected_to`` (T_s): every closed moment that ends by here has been read. Select lane. Once
+  every closed moment is read, it follows ``closed_to``.
 - ``horizon``: ``min(T_a, T_s)``. Evidence before it is final, so the draft lane may write its
-  notes sections ahead of stop.
+  notes sections ahead of stop. With no screen it is ``transcribed_to``: notes are written from
+  the speech as it is transcribed.
 
 Selection is published in time order and never reaches back: every moment read after
 ``selected_to`` advanced starts at or after it, and so does every record made from it (its
@@ -167,7 +170,9 @@ class LiveTimeline:
         await self._notify()
 
     async def advance_closed_to(self, t: float) -> None:
-        """Screen lane: no moment ending before ``t`` is still open (e.g. nothing changed)."""
+        """Screen lane: no moment is open and none can start before ``t`` (no screen is shared).
+        Only then: a later moment starting before ``t`` would break the time order selection
+        relies on (see the module docstring)."""
         self.closed_to = max(self.closed_to, t)
         await self._notify()
 
@@ -190,6 +195,12 @@ class LiveTimeline:
         self.visuals.extend(visuals)
         self.rejected_moment_ids.extend(rejected_moment_ids)
         self.selected_to = max(self.selected_to, selected_to)
+        await self._notify()
+
+    async def advance_selected_to(self, t: float) -> None:
+        """Select lane: every closed moment is read, so every one ending by ``t`` (at most
+        ``closed_to``) is."""
+        self.selected_to = max(self.selected_to, min(t, self.closed_to))
         await self._notify()
 
     async def mark_skipped_input(self, lane: Lane) -> None:

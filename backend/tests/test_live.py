@@ -25,6 +25,7 @@ from iris.models import (
     LIVE_WITHOUT_AUDIO,
     UNREADABLE_LIVE_AUDIO,
     FrameIndex,
+    LiveCapture,
     SourceKind,
     UsageRecord,
 )
@@ -40,10 +41,11 @@ from iris.sources.browser_live import (
     find_cluster,
     fit,
     missing_audio_chunks,
+    read_capture,
     store_audio_chunk,
     store_frame,
 )
-from iris.store.layout import SessionPaths, read_model
+from iris.store.layout import SessionPaths, read_model, session_paths
 from tests.test_api import wait_for_status
 
 RATE = 48_000
@@ -316,6 +318,21 @@ def test_live_input_is_validated(client: TestClient):
     assert post_frame(client, sid, 1.0, big) == 413
     assert post_audio(client, "nope", 0, b"x") == 404
     assert client.post("/api/live/nope/end").status_code == 404
+
+
+def test_an_audio_only_recording_is_recorded_as_such_and_refuses_frames(
+    client: TestClient, settings: Settings, webm: bytes
+):
+    sid = client.post("/api/live", json={"title": "call", "screen": False}).json()["id"]
+    paths = session_paths(settings.sessions_dir, sid)
+    assert read_capture(paths) == LiveCapture(screen=False)
+    assert post_audio(client, sid, 0, split(webm)[0]) == 204
+    assert post_frame(client, sid, 1.0, jpeg(COLOURS[0])) == 409
+    assert not paths.live_frames_dir.exists() or not any(paths.live_frames_dir.iterdir())
+    # A screen recording is the default.
+    shared = start(client)
+    assert read_capture(session_paths(settings.sessions_dir, shared)) == LiveCapture(screen=True)
+    assert post_frame(client, shared, 1.0, jpeg(COLOURS[0])) == 204
 
 
 def test_repeated_chunk_with_other_content_conflicts(client: TestClient, webm: bytes):
