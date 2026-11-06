@@ -9,8 +9,11 @@ Iris.app
 ├── Electron main process (desktop/main.cjs, desktop/src/)
 │     • one instance at a time; a second launch focuses the running window
 │     • picks a free port, makes a random token, reads the key (decrypted once per launch)
+│     • refuses to start with --remote-debugging-port/-pipe (packaged app)
 │     • starts the backend: python3 -I -u -B -m iris serve --host 127.0.0.1 --port <port>
-│         env: OPENAI_API_KEY, IRIS_DATA_DIR, IRIS_API_TOKEN, IRIS_PARENT_PID; cwd = userData
+│         --secrets-from-stdin
+│         stdin: {"openai_api_key": <key or null>, "api_token": <token>}, one line, then closed
+│         env: IRIS_DATA_DIR, IRIS_PARENT_PID; cwd = userData
 │     • waits for /api/health (with the token), watches the process, offers Restart if it dies
 │     • app:// protocol handler:
 │         app://iris/api/*  → http://127.0.0.1:<port>/api/* (+ X-Iris-Token), streamed both ways
@@ -26,12 +29,14 @@ Iris.app
 | Decision | Choice | Why |
 |---|---|---|
 | How the window gets the UI and reaches the API | Electron serves the built UI from a custom `app://` scheme and forwards `/api/*` to the backend | The backend stays the engine and never serves a client's files; the UI still loads, and says the engine isn't running, if the backend stops; the token never enters the page. The frontend and the API are the same as in the browser |
-| Local API security | A random per-launch token, given to the backend in its environment and added by the handler to every forwarded request | The backend otherwise accepts anything on `127.0.0.1` with the user's key loaded. `EventSource` and `<img>` can't set headers, but every request goes through the handler, so the page needs no token or cookie |
-| API key | Entered in the key window (on a new install's first launch only, a two-step welcome, Welcome then Connect, with Set up later; otherwise from Settings or the menu), checked once with OpenAI before it is saved; stored encrypted with Electron `safeStorage` (its key is in the macOS Keychain) in `userData`; passed to the backend as `OPENAI_API_KEY` at launch. Without one Iris still opens and warns that it can't make notes | Never written in plain text, never built in, never sent to a page; a wrong key is caught when it is entered, not by the first session |
+| Local API security | A random per-launch token, given to the backend on its stdin and added by the handler to every forwarded request | The backend otherwise accepts anything on `127.0.0.1` with the user's key loaded. `EventSource` and `<img>` can't set headers, but every request goes through the handler, so the page needs no token or cookie |
+| API key | Entered in the key window (on a new install's first launch only, a two-step welcome, Welcome then Connect, with Set up later; otherwise from Settings or the menu), checked once with OpenAI before it is saved; stored encrypted with Electron `safeStorage` (its key is in the macOS Keychain) in `userData`; passed to the backend on its stdin at each start, never in its environment. Without one Iris still opens and warns that it can't make notes | Never written in plain text, never built in, never sent to a page, never readable with `ps`; a wrong key is caught when it is entered, not by the first session |
 | Data folder | `~/Library/Application Support/Iris` (`userData`), as `IRIS_DATA_DIR` and the backend's working directory | The Settings page saves `settings.json` there; a `.env` there still sets `IRIS_*` options and wins over the page. The app keeps its own flags (`welcomeShown`) in `app-state.json` there |
 | Python bundle | python-build-standalone with Iris installed into it, bytecode precompiled at build time | Runs from any folder with an empty environment, with no import hooks to maintain |
 | Framework | Electron | The system WebView (e.g. Tauri) has weak screen and system-audio capture, and capture is Iris's core |
 | Signing | Ad-hoc (`identity: "-"`), not notarized | No Developer ID yet: the app is for the user's own Mac |
+| Secrets to the backend | One JSON line on the backend's stdin (`iris serve --secrets-from-stdin`, `backend/src/iris/launch_secrets.py`), then the pipe is closed | Any process of the same user reads another's environment with `ps eww <pid>`, with no prompt (macOS hides it only for Apple's own binaries, not the bundled Python). A pipe is readable only by the backend |
+| Electron fuses | `runAsNode`, `enableNodeOptionsEnvironmentVariable` and `enableNodeCliInspectArguments` off; `onlyLoadAppFromAsar` and `enableEmbeddedAsarIntegrityValidation` on (`electron-builder.yml`) | Otherwise anything running as the user could start Iris with `ELECTRON_RUN_AS_NODE=1`, `NODE_OPTIONS=--require …`, `--inspect` or a changed `app.asar` and run its own code as Iris, which the Keychain trusts with the key without asking |
 
 ## The `app://` handler
 
@@ -112,16 +117,45 @@ whole request body ahead of the socket. Server-sent events stream event by event
   request to OpenAI (listing the models, `src/keycheck.cjs`): rejected (401/403), unreachable, or
   OpenAI unable to check, each says so in the window and nothing is saved.
 - **The main window's bridge** (`pages/preload-main.cjs`) gives the Iris UI three actions and
-  nothing to read: `changeKey()` opens the key window (asking first if a session is busy, then
-  restarting the engine with the new key), `removeKey()` asks once, deletes the key and restarts
-  the engine without it, and `savePdf(title)` asks where to save, then prints the page (its print
+  nothing to read: `changeKey()` opens the key window, then restarts the engine with the new key,
+  `removeKey()` asks once, deletes the key and restarts the engine without it (both refuse, with
+  OK only, while a session is recording or making notes: the restart would cut it short;
+  `src/busy.cjs` words it), and `savePdf(title)` asks where to save, then prints the page (its print
   stylesheet) with `printToPDF` and writes the file there (`src/pdf.cjs` names it after the
   session). The main process accepts them only from the top frame of the main window showing
   `app://iris` (`policy.fromIrisWindow`). Whether a key is set reaches the UI from the engine
   (`/api/settings` `api_key_set`), never from the app.
 - **The API token** is compared in constant time and guards every request, including
-  `/api/health` and the OpenAPI docs (`backend/src/iris/api/token.py`); without
-  `IRIS_API_TOKEN` (`make dev`, the CLI, tests) nothing changes.
+  `/api/health` and the OpenAPI docs (`backend/src/iris/api/token.py`); without one (`make dev`,
+  the CLI, tests) nothing changes.
+- **Secrets reach the backend on its stdin**, never its environment: `ps eww <backend pid>` shows
+  no key or token. At each start (launch, Restart Engine, a key change or removal) the app writes
+  one line, `{"openai_api_key": <key or null>, "api_token": <token>}`, and closes the pipe;
+  `iris serve --secrets-from-stdin` reads it before the server starts (16 KB at most, unknown
+  fields refused), passes the values to the server's `Settings` and never puts them in
+  `os.environ`. A missing or malformed line stops the backend with a message in `backend.log`
+  that never includes the line. The key from the app wins over a `.env` in `userData`; with no
+  key (null) a `.env` may still supply one. A backend that exits before reading its stdin can't
+  crash the app (the write's EPIPE is logged, by code only).
+- **No code runs as Iris but Iris's own.** The packaged app's Electron fuses turn off
+  `ELECTRON_RUN_AS_NODE`, `NODE_OPTIONS` and `--inspect`/`--inspect-brk` (and `SIGUSR1`), and load
+  only `app.asar`, checked against the hash electron-builder writes into `Info.plist`. No fuse
+  covers Chromium's remote debugging, so the packaged app quits at once, before any window or
+  engine, when started with `--remote-debugging-port` or `--remote-debugging-pipe`
+  (`src/debugging.cjs`, logged in `main.log`). Development (`npm start`) keeps every debugging
+  switch.
+
+### Limits
+
+These keep the key from other processes that only run as the user. They don't stop:
+
+- **A keylogger or screen reader** catching the key as it is typed into the key window.
+- **Reading the session files** in `userData` (recordings, transcripts, notes): they are plain
+  files, readable by anything running as the user.
+- **Anything with admin rights**, such as a debugger attached with `sudo`, or a process that can
+  read another's memory.
+- **A process that asks the Keychain itself**: macOS prompts for "Iris Safe Storage", and a user
+  who clicks Always Allow lets it through.
 
 ## Capture
 

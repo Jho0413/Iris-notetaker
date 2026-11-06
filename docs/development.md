@@ -79,7 +79,8 @@ A copy downloaded from elsewhere needs right-click → **Open** the first time.
   install's first launch, once and never again (two steps, Welcome then Connect; **Set up later**
   opens Iris without one; `welcomeShown` in `app-state.json` in the same folder records it) or from **Settings → OpenAI** (Add key…, Replace…, Remove)
   or **Iris → Change OpenAI API Key…**; a new key is checked with OpenAI before it is saved, and
-  the engine restarts to use it. Without a key, the Library and Settings warn that Iris can't make
+  the engine restarts to use it. While a session is recording or making notes, the key can't be
+  changed or removed (Iris says so). Without a key, the Library and Settings warn that Iris can't make
   notes. In development (`npm start`) the engine falls back to `backend/.env`'s key when none is
   stored, so removing the stored key doesn't make it keyless there.
 - Logs: `logs/main.log` (the app) and `logs/backend.log` (the engine, the same output as
