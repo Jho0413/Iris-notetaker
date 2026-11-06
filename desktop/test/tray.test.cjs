@@ -128,7 +128,8 @@ test('a window closed before its UI loaded cancels the start', () => {
 })
 
 test('an engine that fails to start drops the waiting start, so Restart doesn’t record unasked', () => {
-  assert.deepEqual(run([RECORD, { type: 'engineFailed' }, LISTENING]).effects, [])
+  // No start, now or once the UI loads (the window is shown for the engine's dialog).
+  assert.deepEqual(run([RECORD, { type: 'engineFailed' }, LISTENING]).effects, ['show'])
 })
 
 test('no second start while one is under way or recording', () => {
@@ -190,4 +191,46 @@ test('a Live page left while its upload is still retrying keeps Iris busy until 
   assert.equal(left.state.recording.phase, 'stopping')
   assert.equal(hideOnClose(left.state.recording), true, 'closing the window would lose the queued chunks')
   assert.equal(run([report('idle', 0)], left.state).state.recording.phase, 'idle')
+})
+
+const CANCELLED = { type: 'pickerCancelled' }
+
+test('Record from the menu bar shows only the picker: the window stays as it was', () => {
+  // The start, the picker answered, recording: nothing asks for the window.
+  assert.deepEqual(run([RECORD, LISTENING, report('requesting'), report('recording')]).effects, ['start'])
+  const { state } = run([LISTENING, RECORD, report('requesting'), report('recording')])
+  assert.equal(state.quietStart, false, 'done once it records')
+})
+
+test('a cancel in the picker shows nothing; a start that fails otherwise shows the window', () => {
+  assert.deepEqual(run([LISTENING, RECORD, report('requesting'), CANCELLED, report('idle', 0)]).effects, ['start'])
+  // E.g. the microphone blocked after a source was chosen: the Live page says why.
+  assert.deepEqual(run([LISTENING, RECORD, report('requesting'), report('idle', 0)]).effects, ['start', 'show'])
+})
+
+test("a start from the Live page's own button never shows the window: it is in front already", () => {
+  assert.deepEqual(run([LISTENING, report('requesting'), report('idle', 0)]).effects, [])
+})
+
+test('an idle report before the start reaches the page keeps the start quiet until it ends', () => {
+  // The Live page reports idle as it opens, then starts.
+  const { effects } = run([RECORD, LISTENING, report('idle', 0), report('requesting'), report('idle', 0)])
+  assert.deepEqual(effects, ['start', 'show'])
+})
+
+test('a failed start is shown once: the next start from the page itself is not quiet', () => {
+  const failed = run([LISTENING, RECORD, report('requesting'), report('idle', 0)]).state
+  assert.deepEqual(run([report('requesting'), report('idle', 0)], failed).effects, [])
+})
+
+test('an engine that fails while a menu bar start waits shows the window its dialog belongs to', () => {
+  assert.deepEqual(run([RECORD, { type: 'engineFailed' }]).effects, ['show'])
+  assert.deepEqual(run([LISTENING, { type: 'engineFailed' }]).effects, [], 'no start waiting: nothing to show')
+})
+
+test('a page that goes away or a closed window ends a quiet start', () => {
+  for (const type of ['pageGone', 'windowClosed']) {
+    const { state } = run([LISTENING, RECORD, report('requesting'), { type }])
+    assert.equal(state.quietStart, false, type)
+  }
 })

@@ -181,7 +181,8 @@ open focuses it and is refused.
   opens, not refreshed): the entire screen first and selected, one card per display (the main
   display first, "Entire screen" with one display, "Screen 1", "Screen 2" and the display's name
   with several), then app windows, front to back, with their thumbnail, app icon and title
-  (Electron gives no app name). Iris's own windows, the picker too, are never listed (compared by
+  (Electron gives no app name). Only windows on screen in each display's current Space are listed:
+  macOS gives Electron no others. Iris's own windows, the picker too, are never listed (compared by
   `getMediaSourceId()`): recording Iris is never wanted, and a window stops being captured once it
   is hidden, as Iris's is while recording. Untitled windows and windows with no image are left out.
 - **Choosing:** click selects, the arrow keys move the selection, Return or a double-click
@@ -214,12 +215,19 @@ stops a recording from any app, with the window closed too:
   upload, or stopped with notes not started ("Recording stopped", the Live page's Try again),
   it offers only Show Iris and Quit.
 - **Recording still happens in the Live page**, whose capture code runs in the window. The main
-  process only relays (`relay` in `src/tray.cjs`, a pure reducer): Record Screen… shows the window
-  (making it if it was closed) and, once the UI has loaded and subscribed
+  process only relays (`relay` in `src/tray.cjs`, a pure reducer): Record Screen… makes the window
+  if it was closed, without showing it, and, once the UI has loaded and subscribed
   (`iris-app:record-listening`), sends it `start`; the UI opens `/live`, which starts as if its
   button was pressed. Stop sends `stop`, which runs the Live page's own Stop, so the notes are made
   as usual. A stop is never queued for a page that loads later; a start waiting for the UI is
   dropped if the window closes or the engine fails to start first.
+- **Only the picker shows** for Record Screen…: the window stays as it was (hidden, or in another
+  Space). Showing it would switch to its Space, and the picker lists only the windows on screen in
+  the current Space, so it would offer that Space's windows instead of the ones the user is
+  looking at. The window shows only if that start fails for another reason than a cancel in the
+  picker (the Live page says why; the display-media handler reports a cancel as
+  `pickerCancelled` before the page hears of it), or if the engine fails while the start waits,
+  for the engine's dialog.
 - **The page reports its phase** (`iris-app:recording`, `{phase, startedAt}`), checked once by
   `parseReport`; a reload, a closed window or a crashed renderer resets the icon to idle. A stop
   that fails (the Live page's "Recording stopped", with Try again) shows the window, which may

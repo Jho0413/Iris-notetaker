@@ -138,8 +138,11 @@ function background() {
   return nativeTheme.shouldUseDarkColors ? '#0e0f13' : '#f6f6f9'
 }
 
-function showMainWindow() {
+/** Show the main window, making it if it was closed. With `show: false` it is only made if
+ * needed, and left as it is: a new one stays hidden, an open one where it is. */
+function showMainWindow({ show = true } = {}) {
   if (mainWindow) {
+    if (!show) return mainWindow
     if (mainWindow.isMinimized()) mainWindow.restore()
     mainWindow.show()
     mainWindow.focus()
@@ -157,7 +160,7 @@ function showMainWindow() {
     webPreferences: { ...WEB_PREFERENCES, preload: path.join(PAGES, 'preload-main.cjs') },
   })
   mainWindow = win
-  win.once('ready-to-show', () => win.show())
+  if (show) win.once('ready-to-show', () => win.show())
   // While recording, closing the window would end it: hide the window instead. The menu bar
   // shows the recording, stops it and shows the window again. Quitting closes it for real.
   win.on('close', (event) => {
@@ -447,13 +450,17 @@ async function pickSource() {
     webPreferences: { ...WEB_PREFERENCES, preload: path.join(PAGES, 'preload-picker.cjs') },
   })
   state.win = win
-  // Started from the menu bar, Iris may not be the active app: bring the picker to the front.
+  // Started from the menu bar, Iris may not be the active app: bring the picker to the front, and
+  // give it the keyboard once macOS has made Iris active (that comes later), so Return records.
+  const focusPicker = () => win.isDestroyed() || win.focus()
   win.once('ready-to-show', () => {
-    app.focus({ steal: true })
     win.show()
+    app.once('did-become-active', focusPicker)
+    app.focus({ steal: true })
     win.focus()
   })
   win.on('closed', () => {
+    app.removeListener('did-become-active', focusPicker)
     if (picker === state) picker = null
     state.resolve(null) // closed without a choice: cancelled (a no-op after a choice)
   })
@@ -512,7 +519,10 @@ function createTray() {
 
 const TRAY_ACTIONS = {
   record: () => {
-    showMainWindow() // making it if it was closed; the start waits for its UI to load
+    // Only the picker shows: bringing the window up would switch to its Space, and the picker
+    // would list that Space's windows instead of the ones the user is looking at. The window is
+    // made if it was closed (the recording runs in its Live page); the start waits for its UI.
+    showMainWindow({ show: false })
     menuBarEvent({ type: 'record' })
   },
   stop: () => menuBarEvent({ type: 'stop' }),
@@ -732,9 +742,11 @@ function secureSession(ses) {
     requester?.once('render-process-gone', closePicker)
     requester?.on('did-start-navigation', onNavigation)
     let source = null
+    let failed = false
     try {
       source = await pickSource()
     } catch (err) {
+      failed = true
       log(`[capture] the picker failed: ${err.stack ?? err}`)
       closePicker()
     } finally {
@@ -743,7 +755,11 @@ function secureSession(ses) {
       requester?.removeListener('did-start-navigation', onNavigation)
     }
     if (!source) {
-      log('[capture] nothing chosen to record')
+      if (!failed) {
+        log('[capture] nothing chosen to record')
+        // Before the page hears of it: a start from the menu bar then shows no window for it.
+        menuBarEvent({ type: 'pickerCancelled' })
+      }
       return answer(null)
     }
     log(`[capture] recording ${source.id}`)

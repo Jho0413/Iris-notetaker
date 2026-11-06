@@ -85,18 +85,22 @@ function hideOnClose(state) {
  * The relay between the menu bar and the main window's UI. `recording`: what the Live page last
  * reported. `listening`: the UI has subscribed to commands. `startPending`: "Record Screen…" is
  * waiting for the UI to load (the window was closed, or the engine is still starting).
+ * `quietStart`: a start from the menu bar is under way with the window left as it was (hidden, or
+ * in another Space): only the picker shows, and the window only if the start fails.
  */
-const RELAY_START = Object.freeze({ recording: IDLE, listening: false, startPending: false })
+const RELAY_START = Object.freeze({ recording: IDLE, listening: false, startPending: false, quietStart: false })
 
 /**
  * The relay's next state for `event`, and what main.cjs does about it: `send` a command to the UI
  * ('start' or 'stop'), `show` the window, or log a `malformed` report. Events:
- *   record        "Record Screen…" (main.cjs shows the window first)
+ *   record        "Record Screen…" (main.cjs makes the window if it was closed, but doesn't
+ *                 show it)
  *   stop          "Stop and Make Notes"
  *   listening     the UI subscribed (after each load of the UI)
  *   report        the Live page's phase, `event.report` as sent over the bridge
  *   pageGone      the page was replaced (a reload, the UI after the starting screen) or crashed
  *   windowClosed  the main window is gone
+ *   pickerCancelled  the picker was cancelled: the user's choice, so a failed start shows nothing
  *   engineFailed  the engine didn't start: a start waiting for the UI is dropped, so a later
  *                 Restart doesn't start recording without being asked again
  */
@@ -104,8 +108,8 @@ function relay(state, event) {
   switch (event.type) {
     case 'record':
       if (state.recording.phase !== 'idle') return { state }
-      if (state.listening) return { state: { ...state, startPending: false }, send: 'start' }
-      return { state: { ...state, startPending: true } }
+      if (state.listening) return { state: { ...state, startPending: false, quietStart: true }, send: 'start' }
+      return { state: { ...state, startPending: true, quietStart: true } }
     case 'stop':
       // Never queued: a page that loads later has nothing to stop.
       return state.listening && state.recording.phase === 'recording' ? { state, send: 'stop' } : { state }
@@ -116,15 +120,24 @@ function relay(state, event) {
       const recording = parseReport(event.report)
       if (!recording) return { state, malformed: true }
       // A stop that failed (the Live page's Try again): the window may be hidden, so show it.
-      const show = state.recording.phase === 'stopping' && recording.phase === 'unfinished'
-      return { state: { ...state, recording }, ...(show && { show: true }) }
+      const stopFailed = state.recording.phase === 'stopping' && recording.phase === 'unfinished'
+      // A quiet start that ended without recording (and wasn't cancelled): the page says why.
+      const startEnded = state.recording.phase === 'starting' && recording.phase !== 'starting'
+      const startFailed = state.quietStart && startEnded && recording.phase === 'idle'
+      const quietStart = state.quietStart && !startEnded
+      return { state: { ...state, recording, quietStart }, ...((stopFailed || startFailed) && { show: true }) }
     }
+    case 'pickerCancelled':
+      return { state: { ...state, quietStart: false } }
     case 'pageGone':
-      return { state: { ...state, recording: IDLE, listening: false } }
+      return { state: { ...state, recording: IDLE, listening: false, quietStart: false } }
     case 'windowClosed':
-      return { state: { recording: IDLE, listening: false, startPending: false } }
-    case 'engineFailed':
-      return { state: { ...state, startPending: false } }
+      return { state: RELAY_START }
+    case 'engineFailed': {
+      // The engine's dialog is about to ask: a quiet start shows the window it belongs to.
+      const show = state.startPending && state.quietStart
+      return { state: { ...state, startPending: false, quietStart: false }, ...(show && { show: true }) }
+    }
     default:
       return { state }
   }
