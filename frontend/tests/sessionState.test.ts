@@ -415,6 +415,15 @@ test('a general failure shows the generic message, the step and Try again', () =
   assert.equal(ui.fromStage, 'render')
 })
 
+test('a run cut off by Iris closing says so and offers Try again from its step', () => {
+  const message = 'Iris was closed before these notes were finished. Try again; finished steps are kept.'
+  const cutOff = failedSession({ current_stage: 'write', failure_message: message, failure_kind: 'general' })
+  assert.deepEqual(failureView(cutOff, emptyRun()), {
+    message, kind: 'general', stage: 'write', headline: 'Stopped at Writing notes',
+  })
+  assert.equal(uiState(cutOff, emptyRun()).fromStage, 'write')
+})
+
 test('an input failure shows its own message and what to do', () => {
   const message = 'This recording has no sound. Upload a recording with speech.'
   const view = failureView(

@@ -61,6 +61,16 @@ stop, since their flush (the last windows and moments) is what stop waits for, b
 processed like an upload (or from detect), which meets a blocking error again and fails fast.
 Nothing user-visible changes while recording.
 
+## Runs cut off by Iris stopping
+
+When Iris stops during a run (Restart Engine, Quit, the Mac shutting down, a crash, a forced quit,
+power loss), the run records nothing: shutdown cancels it, which is not an error, and a crash never
+reaches shutdown at all. So when Iris starts, before any run can start, every session still
+`processing` was cut off and is marked failed (`JobRunner.fail_interrupted`, logged with its id and
+stage) with its own message, `INTERRUPTED_RUN` in `models.py` (`failure_kind: general`), at the
+stage it had reached, so **Try again** resumes from there.
+`recording` sessions are left alone: the session page offers to finish them.
+
 ## What the user sees
 
 Only messages we wrote, from a fixed list (`FailureMessage` in `models.py`; the UI keeps the same
@@ -69,7 +79,8 @@ list and shows the generic message for anything else). A known input problem rai
 upload, an upload with no audio track, a live recording with no audio or an unreadable one, or a
 recording with no speech or screen content to write from. Everything else, including a missing or
 rejected key, exhausted credit or a missing model, gets "Iris couldn't finish making the notes.
-Try again; finished steps are kept." (`failure_kind: general`).
+Try again; finished steps are kept." (`failure_kind: general`). A run cut off by Iris stopping
+gets its own message (above).
 
 The session stores `failure_message`, `failure_kind` and the failed stage (`current_stage`) for the
 API, and the raw error with its time (`error_detail`, `failed_at`) for developers only: it is never

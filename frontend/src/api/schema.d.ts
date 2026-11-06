@@ -561,7 +561,7 @@ export interface components {
             status: components["schemas"]["SessionStatus"];
             current_stage?: components["schemas"]["Stage"] | null;
             /** Failure Message */
-            failure_message?: ("Iris couldn't finish making the notes. Try again; finished steps are kept." | "Iris couldn't read this file. Upload an audio or video recording." | "This recording has no sound. Upload a recording with speech." | "No audio was recorded. Check that the microphone works, then record again." | "The recorded audio couldn't be read. Record the session again." | "Iris found no speech or screen content in this recording to make notes from.") | null;
+            failure_message?: ("Iris couldn't finish making the notes. Try again; finished steps are kept." | "Iris couldn't read this file. Upload an audio or video recording." | "This recording has no sound. Upload a recording with speech." | "No audio was recorded. Check that the microphone works, then record again." | "The recorded audio couldn't be read. Record the session again." | "Iris found no speech or screen content in this recording to make notes from." | "Iris was closed before these notes were finished. Try again; finished steps are kept.") | null;
             failure_kind?: components["schemas"]["FailureKind"] | null;
             /** Duration S */
             duration_s?: number | null;

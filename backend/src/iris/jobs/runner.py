@@ -3,7 +3,8 @@
 A failed run is recorded twice (docs/architecture/errors.md): for the user, one of
 our own messages (``UserFacingError``'s for a known input problem, else ``GENERIC_FAILURE``) and its
 kind, published in the ``error`` event; for developers, the raw error in the log and the session
-record (``iris show``). Exception text never reaches the API.
+record (``iris show``). Exception text never reaches the API. A run cut off by Iris stopping is
+recorded when Iris next starts (``fail_interrupted``).
 """
 
 import asyncio
@@ -14,7 +15,15 @@ from iris.events import EventBus
 from iris.live import LiveRegistry, LiveTimeline, promote
 from iris.llm import usage
 from iris.llm.errors import StageError, UserFacingError, first_error
-from iris.models import GENERIC_FAILURE, EventType, FailureKind, SessionStatus, SourceKind, Stage
+from iris.models import (
+    GENERIC_FAILURE,
+    INTERRUPTED_RUN,
+    EventType,
+    FailureKind,
+    SessionStatus,
+    SourceKind,
+    Stage,
+)
 from iris.pipeline import STAGES, plan_from
 from iris.pipeline.context import StageContext
 from iris.store.db import SessionStore
@@ -41,6 +50,27 @@ class JobRunner:
             raise RuntimeError(f"session {session_id} is already processing")
         task = asyncio.create_task(self.run(session_id, from_stage), name=f"session-{session_id}")
         self._tasks[session_id] = task
+
+    def fail_interrupted(self) -> None:
+        """Mark as failed every run cut off by Iris stopping, so it can be tried again.
+
+        Called at startup, before any run starts: a session still ``processing`` then was cut off
+        (a quit or restart mid-run, a crash, a forced quit, power loss). Checked here and not at
+        shutdown, which a crash never reaches. The stage it stopped at is kept, and so are the
+        finished stages' outputs, so **Try again** resumes from it. ``recording`` sessions are
+        left alone: the session page offers to finish them.
+        """
+        for session in self.store.list():
+            if session.status != SessionStatus.PROCESSING or self.is_running(session.id):
+                continue
+            stage = session.current_stage
+            log.warning("session %s was interrupted at %s: marked failed", session.id, stage)
+            self.store.fail(
+                session.id,
+                message=INTERRUPTED_RUN,
+                kind=FailureKind.GENERAL,
+                detail=f"interrupted: Iris stopped during the run (at {stage})",
+            )
 
     def context(self, session_id: str) -> StageContext:
         session = self.store.get(session_id)

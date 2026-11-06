@@ -38,6 +38,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.store = store
         app.state.bus = bus
         app.state.runner = JobRunner(store, bus, current)
+        app.state.runner.fail_interrupted()
         watcher = None
         if settings.parent_pid is not None:
             watcher = asyncio.create_task(
