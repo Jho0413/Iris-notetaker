@@ -21,6 +21,10 @@ test('changing the key while a session is busy is refused, with OK only', () => 
   assert.equal(dialog.detail, '“Lecture 3” is still recording or making notes. Change the key once it has finished.')
 })
 
+test('adding a key while a session is busy is refused too', () => {
+  assert.equal(busyKeyRefusal([session('Lecture 3')], 'add').detail, '“Lecture 3” is still recording or making notes. Add the key once it has finished.')
+})
+
 test('removing the key while sessions are busy is refused, worded for several', () => {
   const dialog = busyKeyRefusal([session('A'), session('B')], 'remove')
   assert.deepEqual(dialog.buttons, ['OK'])

@@ -15,12 +15,13 @@ function busyDetail(busy) {
 }
 
 /**
- * The dialog refusing to change or remove the key while a session is busy (`action`: 'change' or
- * 'remove'). Either restarts the engine, and a key change mid-session would stop a recording or
- * a run half done; Restart Engine stays available for a stuck engine.
+ * The dialog refusing to add, change or remove the key while a session is busy (`action`: 'add',
+ * 'change' or 'remove'). Each restarts the engine, which would stop a recording or a run half
+ * done; Restart Engine stays available for a stuck engine.
  */
 function busyKeyRefusal(busy, action) {
   const one = busy.length === 1
+  const verb = { add: 'Add', change: 'Change', remove: 'Remove' }[action]
   return {
     type: 'info',
     buttons: ['OK'],
@@ -28,7 +29,7 @@ function busyKeyRefusal(busy, action) {
     message: 'Iris is still busy.',
     detail:
       `${names(busy)} ${one ? 'is' : 'are'} still recording or making notes. ` +
-      `${action === 'remove' ? 'Remove' : 'Change'} the key once ${one ? 'it has' : 'they have'} finished.`,
+      `${verb} the key once ${one ? 'it has' : 'they have'} finished.`,
   }
 }
 

@@ -74,7 +74,7 @@ Iris.app
 │     • app://iris/api/*  → http://127.0.0.1:<port>/api/* with X-Iris-Token, streamed both ways
 │     • app://iris/<file> → the built UI; any other path → index.html (client-side routes)
 │     • starts the backend: python3 -I -m iris serve --port <free port> --secrets-from-stdin
-│         stdin: the OpenAI key (from the Keychain-encrypted store) and IRIS_API_TOKEN, one line
+│         stdin: the OpenAI key (from the Keychain-encrypted store) and the API token, one JSON line
 │         env: IRIS_DATA_DIR, IRIS_PARENT_PID; data and logs in ~/Library/Application Support/Iris
 ├── Window: app://iris/, the web UI unchanged
 └── Resources/backend/python, Resources/frontend

@@ -285,8 +285,9 @@ ipcMain.handle('iris-key:cancel', (event) => {
 /** Add or replace the key (menu, Settings, the no-key banner). Resolves true once the engine
  * runs with the new key, false if the user cancelled or a session is busy. */
 async function changeKey() {
-  if (await refuseKeyWhileBusy('change')) return false
-  if (!(await askForKey(currentKey() ? 'change' : 'add'))) return false
+  const mode = currentKey() ? 'change' : 'add'
+  if (await refuseKeyWhileBusy(mode)) return false
+  if (!(await askForKey(mode))) return false
   await restartBackend()
   return true
 }
