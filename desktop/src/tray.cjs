@@ -88,11 +88,11 @@ function hideOnClose(state) {
  * `quietStart`: a start from the menu bar is under way with the window left as it was (hidden, or
  * in another Space): only the picker shows, and the window only if the start fails.
  */
+const RELAY_START = Object.freeze({ recording: IDLE, listening: false, startPending: false, quietStart: false })
+
 /** How long a page sent "start" has to report it is starting. It does within a render; one that
  * doesn't is held up by something it shows (e.g. "Leave without saving?" on another page). */
 const START_ANSWER_MS = 3000
-
-const RELAY_START = Object.freeze({ recording: IDLE, listening: false, startPending: false, quietStart: false })
 
 /**
  * The relay's next state for `event`, and what main.cjs does about it: `send` a command to the UI
