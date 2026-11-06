@@ -40,11 +40,13 @@ What happens when capture is interrupted:
   the session. Audio is never discarded while the tab stays open. Screen frames are queued up to
   120 (about 2 minutes); during a longer outage the oldest queued frames are dropped to bound
   memory, so the notes may miss what was on screen then.
-- **Closing the tab while recording:** the browser asks for confirmation (the desktop app shows its
-  own "Stop recording?" dialog). If you leave, the session is processed with what arrived: the page
-  ends it with a beacon, or a keepalive request where beacons aren't allowed (the app's `app://`
-  pages). If the browser crashes instead, the session stays `recording`;
-  finish it with `curl -X POST http://127.0.0.1:8000/api/live/<session_id>/end`.
+- **Closing the tab while recording:** the browser asks for confirmation. If you leave, the
+  session is processed with what arrived: the page ends it with a beacon, or a keepalive request
+  where beacons aren't allowed (the app's `app://` pages). If the browser crashes instead, the
+  session stays `recording`; finish it with
+  `curl -X POST http://127.0.0.1:8000/api/live/<session_id>/end`. The desktop app hides its window
+  instead of closing it while recording, and its menu bar icon stops the recording
+  ([`desktop.md`](desktop.md)); reloading the page asks "Stop recording?".
 
 ## Processing while recording
 
