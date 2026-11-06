@@ -79,7 +79,7 @@ export const BROWSER_KEY_NOTE =
 
 /** The confirmation after the key changed through the app (its engine restarted). */
 export function keyChanged(action: 'saved' | 'removed'): string {
-  return action === 'saved' ? 'Key saved. Iris’s engine restarted with it.' : 'Key removed. Iris’s engine restarted without it.'
+  return action === 'saved' ? 'Key saved.' : 'Key removed.'
 }
 
 /** When the app couldn't do what was asked (rare: the bridge call itself failed). */

@@ -301,7 +301,7 @@ async function removeKey() {
     defaultId: 1,
     cancelId: 1,
     message: 'Remove the OpenAI key?',
-    detail: 'Iris can’t make notes until you add a key again. Iris’s engine restarts to stop using it.',
+    detail: 'Iris can’t make notes until you add a key again.',
   })
   if (response !== 0) return false
   keystore.clear()
