@@ -89,8 +89,8 @@ Iris.app
   its environment, which other processes of the user can read.
 - **The backend can't outlive the app.** It stops on quit and, if the app crashes or is
   force-quit, exits on its own once the app's process is gone (`IRIS_PARENT_PID`).
-- **Capture** goes through the UI's own `getDisplayMedia` call, answered by the macOS system picker
-  (any screen or window) with system audio.
+- **Capture** goes through the UI's own `getDisplayMedia` call, answered by Iris's own picker
+  (the entire screen first, then app windows, never Iris's own) with system audio.
 
 Details, decisions and measurements: [`desktop.md`](desktop.md).
 

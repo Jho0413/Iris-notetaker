@@ -1,9 +1,10 @@
-/* Shared by the desktop app's own pages (key screen, starting screen). Colours from
+/* Shared by the desktop app's own pages (key screen, starting screen, picker). Colours from
    frontend/DESIGN.md. */
 :root {
   --bg: #f6f6f9; --surface: #ffffff; --border: #dedee6; --field-border: #8a8a99;
   --text: #17171c; --text-2: #5b5b68; --accent: #4b44d6; --accent-hover: #3d36c2;
   --accent-text: #ffffff; --accent-soft: #ecebff; --error: #c92a2a;
+  --surface-2: #eeeef3; --warning-soft: #fdf3e1; --warning-line: #efd6a6;
   --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
   --mono: ui-monospace, 'SF Mono', Menlo, monospace;
   color-scheme: light dark;
@@ -13,6 +14,7 @@
     --bg: #0e0f13; --surface: #16171d; --border: #2b2c36; --field-border: #666778;
     --text: #ececf2; --text-2: #a2a2b0; --accent: #8f8cff; --accent-hover: #a7a5ff;
     --accent-text: #0e0f13; --accent-soft: #25244a; --error: #ff6b6b;
+    --surface-2: #1c1d24; --warning-soft: #2e2412; --warning-line: #5a4419;
   }
 }
 * { box-sizing: border-box; }
@@ -63,3 +65,51 @@ button:disabled { opacity: 0.6; cursor: default; }
 button.quiet { border-color: transparent; background: transparent; color: var(--text-2); padding-left: 10px; padding-right: 10px; }
 button.quiet:hover { color: var(--text); }
 [hidden] { display: none !important; }
+
+/* The picker (picker.html): what to record. Fills the window, which the user can resize: the
+   header and footer stay, the list between them scrolls, the cards reflow. */
+body.picker { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; place-items: stretch; padding: 0; }
+.picker header { padding: 1.25rem 1.5rem 0.75rem; }
+.picker h1 { font-size: 1.125rem; margin: 0; }
+.picker header p { margin: 0.2rem 0 0; font-size: 0.8125rem; }
+.picker main { max-width: none; overflow: auto; padding: 0.25rem 1.5rem 1rem; }
+.picker footer { display: flex; align-items: center; gap: 0.5rem; padding: 0.875rem 1.5rem;
+  border-top: 1px solid var(--border); background: var(--surface); }
+.picker footer .spacer { flex: 1; }
+.picker footer button, .perm button { padding: 0.5rem 1rem; font-size: 0.875rem; }
+.audio { display: flex; align-items: center; gap: 0.4rem; min-width: 0; font-size: 0.8125rem; color: var(--text-2); }
+.audio svg { flex: none; width: 1rem; height: 1rem; fill: none; stroke: currentColor; stroke-width: 1.75;
+  stroke-linecap: round; stroke-linejoin: round; }
+.picker h2 { font-size: 0.75rem; font-weight: 650; text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--text-2); margin: 1rem 0 0.5rem; }
+.picker h2:first-child { margin-top: 0.25rem; }
+.picker .empty { font-size: 0.8125rem; }
+
+.grid { display: grid; gap: 0.75rem; }
+.grid.screens { grid-template-columns: repeat(auto-fill, minmax(min(15rem, 100%), 1fr)); }
+.grid.screens.one { grid-template-columns: minmax(0, 26rem); }
+.grid.windows { grid-template-columns: repeat(auto-fill, minmax(min(10rem, 100%), 1fr)); }
+.card { all: unset; box-sizing: border-box; display: grid; gap: 0.45rem; align-content: start; min-width: 0;
+  padding: 0.5rem; border-radius: 0.6rem; cursor: pointer; border: 2px solid transparent; }
+.card:hover { background: var(--surface); }
+.card[aria-checked="true"] { border-color: var(--accent); background: var(--accent-soft); }
+.card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.card[aria-checked="true"]:focus-visible { outline: none; }
+/* Thumbnails keep their own shape inside a 16:10 frame: windows come in every shape. */
+.thumb { display: grid; place-items: center; aspect-ratio: 16 / 10; border-radius: 0.35rem; overflow: hidden;
+  background: var(--surface-2); box-shadow: 0 0 0 1px var(--border); }
+.thumb img { width: 100%; height: 100%; object-fit: contain; }
+.label { display: flex; align-items: center; gap: 0.4rem; min-width: 0; font-size: 0.8125rem; }
+.label strong { font-weight: 600; white-space: nowrap; }
+.label span { color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.label .title { color: var(--text); font-weight: 600; }
+.label .badge { margin-left: auto; flex: none; font-size: 0.6875rem; font-weight: 600; color: var(--accent); }
+.appicon { flex: none; width: 1rem; height: 1rem; }
+
+/* Without the Screen Recording permission: how to grant it. */
+.perm { display: grid; justify-items: start; gap: 0.75rem; padding: 1.25rem; margin-top: 0.5rem; border-radius: 0.75rem;
+  background: var(--warning-soft); border: 1px solid var(--warning-line); }
+.perm h3 { margin: 0; font-size: 1rem; color: var(--text); }
+.perm p { margin: 0; font-size: 0.875rem; }
+.perm ol { margin: 0; padding-left: 1.2rem; font-size: 0.875rem; color: var(--text-2); display: grid; gap: 0.25rem; }
+.perm ol b { color: var(--text); font-weight: 600; }

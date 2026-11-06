@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- Thumbnails and app icons arrive as data: URLs from the main process. -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:" />
+    <title>Record with Iris</title>
+    <link rel="stylesheet" href="page.css" />
+    <script src="picker.js" defer></script>
+  </head>
+  <body class="picker">
+    <header>
+      <h1>Choose what to record</h1>
+      <p>Recording the entire screen keeps going whichever app you switch to.</p>
+    </header>
+
+    <main class="scroll">
+      <!-- picker.js fills the cards from the snapshot taken as the picker opened. -->
+      <div id="sources" role="radiogroup" aria-label="What to record" hidden>
+        <h2 id="screens-title">Entire screen</h2>
+        <div id="screens" class="grid screens" aria-labelledby="screens-title"></div>
+        <h2 id="windows-title">Windows</h2>
+        <div id="windows" class="grid windows" aria-labelledby="windows-title"></div>
+        <p id="no-windows" class="empty" hidden>No other app has a window open.</p>
+      </div>
+
+      <section id="no-permission" class="perm" role="alert" hidden>
+        <h3>Iris needs permission to see your screen</h3>
+        <p>macOS only lets Iris list and record screens and windows once you allow it.</p>
+        <ol>
+          <li>Open <b>System Settings → Privacy &amp; Security → Screen &amp; System Audio Recording</b>.</li>
+          <li>Turn on <b>Iris</b>.</li>
+          <li>Quit and reopen Iris, then start the recording again.</li>
+        </ol>
+        <div><button id="settings" class="primary" type="button">Open System Settings</button></div>
+      </section>
+    </main>
+
+    <footer>
+      <span id="audio" class="audio" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4V5zM15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13" /></svg>
+        Records your microphone and your Mac's sound
+      </span>
+      <span class="spacer"></span>
+      <button id="cancel" type="button">Cancel</button>
+      <button id="record" class="primary" type="button" hidden>Record</button>
+    </footer>
+
+    <template id="card">
+      <button class="card" type="button" role="radio" aria-checked="false" tabindex="-1">
+        <span class="thumb"></span>
+        <span class="label"></span>
+      </button>
+    </template>
+  </body>
+</html>

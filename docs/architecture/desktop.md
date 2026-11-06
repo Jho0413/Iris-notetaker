@@ -19,7 +19,8 @@ Iris.app
 │         app://iris/api/*  → http://127.0.0.1:<port>/api/* (+ X-Iris-Token), streamed both ways
 │         app://iris/<file> → frontend/dist/<file>
 │         anything else     → index.html (client-side routes)
-│     • display-media handler (macOS system picker, system audio as "loopback")
+│     • display-media handler: Iris's own picker (entire screen first, Iris's windows left
+│         out), system audio as "loopback"
 │     • menu bar icon (Tray): Record Screen… and Stop, relayed to the Live page
 ├── Window (renderer): app://iris/, the web UI unchanged
 └── Contents/Resources/backend/python (standalone Python with Iris), Resources/frontend (built UI)
@@ -120,6 +121,11 @@ whole request body ahead of the socket. Server-sent events stream event by event
   is never sent back to a page and never logged. Saving first checks the new key with one free
   request to OpenAI (listing the models, `src/keycheck.cjs`): rejected (401/403), unreachable, or
   OpenAI unable to check, each says so in the window and nothing is saved.
+- **The picker** (`pages/picker.html`) has a preload exposing only `snapshot`, `choose(id)`,
+  `cancel` and `openSettings`. The main process checks that each call comes from that page in the
+  picker window, and records only an id the picker offered (`chosenId` in `src/picker.cjs`).
+  Window titles come from other apps, so the page sets them as text, never as HTML; thumbnails
+  and icons arrive as `data:` URLs (the page's CSP allows `img-src 'self' data:`, nothing else).
 - **The main window's bridge** (`pages/preload-main.cjs`) gives the Iris UI three actions, plus
   the menu bar's recording state and commands (see "Menu bar"), and nothing to read:
   `changeKey()` opens the key window, then restarts the engine with the new key,
@@ -164,9 +170,35 @@ These keep the key from other processes that only run as the user. They don't st
 
 ## Capture
 
-The UI's own `getDisplayMedia` call is answered by the macOS system picker (`useSystemPicker`,
-macOS 15+), where the user picks any screen or window, with system audio as `loopback`; no native
-helper is needed. Shared audio is requested with echo cancellation, noise suppression and gain
+The UI's own `getDisplayMedia` call is answered by Iris's own picker (`pages/picker.html`), opened
+by the main process from its display-media handler, so the Live page's capture code is the same as
+in the browser. With the window closed (a start from the menu bar) it is a window of its own,
+brought to the front even when another app is active. One opens at a time: Chromium holds a
+second request from the same page until the first is answered, and any other request while it is
+open focuses it and is refused.
+
+- **What it lists** (`src/picker.cjs`, a snapshot from `desktopCapturer.getSources` taken as it
+  opens, not refreshed): the entire screen first and selected, one card per display (the main
+  display first, "Entire screen" with one display, "Screen 1", "Screen 2" and the display's name
+  with several), then app windows, front to back, with their thumbnail, app icon and title
+  (Electron gives no app name). Iris's own windows, the picker too, are never listed (compared by
+  `getMediaSourceId()`): recording Iris is never wanted, and a window stops being captured once it
+  is hidden, as Iris's is while recording. Untitled windows and windows with no image are left out.
+- **Choosing:** click selects, the arrow keys move the selection, Return or a double-click
+  records it, Esc, Cancel or closing the window cancels. The chosen source goes to the page with
+  all of the Mac's sound as `loopback`; a cancel refuses the request, which the Live page treats as
+  a cancelled start (the empty session is discarded). Electron rejects every refused request as
+  `AbortError` ("Invalid capture constraints"), never `NotAllowedError`, so in the app
+  `describeCaptureError` words that as cancelled or blocked too.
+- **Without the Screen Recording permission** macOS lists nothing, so the picker says how to allow
+  it (System Settings › Privacy & Security › Screen & System Audio Recording, turn on Iris, then
+  quit and reopen Iris, as macOS asks), with Open System Settings, and nothing is recorded. Measured
+  with Electron 45 on macOS 26: an app that has never asked reports `denied`, the same as one
+  turned off (`getMediaAccessStatus('screen')` can't tell them apart), and `getSources` then
+  rejects ("Failed to get sources"), so both are handled the same way. A `getSources` failure with
+  the permission granted shows the same explanation, and the error goes to `main.log`.
+
+Shared audio is requested with echo cancellation, noise suppression and gain
 control off, since it is a recording of what plays, not a voice in a room; the microphone keeps
 them. `Info.plist` carries `NSMicrophoneUsageDescription` and `NSAudioCaptureUsageDescription`.
 
@@ -191,11 +223,11 @@ stops a recording from any app, with the window closed too:
   that fails (the Live page's "Recording stopped", with Try again) shows the window, which may
   have been hidden.
 - **`getDisplayMedia` needs no user gesture here:** Electron passes a request without one to its
-  display-media handler (and the system picker). Measured with Electron 45.
+  display-media handler, which opens the picker. Measured with Electron 45.
 - **Closing the window while recording hides it** instead (`hideOnClose`), since closing would end
   the recording; the menu bar or the Dock shows it again. A fullscreen window leaves fullscreen
-  first, so no empty Space is left behind. Sharing the Iris window itself is the exception: macOS
-  stops capturing a window once it is hidden, so the recording finishes, as for Stop sharing.
+  first, so no empty Space is left behind. The picker never offers Iris's own windows, so hiding
+  the window never ends the recording (macOS stops capturing a window once it is hidden).
   Quit still asks first ("Quit Iris?"), then closes it for real. Reloading still asks "Stop
   recording?". Leaving the Live page while a failed stop's upload is still retrying keeps it
   "stopping" until the retry settles, so quitting still asks then.

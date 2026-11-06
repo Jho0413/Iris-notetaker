@@ -20,10 +20,12 @@ const {
   nativeTheme,
   protocol,
   safeStorage,
+  screen,
   session,
   shell,
   systemPreferences,
   Tray,
+  webContents,
 } = require('electron')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -41,6 +43,7 @@ const { pdfFileName, PDF_OPTIONS } = require('./src/pdf.cjs')
 const { busyDetail, busyKeyRefusal, busyNow } = require('./src/busy.cjs')
 const { refusedDebugSwitch } = require('./src/debugging.cjs')
 const trayRules = require('./src/tray.cjs')
+const pickerRules = require('./src/picker.cjs')
 
 const PACKAGED = app.isPackaged
 const REPO = path.resolve(__dirname, '..')
@@ -115,6 +118,7 @@ const backend = new Backend({
 let mainWindow = null
 let keyWindow = null
 let keyPrompt = null // {resolve} while the key screen is open
+let picker = null // {win, list, sources, resolve} while the picker is open (one at a time)
 let quitConfirmed = false
 let quitting = false
 let menuBar = trayRules.RELAY_START // the menu bar's relay to the Live page (src/tray.cjs)
@@ -259,15 +263,14 @@ function askForKey(mode) {
   return promise
 }
 
-/** IPC from the key screen only: the key window, showing pages/key.html. */
-function fromKeyScreen(event) {
+/** IPC from one of the app's own pages (`page`, e.g. key.html) showing in `win`, only. */
+function fromDesktopPage(event, win, page) {
   const url = event.senderFrame?.url ?? ''
-  return (
-    keyWindow !== null &&
-    event.sender === keyWindow.webContents &&
-    policy.isDesktopPage(url, PAGES) &&
-    new URL(url).pathname.endsWith('/key.html')
-  )
+  return Boolean(win) && event.sender === win.webContents && policy.isDesktopPage(url, PAGES) && new URL(url).pathname.endsWith(`/${page}`)
+}
+
+function fromKeyScreen(event) {
+  return fromDesktopPage(event, keyWindow, 'key.html')
 }
 
 ipcMain.handle('iris-key:has', (event) => {
@@ -364,6 +367,130 @@ ipcMain.handle('iris-app:save-pdf', async (event, title) => {
     log(`[pdf] couldn't save: ${err.message}`) // the page says it in its own words
     throw err
   }
+})
+
+// ---- picker: what to record ------------------------------------------------------------------
+
+// The Live page's getDisplayMedia call is answered by Iris's own picker (pages/picker.html), not
+// the macOS one: it puts the entire screen first and never offers Iris's own windows (a hidden
+// window stops being captured). What it lists is src/picker.cjs; this opens it and hands back
+// the choice. Thumbnails are about twice the largest card's size, for Retina displays.
+const THUMBNAIL_SIZE = { width: 640, height: 400 }
+
+/** The picker's list, a snapshot: sources from desktopCapturer, thumbnails as data: URLs. */
+async function pickerSnapshot() {
+  const found = await desktopCapturer.getSources({ types: ['screen', 'window'], thumbnailSize: THUMBNAIL_SIZE, fetchWindowIcons: true })
+  const list = pickerRules.listSources(
+    found.map((s) => ({ id: s.id, name: s.name, displayId: s.display_id, hasThumbnail: !s.thumbnail.isEmpty() })),
+    {
+      ownWindowIds: BrowserWindow.getAllWindows().map((w) => w.getMediaSourceId()),
+      displays: screen.getAllDisplays(),
+      primaryDisplayId: screen.getPrimaryDisplay().id,
+    },
+  )
+  const byId = new Map(found.map((s) => [s.id, s]))
+  const image = (img) => (img && !img.isEmpty() ? img : null)
+  // JPEG: a PNG of each thumbnail would be several times larger to send to the page.
+  const thumbnail = (id) => {
+    const img = image(byId.get(id).thumbnail)
+    return img && `data:image/jpeg;base64,${img.toJPEG(80).toString('base64')}`
+  }
+  return {
+    list,
+    sources: byId,
+    page: {
+      granted: true,
+      screens: list.screens.map((s) => ({ ...s, thumbnail: thumbnail(s.id) })),
+      windows: list.windows.map((w) => ({ ...w, thumbnail: thumbnail(w.id), icon: image(byId.get(w.id).appIcon)?.toDataURL() ?? null })),
+      selected: pickerRules.defaultSelection(list),
+    },
+  }
+}
+
+/** Close the picker without a choice, also while it is still listing (no window yet). */
+function closePicker() {
+  const state = picker
+  if (!state) return
+  state.resolve(null)
+  if (state.win) state.win.close()
+  else picker = null
+}
+
+/** Ask what to record. Resolves the chosen source, or null if cancelled or not allowed. */
+async function pickSource() {
+  const state = { win: null, list: null, sources: null, page: null, resolve: null }
+  picker = state
+  const chosen = new Promise((resolve) => (state.resolve = resolve))
+  // Without the Screen Recording permission macOS lists nothing: the picker says how to allow it.
+  // A Mac that never asked reports "denied" too (CGPreflightScreenCaptureAccess), and
+  // getSources then rejects.
+  const status = systemPreferences.getMediaAccessStatus('screen')
+  if (status === 'granted') {
+    try {
+      Object.assign(state, await pickerSnapshot())
+    } catch (err) {
+      log(`[capture] couldn't list screens and windows: ${err} (screen permission: ${status})`)
+    }
+  } else {
+    log(`[capture] no Screen Recording permission (${status}): the picker says how to allow it`)
+  }
+  state.page ??= { granted: false }
+  if (picker !== state) return chosen // cancelled while listing (closePicker)
+
+  const win = new BrowserWindow({
+    width: 760,
+    height: 620,
+    minWidth: 480,
+    minHeight: 400,
+    useContentSize: true,
+    minimizable: false,
+    fullscreenable: false,
+    title: 'Record with Iris',
+    show: false,
+    backgroundColor: background(),
+    webPreferences: { ...WEB_PREFERENCES, preload: path.join(PAGES, 'preload-picker.cjs') },
+  })
+  state.win = win
+  // Started from the menu bar, Iris may not be the active app: bring the picker to the front.
+  win.once('ready-to-show', () => {
+    app.focus({ steal: true })
+    win.show()
+    win.focus()
+  })
+  win.on('closed', () => {
+    if (picker === state) picker = null
+    state.resolve(null) // closed without a choice: cancelled (a no-op after a choice)
+  })
+  win.loadFile(path.join(PAGES, 'picker.html'))
+  return chosen
+}
+
+function fromPicker(event) {
+  return fromDesktopPage(event, picker?.win, 'picker.html')
+}
+
+ipcMain.handle('iris-picker:snapshot', (event) => {
+  if (!fromPicker(event)) throw new Error('not allowed')
+  return picker.page
+})
+
+ipcMain.handle('iris-picker:choose', (event, id) => {
+  if (!fromPicker(event)) throw new Error('not allowed')
+  const state = picker
+  const valid = state.list && pickerRules.chosenId(state.list, id)
+  if (!valid) throw new Error('not offered')
+  state.resolve(state.sources.get(valid))
+  state.win.close()
+})
+
+ipcMain.handle('iris-picker:cancel', (event) => {
+  if (!fromPicker(event)) throw new Error('not allowed')
+  picker.win.close()
+})
+
+ipcMain.handle('iris-picker:open-settings', (event) => {
+  if (!fromPicker(event)) throw new Error('not allowed')
+  shell.openExternal(pickerRules.SCREEN_SETTINGS_URL)
 })
 
 // ---- menu bar --------------------------------------------------------------------------------
@@ -580,34 +707,46 @@ function secureSession(ses) {
   })
   ses.setPermissionCheckHandler((_wc, permission, origin) => policy.permissionCheckAllowed(permission, origin))
 
-  // The UI's getDisplayMedia call. On macOS 15+ the system picker answers it (the user picks a
-  // screen or window) and this handler isn't called; otherwise it offers the first screen. System
-  // audio comes as 'loopback' either way.
-  ses.setDisplayMediaRequestHandler(
-    async (request, callback) => {
-      const from = request.frame?.url ?? request.securityOrigin
-      const deny = () => {
-        try {
-          callback(null)
-        } catch (err) {
-          log(`[capture] deny failed: ${err.message}`)
-        }
-      }
-      if (!policy.isIrisUrl(from)) {
-        log(`[capture] refused a capture request from ${from}`)
-        return deny()
-      }
+  // The UI's getDisplayMedia call: Iris's picker asks what to record (see "picker" above), with
+  // all of the Mac's sound as 'loopback'. A refusal reaches the page as a cancelled start.
+  ses.setDisplayMediaRequestHandler(async (request, callback) => {
+    const from = request.frame?.url ?? request.securityOrigin
+    const answer = (streams) => {
       try {
-        const sources = await desktopCapturer.getSources({ types: ['screen'] })
-        if (!sources.length) return deny()
-        callback({ video: sources[0], audio: request.audioRequested ? 'loopback' : undefined })
+        callback(streams)
       } catch (err) {
-        log(`[capture] getSources failed: ${err} (screen permission: ${systemPreferences.getMediaAccessStatus('screen')})`)
-        deny()
+        log(`[capture] answering the page failed: ${err.message}`) // e.g. the page went away
       }
-    },
-    { useSystemPicker: true },
-  )
+    }
+    if (!policy.isIrisUrl(from)) {
+      log(`[capture] refused a capture request from ${from}`)
+      return answer(null)
+    }
+    // One picker at a time. Chromium holds a second request from the same page until the first
+    // is answered (measured, Electron 45); any other request meanwhile focuses the open picker.
+    if (picker) {
+      picker.win?.focus()
+      return answer(null)
+    }
+    // The page that asked going away (its window closed) closes the picker: no one to answer.
+    const requester = request.frame ? webContents.fromFrame(request.frame) : null
+    requester?.once('destroyed', closePicker)
+    let source = null
+    try {
+      source = await pickSource()
+    } catch (err) {
+      log(`[capture] the picker failed: ${err.stack ?? err}`)
+      closePicker()
+    } finally {
+      requester?.removeListener('destroyed', closePicker)
+    }
+    if (!source) {
+      log('[capture] nothing chosen to record')
+      return answer(null)
+    }
+    log(`[capture] recording ${source.id}`)
+    answer({ video: source, audio: request.audioRequested ? 'loopback' : undefined })
+  })
 }
 
 // ---- menu ------------------------------------------------------------------------------------
