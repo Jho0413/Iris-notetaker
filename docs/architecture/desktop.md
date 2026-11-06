@@ -97,9 +97,11 @@ whole request body ahead of the socket. Server-sent events stream event by event
   them.
 - **The app dies:** the backend watches `IRIS_PARENT_PID` (`backend/src/iris/parent.py`) and shuts
   itself down once that process is gone. Measured: 0.3 s after the app was killed with SIGKILL.
-- **Quit:** if a session is recording or processing, Iris asks first (what was captured is kept,
-  and next time the session page offers Finish for a recording, Try again for notes being made).
-  Then it stops the backend and exits. Closing the window doesn't quit: Iris keeps running, and
+- **Quit:** if a session is being recorded (the Live page is capturing) or processing, Iris asks
+  first (what was captured is kept, and next time the session page offers Finish for a recording,
+  Try again for notes being made). A session left "recording" by an earlier quit or crash doesn't
+  count: nothing is capturing it (`busyNow` in `src/busy.cjs`). Then it stops the backend and
+  exits. Closing the window doesn't quit: Iris keeps running, and
   making notes, in the Dock and the menu bar. While a recording runs, closing the window only
   hides it (see "Menu bar").
 

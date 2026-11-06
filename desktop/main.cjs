@@ -38,7 +38,7 @@ const policy = require('./src/policy.cjs')
 const { ORIGIN } = require('./src/routes.cjs')
 const { unloadPrompt } = require('./src/unload.cjs')
 const { pdfFileName, PDF_OPTIONS } = require('./src/pdf.cjs')
-const { busyDetail, busyKeyRefusal } = require('./src/busy.cjs')
+const { busyDetail, busyKeyRefusal, busyNow } = require('./src/busy.cjs')
 const { refusedDebugSwitch } = require('./src/debugging.cjs')
 const trayRules = require('./src/tray.cjs')
 
@@ -504,9 +504,8 @@ async function askToRestart(message, detail) {
 
 /** Sessions recording or making notes right now. */
 async function busySessions() {
-  const sessions = await backend.getJson('/api/sessions')
-  if (!Array.isArray(sessions)) return []
-  return sessions.filter((s) => s.status === 'recording' || s.status === 'processing')
+  const capturing = menuBar.recording.phase !== 'idle' // what the Live page reported
+  return busyNow(await backend.getJson('/api/sessions'), { capturing })
 }
 
 /** If a session is recording or processing, ask before stopping the engine. `detail`, if any,
