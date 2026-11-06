@@ -7,6 +7,7 @@ No network: SDK exceptions are built locally (``tests/api_errors.py``) and model
 import asyncio
 import json
 import sqlite3
+import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -34,6 +35,7 @@ from iris.llm.errors import (
 from iris.main import create_app
 from iris.models import (
     GENERIC_FAILURE,
+    INTERRUPTED_RUN,
     LIVE_WITHOUT_AUDIO,
     NOTHING_TO_WRITE,
     UNREADABLE_LIVE_AUDIO,
@@ -116,6 +118,7 @@ def test_failure_messages_are_the_fixed_list():
     """The constants are exactly the messages the API may serve (``FailureMessage``)."""
     constants = {
         GENERIC_FAILURE,
+        INTERRUPTED_RUN,
         UNREADABLE_UPLOAD,
         UPLOAD_WITHOUT_AUDIO,
         LIVE_WITHOUT_AUDIO,
@@ -705,3 +708,116 @@ def test_a_stored_message_not_on_the_list_is_served_as_the_generic_one(tmp_path)
             UPLOAD_WITHOUT_AUDIO,
             "general",
         )
+
+
+# --- Runs cut off by Iris stopping ---------------------------------------------------------------
+
+
+def wait_for_stage(client: TestClient, sid: str, stage: str, timeout: float = 5.0) -> None:
+    deadline = time.monotonic() + timeout
+    while client.get(f"/api/sessions/{sid}").json()["current_stage"] != stage:
+        assert time.monotonic() < deadline, f"session {sid} never reached {stage}"
+        time.sleep(0.05)
+
+
+def test_a_run_cut_off_by_a_restart_can_be_tried_again_from_its_stage(tmp_path, monkeypatch):
+    """Restart Engine or Quit mid-run: shutdown cancels the run, which records nothing (the
+    cancellation is not an ``Exception``). The next start marks it failed at its stage."""
+    settings = Settings(data_dir=tmp_path / "data", openai_api_key="test", synthesis=False)
+    ran: list[Stage] = []
+
+    def fake(stage: Stage, *, hang: bool = False):
+        async def run(_ctx) -> None:
+            ran.append(stage)
+            if hang:
+                await asyncio.sleep(3600)  # stands in for a stage waiting on the API
+
+        return run
+
+    for stage in STAGES:
+        monkeypatch.setitem(STAGES, stage, fake(stage, hang=stage == Stage.ALIGN))
+    with TestClient(create_app(settings)) as client:
+        sid = client.app.state.store.create("Lecture", SourceKind.UPLOAD).id
+        assert client.post(f"/api/sessions/{sid}/run?from_stage=transcribe").status_code == 200
+        wait_for_stage(client, sid, "align")
+    store = SessionStore(settings.db_path)
+    assert store.get(sid).status == SessionStatus.PROCESSING  # what shutdown leaves behind
+    store.close()
+
+    for stage in STAGES:
+        monkeypatch.setitem(STAGES, stage, fake(stage))
+    ran.clear()
+    with TestClient(create_app(settings)) as client:
+        session = client.get(f"/api/sessions/{sid}").json()
+        assert session["status"] == "failed"
+        assert (session["failure_message"], session["failure_kind"]) == (INTERRUPTED_RUN, "general")
+        assert session["current_stage"] == "align"
+        assert "interrupted" in client.app.state.store.failure_detail(sid).error
+
+        # Try again from the stage it stopped at; the earlier stages' outputs are reused.
+        assert client.post(f"/api/sessions/{sid}/run?from_stage=align").status_code == 200
+        session = wait_for_status(client, sid, {"done", "failed"})
+        assert session["status"] == "done"
+        assert (session["failure_message"], session["failure_kind"]) == (None, None)
+        assert Stage.TRANSCRIBE not in ran and ran[0] == Stage.ALIGN
+
+
+def test_startup_fails_only_the_runs_left_processing(tmp_path):
+    """A crash, a forced quit or power loss: no shutdown ran, so only the next start finds out."""
+    settings = Settings(data_dir=tmp_path / "data", openai_api_key="test")
+    store = SessionStore(settings.db_path)
+
+    def session(status: SessionStatus, stage: Stage | None = None) -> str:
+        sid = store.create(status.value, SourceKind.UPLOAD).id
+        store.update(sid, status=status, current_stage=stage)
+        return sid
+
+    cut_off = session(SessionStatus.PROCESSING, Stage.WRITE)
+    cut_off_live = store.create("Live", SourceKind.BROWSER_LIVE).id
+    store.update(cut_off_live, status=SessionStatus.PROCESSING)  # before its first stage
+    untouched = {
+        session(SessionStatus.CREATED): None,
+        session(SessionStatus.RECORDING): None,
+        session(SessionStatus.DONE, Stage.SYNTHESIZE): None,
+        session(SessionStatus.FAILED, Stage.RENDER): None,
+    }
+    failed = list(untouched)[-1]
+    store.fail(failed, message=GENERIC_FAILURE, kind=FailureKind.GENERAL, detail="x")
+    before = {sid: store.get(sid) for sid in untouched}
+    store.close()
+
+    with TestClient(create_app(settings)) as client:
+        for sid, stage in ((cut_off, "write"), (cut_off_live, None)):
+            s = client.get(f"/api/sessions/{sid}").json()
+            assert (s["status"], s["current_stage"]) == ("failed", stage)
+            assert (s["failure_message"], s["failure_kind"]) == (INTERRUPTED_RUN, "general")
+        for sid, old in before.items():
+            assert client.app.state.store.get(sid) == old
+
+
+async def test_a_run_that_finishes_after_being_marked_interrupted_is_clean(tmp_path, monkeypatch):
+    """A CLI run on the same data while the server starts: marked, but it carries on and ends
+    done with no failure left on it."""
+    runner, sid, _ctx = runner_session(tmp_path)
+    started, release = asyncio.Event(), asyncio.Event()
+
+    async def wait(_ctx) -> None:
+        started.set()
+        await release.wait()
+
+    async def nothing(_ctx) -> None:
+        pass
+
+    for stage in STAGES:
+        monkeypatch.setitem(STAGES, stage, wait if stage == Stage.INGEST else nothing)
+    runner.start(sid)
+    await started.wait()
+    runner.fail_interrupted()  # as the server starting would
+    assert runner.store.get(sid).failure_message == INTERRUPTED_RUN
+    release.set()
+    await runner._tasks[sid]
+    session = runner.store.get(sid)
+    assert session.status == SessionStatus.DONE
+    assert (session.failure_message, session.failure_kind) == (None, None)
+    assert runner.store.failure_detail(sid) is None
+    runner.store.close()

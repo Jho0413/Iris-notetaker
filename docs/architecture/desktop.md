@@ -92,8 +92,9 @@ whole request body ahead of the socket. Server-sent events stream event by event
 - **The app dies:** the backend watches `IRIS_PARENT_PID` (`backend/src/iris/parent.py`) and shuts
   itself down once that process is gone. Measured: 0.3 s after the app was killed with SIGKILL.
 - **Quit:** if a session is recording or processing, Iris asks first (what was captured is kept,
-  and the session page offers Resume or Finish next time). Then it stops the backend and exits.
-  Closing the window doesn't quit: Iris keeps running, and making notes, in the Dock.
+  and next time the session page offers Finish for a recording, Try again for notes being made).
+  Then it stops the backend and exits. Closing the window doesn't quit: Iris keeps running, and
+  making notes, in the Dock.
 
 ## Security
 

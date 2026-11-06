@@ -54,6 +54,10 @@ UPLOAD_WITHOUT_AUDIO = "This recording has no sound. Upload a recording with spe
 LIVE_WITHOUT_AUDIO = "No audio was recorded. Check that the microphone works, then record again."
 UNREADABLE_LIVE_AUDIO = "The recorded audio couldn't be read. Record the session again."
 NOTHING_TO_WRITE = "Iris found no speech or screen content in this recording to make notes from."
+# A run cut off by Iris stopping (quit, restart, a crash), found when Iris next starts.
+INTERRUPTED_RUN = (
+    "Iris was closed before these notes were finished. Try again; finished steps are kept."
+)
 
 FailureMessage = Literal[
     "Iris couldn't finish making the notes. Try again; finished steps are kept.",
@@ -62,6 +66,7 @@ FailureMessage = Literal[
     "No audio was recorded. Check that the microphone works, then record again.",
     "The recorded audio couldn't be read. Record the session again.",
     "Iris found no speech or screen content in this recording to make notes from.",
+    "Iris was closed before these notes were finished. Try again; finished steps are kept.",
 ]
 
 

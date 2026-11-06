@@ -29,6 +29,7 @@ const FAILURE_MESSAGES: Record<FailureMessage, true> = {
   'No audio was recorded. Check that the microphone works, then record again.': true,
   "The recorded audio couldn't be read. Record the session again.": true,
   'Iris found no speech or screen content in this recording to make notes from.': true,
+  'Iris was closed before these notes were finished. Try again; finished steps are kept.': true,
 }
 
 /** `message` if it is one of ours, else the generic message. */
