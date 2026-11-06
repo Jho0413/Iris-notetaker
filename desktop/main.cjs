@@ -16,12 +16,14 @@ const {
   desktopCapturer,
   dialog,
   ipcMain,
+  nativeImage,
   nativeTheme,
   protocol,
   safeStorage,
   session,
   shell,
   systemPreferences,
+  Tray,
 } = require('electron')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -38,10 +40,12 @@ const { unloadPrompt } = require('./src/unload.cjs')
 const { pdfFileName, PDF_OPTIONS } = require('./src/pdf.cjs')
 const { busyDetail, busyKeyRefusal } = require('./src/busy.cjs')
 const { refusedDebugSwitch } = require('./src/debugging.cjs')
+const trayRules = require('./src/tray.cjs')
 
 const PACKAGED = app.isPackaged
 const REPO = path.resolve(__dirname, '..')
 const PAGES = path.join(__dirname, 'pages')
+const ASSETS = path.join(__dirname, 'assets')
 const DIST = PACKAGED ? path.join(process.resourcesPath, 'frontend') : path.join(REPO, 'frontend', 'dist')
 const UI_URL = `${ORIGIN}/`
 
@@ -113,6 +117,9 @@ let keyWindow = null
 let keyPrompt = null // {resolve} while the key screen is open
 let quitConfirmed = false
 let quitting = false
+let recording = trayRules.IDLE // what the Live page last reported (src/tray.cjs)
+let pageListening = false // the main window's UI is subscribed to record commands
+let startPending = false // "Record Screen…" waiting for that UI to load
 
 // ---- windows ---------------------------------------------------------------------------------
 
@@ -149,8 +156,24 @@ function showMainWindow() {
   })
   mainWindow = win
   win.once('ready-to-show', () => win.show())
+  // While recording, closing the window would end it: hide the window instead. The menu bar
+  // shows the recording, stops it and shows the window again. Quitting closes it for real.
+  win.on('close', (event) => {
+    if (quitConfirmed || !trayRules.hideOnClose(recording)) return
+    event.preventDefault()
+    win.hide()
+  })
   win.on('closed', () => {
-    if (mainWindow === win) mainWindow = null
+    if (mainWindow === win) {
+      mainWindow = null
+      startPending = false // closed before the UI loaded: the start is cancelled
+      pageGone()
+    }
+  })
+  // A reload or a new page (the starting screen, then the UI): what the old page reported, and
+  // its subscription, went with it. Client-side routes are same-document and keep both.
+  win.webContents.on('did-start-navigation', ({ isMainFrame, isSameDocument }) => {
+    if (isMainFrame && !isSameDocument) pageGone()
   })
   // A page refusing to unload (beforeunload): the live page while it records, Settings with an
   // unsaved change. Electron would cancel the close or reload silently, so ask here
@@ -166,6 +189,7 @@ function showMainWindow() {
   const crashes = []
   win.webContents.on('render-process-gone', async (_e, details) => {
     log(`[window] renderer gone: ${details.reason}`)
+    if (mainWindow === win) pageGone()
     if (details.reason === 'clean-exit' || mainWindow !== win) return
     const now = Date.now()
     crashes.push(now)
@@ -341,6 +365,96 @@ ipcMain.handle('iris-app:save-pdf', async (event, title) => {
     log(`[pdf] couldn't save: ${err.message}`) // the page says it in its own words
     throw err
   }
+})
+
+// ---- menu bar --------------------------------------------------------------------------------
+
+// The menu bar icon starts and stops a recording, but recording happens in the Live page (its
+// capture code runs in the window), so the icon only relays: "Record Screen…" opens the window
+// and asks the page to start; Stop asks the page to stop, which makes notes as its own Stop does.
+let tray = null
+let trayTicker = null
+const TRAY_ICONS = {}
+
+function trayIcon(recordingNow) {
+  const name = recordingNow ? 'trayRecording.png' : 'trayTemplate.png' // "Template": macOS tints it
+  TRAY_ICONS[name] ??= nativeImage.createFromPath(path.join(ASSETS, name))
+  return TRAY_ICONS[name]
+}
+
+function createTray() {
+  tray = new Tray(trayIcon(false))
+  tray.setToolTip('Iris')
+  showTray()
+}
+
+const TRAY_ACTIONS = {
+  record: startFromMenuBar,
+  stop: stopFromMenuBar,
+  show: () => showMainWindow(),
+  quit: () => app.quit(),
+}
+
+/** The icon, the time beside it and the menu for what the Live page last reported. */
+function showTray() {
+  if (!tray) return
+  const view = trayRules.trayView(recording, Date.now())
+  tray.setImage(trayIcon(view.recording))
+  tray.setTitle(view.title, { fontType: 'monospacedDigit' })
+  tray.setContextMenu(
+    Menu.buildFromTemplate(view.items.map(({ id, ...item }) => (id ? { ...item, click: TRAY_ACTIONS[id] } : item))),
+  )
+  // Only the time changes each second; the menu is rebuilt when the phase does.
+  if (recording.phase === 'recording') {
+    trayTicker ??= setInterval(() => tray.setTitle(trayRules.trayView(recording, Date.now()).title, { fontType: 'monospacedDigit' }), 1000)
+  } else if (trayTicker) {
+    clearInterval(trayTicker)
+    trayTicker = null
+  }
+}
+
+/** "Record Screen…": open the window and ask the UI to start, once it has loaded if the window
+ * was closed or the engine is still starting. */
+function startFromMenuBar() {
+  showMainWindow()
+  startPending = true
+  sendStartWhenListening()
+}
+
+function sendStartWhenListening() {
+  if (!startPending || !pageListening || !mainWindow) return
+  startPending = false
+  log('[tray] start recording')
+  mainWindow.webContents.send('iris-app:record', 'start')
+}
+
+/** Stop: offered only while the page records, so it is listening. Never queued for a later page. */
+function stopFromMenuBar() {
+  if (!pageListening || !mainWindow) return
+  log('[tray] stop recording')
+  mainWindow.webContents.send('iris-app:record', 'stop')
+}
+
+/** The main window's page went away: it no longer records or listens. */
+function pageGone() {
+  pageListening = false
+  if (recording.phase === 'idle') return
+  recording = trayRules.IDLE
+  showTray()
+}
+
+ipcMain.on('iris-app:record-listening', (event) => {
+  if (!policy.fromIrisWindow(event, mainWindow)) return
+  pageListening = true
+  sendStartWhenListening()
+})
+
+ipcMain.on('iris-app:recording', (event, report) => {
+  if (!policy.fromIrisWindow(event, mainWindow)) return
+  const next = trayRules.parseReport(report)
+  if (!next) return log('[tray] ignored a malformed recording report')
+  recording = next
+  showTray()
 })
 
 // ---- backend ---------------------------------------------------------------------------------
@@ -576,6 +690,7 @@ if (!app.requestSingleInstanceLock()) {
     secureSession(session.defaultSession)
     handleAppProtocol({ protocol: session.defaultSession.protocol, distDir: DIST, backend: () => backend.info(), log })
     buildMenu()
+    createTray()
 
     // The packaged app welcomes a new install once (Welcome, then Connect), never again; in
     // development the repo's backend/.env can supply the key. Without a key Iris still opens: the

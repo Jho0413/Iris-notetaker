@@ -10,6 +10,7 @@ files:
   - package.json
   - src/**/*
   - pages/**/*
+  - assets/**/*
 extraResources:
   # Standalone Python with Iris installed (scripts/build-backend.sh).
   - from: build/backend/python
