@@ -15,7 +15,7 @@ const back = document.getElementById('back')
 
 const mode = new URLSearchParams(location.search).get('mode')
 if (mode === 'change') document.getElementById('title').textContent = 'Change your OpenAI key'
-if (mode === 'change' || mode === 'add') save.textContent = 'Save and restart'
+if (mode === 'change' || mode === 'add') save.textContent = 'Save'
 if (mode === 'first') {
   cancel.textContent = 'Set up later'
   back.hidden = false

@@ -73,9 +73,9 @@ Iris.app
 ├── Electron main process
 │     • app://iris/api/*  → http://127.0.0.1:<port>/api/* with X-Iris-Token, streamed both ways
 │     • app://iris/<file> → the built UI; any other path → index.html (client-side routes)
-│     • starts the backend: python3 -I -m iris serve --port <free port>
-│         env: OPENAI_API_KEY (from the Keychain-encrypted store), IRIS_DATA_DIR, IRIS_API_TOKEN,
-│              IRIS_PARENT_PID; data and logs in ~/Library/Application Support/Iris
+│     • starts the backend: python3 -I -m iris serve --port <free port> --secrets-from-stdin
+│         stdin: the OpenAI key (from the Keychain-encrypted store) and the API token, one JSON line
+│         env: IRIS_DATA_DIR, IRIS_PARENT_PID; data and logs in ~/Library/Application Support/Iris
 ├── Window: app://iris/, the web UI unchanged
 └── Resources/backend/python, Resources/frontend
 ```
@@ -83,9 +83,10 @@ Iris.app
 - **The backend never serves the UI.** Electron serves it from the `app://` scheme and forwards
   `/api` to the backend, so the UI still loads (and says the engine isn't running) if the backend
   stops.
-- **A per-launch token** (`IRIS_API_TOKEN`) guards the API: the backend refuses (401) any request
-  without it, so other local processes and web pages can't use it. The app adds it to every
-  forwarded request; the page never sees it, or the port.
+- **A per-launch token** guards the API: the backend refuses (401) any request without it, so
+  other local processes and web pages can't use it. The app adds it to every forwarded request;
+  the page never sees it, or the port. The token and the key reach the backend on its stdin, not
+  its environment, which other processes of the user can read.
 - **The backend can't outlive the app.** It stops on quit and, if the app crashes or is
   force-quit, exits on its own once the app's process is gone (`IRIS_PARENT_PID`).
 - **Capture** goes through the UI's own `getDisplayMedia` call, answered by the macOS system picker

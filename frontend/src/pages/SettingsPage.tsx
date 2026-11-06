@@ -298,8 +298,7 @@ function ApiKeyRow(props: { keySet: boolean; onResult: (result: { ok: boolean; t
     )
     description = (
       <>
-        Encrypted with your Keychain; this page never sees it. A new key is checked with OpenAI before it's saved,
-        and Iris's engine restarts to use it.
+        Encrypted with your Keychain; this page never sees it. A new key is checked with OpenAI before it's saved.
       </>
     )
   } else {

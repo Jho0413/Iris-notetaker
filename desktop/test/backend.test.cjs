@@ -4,7 +4,7 @@ const http = require('node:http')
 const os = require('node:os')
 const path = require('node:path')
 const { test } = require('node:test')
-const { Backend, backendCommand, freePort, newToken } = require('../src/backend.cjs')
+const { Backend, backendCommand, freePort, newToken, secretsLine } = require('../src/backend.cjs')
 
 const FAKE = path.join(__dirname, 'fake-backend.cjs')
 
@@ -16,7 +16,8 @@ function fakeBackend(mode, opts = {}) {
       cmd: process.execPath,
       args: [FAKE, mode, String(port)],
       cwd: path.join(dir, 'data'),
-      env: { PATH: process.env.PATH, IRIS_API_TOKEN: token, IRIS_PARENT_PID: String(process.pid) },
+      env: { PATH: process.env.PATH, IRIS_PARENT_PID: String(process.pid) },
+      stdin: secretsLine({ apiKey: 'sk-key', token }),
     }),
     logFile,
     startTimeoutMs: 3000,
@@ -51,28 +52,40 @@ test('the packaged command: bundled python, isolated, clean environment, data in
     env: { HOME: '/Users/me', PATH: '/opt/homebrew/bin:/usr/bin', PYTHONPATH: '/evil', IRIS_DATA_DIR: '/elsewhere', TMPDIR: '/tmp/x', LANG: 'en_GB.UTF-8' },
   })
   assert.equal(c.cmd, '/Applications/Iris.app/Contents/Resources/backend/python/bin/python3')
-  assert.deepEqual(c.args, ['-I', '-u', '-B', '-m', 'iris', 'serve', '--host', '127.0.0.1', '--port', '4321'])
+  assert.deepEqual(c.args, ['-I', '-u', '-B', '-m', 'iris', 'serve', '--host', '127.0.0.1', '--port', '4321', '--secrets-from-stdin'])
   assert.equal(c.cwd, '/Users/me/Library/Application Support/Iris')
+  // No key or token in the environment: any process of the user could read them there.
   assert.deepEqual(c.env, {
     HOME: '/Users/me',
     TMPDIR: '/tmp/x',
     LANG: 'en_GB.UTF-8',
     PATH: '/usr/bin:/bin:/usr/sbin:/sbin',
     IRIS_DATA_DIR: '/Users/me/Library/Application Support/Iris',
-    OPENAI_API_KEY: 'sk-key',
-    IRIS_API_TOKEN: 'tok',
     IRIS_PARENT_PID: '99',
   })
+  assert.equal(c.stdin, '{"openai_api_key":"sk-key","api_token":"tok"}\n')
 })
 
 test('the development command: uv in the repo backend, its .env supplies the key unless one is stored', () => {
   const c = backendCommand({ packaged: false, repoDir: '/repo', userData: '/u', port: 4321, token: 'tok', parentPid: 99, apiKey: null, env: { PATH: '/p' } })
   assert.equal(c.cmd, '/bin/zsh')
-  assert.deepEqual(c.args, ['-lc', 'exec uv run python -u -m iris serve --host 127.0.0.1 --port 4321'])
+  assert.deepEqual(c.args, ['-lc', 'exec uv run python -u -m iris serve --host 127.0.0.1 --port 4321 --secrets-from-stdin'])
   assert.equal(c.cwd, '/repo/backend')
-  assert.equal(c.env.OPENAI_API_KEY, undefined)
-  assert.equal(c.env.IRIS_API_TOKEN, 'tok')
-  assert.equal(c.env.PATH, '/p')
+  assert.deepEqual(c.env, { PATH: '/p', IRIS_PARENT_PID: '99' })
+  assert.equal(c.stdin, '{"openai_api_key":null,"api_token":"tok"}\n')
+  const withKey = backendCommand({ packaged: false, repoDir: '/repo', userData: '/u', port: 1, token: 'tok', parentPid: 99, apiKey: 'sk-key', env: { PATH: '/p' } })
+  assert.equal(withKey.env.OPENAI_API_KEY, undefined)
+  assert.equal(withKey.env.IRIS_API_TOKEN, undefined)
+  assert.equal(withKey.stdin, '{"openai_api_key":"sk-key","api_token":"tok"}\n')
+})
+
+test('the secrets line: one line of JSON, the key null when there is none', () => {
+  for (const apiKey of [null, undefined, '']) {
+    assert.deepEqual(JSON.parse(secretsLine({ apiKey, token: 't' })), { openai_api_key: null, api_token: 't' })
+  }
+  const line = secretsLine({ apiKey: 'sk-"quoted"\\', token: 't' })
+  assert.ok(line.endsWith('\n') && !line.slice(0, -1).includes('\n'))
+  assert.equal(JSON.parse(line).openai_api_key, 'sk-"quoted"\\')
 })
 
 test('start waits for health with the token, stop is clean and expected', async () => {
@@ -93,7 +106,9 @@ test('start waits for health with the token, stop is clean and expected', async 
   assert.equal(backend.running, false)
   assert.equal(await backend.getJson('/api/sessions'), null)
   const logged = fs.readFileSync(logFile, 'utf8')
-  assert.match(logged, /fake backend ok env-token=set parent=\d+/)
+  // The fake backend got the secrets on stdin and none in its environment.
+  assert.match(logged, /fake backend ok stdin=\["openai_api_key","api_token"\] key=set secrets-in-env=none parent=\d+/)
+  assert.doesNotMatch(logged, /sk-key/)
   assert.match(logged, /backend exited/)
   await backend.stop() // stopping twice is fine
 })
@@ -126,6 +141,22 @@ test('a crash while starting rejects; a crash later is reported as unexpected', 
   assert.equal(e.signal, 'SIGKILL')
   assert.equal(ok.info(), null)
   assert.ok(ready.port)
+})
+
+test('a backend that exits before reading its stdin does not crash the app', async () => {
+  const logged = []
+  const { backend } = fakeBackend('crash', { log: (line) => logged.push(line) })
+  const big = backend.command
+  // Far more than a pipe holds, so the write is still under way when the process exits: EPIPE.
+  backend.command = (port, token) => ({ ...big(port, token), stdin: 'x'.repeat(4 * 1024 * 1024) })
+  await assert.rejects(backend.start(), /exited while starting \(code 3\)/)
+  await new Promise((r) => setTimeout(r, 100)) // let a late stdin error arrive
+  assert.ok(logged.some((l) => /couldn't write its stdin: EPIPE/.test(l)), logged.join('\n'))
+  assert.ok(!logged.some((l) => l.includes('xxxx')))
+  // And it starts normally afterwards.
+  backend.command = fakeBackend('ok').backend.command
+  await backend.start()
+  await backend.stop()
 })
 
 test('a backend that never answers times out and is stopped', async () => {
@@ -219,7 +250,8 @@ test('stop is bounded even when a grandchild keeps the output pipes open', async
       cmd: process.execPath,
       args: [path.join(__dirname, 'fake-wrapper.cjs'), String(port)],
       cwd: dir,
-      env: { PATH: process.env.PATH, IRIS_API_TOKEN: token, EXIT_AFTER_MS: '5000' },
+      env: { PATH: process.env.PATH, EXIT_AFTER_MS: '5000' },
+      stdin: secretsLine({ apiKey: null, token }),
     }),
     logFile: path.join(dir, 'backend.log'),
     startTimeoutMs: 3000,

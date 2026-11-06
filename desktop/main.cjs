@@ -36,6 +36,8 @@ const policy = require('./src/policy.cjs')
 const { ORIGIN } = require('./src/routes.cjs')
 const { unloadPrompt } = require('./src/unload.cjs')
 const { pdfFileName, PDF_OPTIONS } = require('./src/pdf.cjs')
+const { busyDetail, busyKeyRefusal } = require('./src/busy.cjs')
+const { refusedDebugSwitch } = require('./src/debugging.cjs')
 
 const PACKAGED = app.isPackaged
 const REPO = path.resolve(__dirname, '..')
@@ -58,6 +60,18 @@ function log(line) {
   const stamped = `${new Date().toISOString()} ${line}`
   console.log(stamped)
   mainLog.write(stamped + '\n')
+}
+
+// The packaged app never runs with remote debugging (src/debugging.cjs): it exits before any
+// window or engine. At once, with the log line written synchronously: Chromium opens the debugging
+// port as soon as the event loop runs. CommonJS allows this top-level return.
+const debugSwitch = refusedDebugSwitch({ packaged: PACKAGED, hasSwitch: (name) => app.commandLine.hasSwitch(name) })
+if (debugSwitch) {
+  const line = `${new Date().toISOString()} [app] refusing to start with --${debugSwitch}: Iris doesn't run with remote debugging`
+  console.error(line)
+  fs.appendFileSync(path.join(LOGS, 'main.log'), line + '\n')
+  process.exit(1)
+  return
 }
 
 // ---- state -----------------------------------------------------------------------------------
@@ -269,27 +283,26 @@ ipcMain.handle('iris-key:cancel', (event) => {
 })
 
 /** Add or replace the key (menu, Settings, the no-key banner). Resolves true once the engine
- * runs with the new key, false if the user cancelled. */
+ * runs with the new key, false if the user cancelled or a session is busy. */
 async function changeKey() {
-  if (!(await confirmBusy('Change the API key?', 'Iris restarts its engine to use the new key.'))) return false
-  if (!(await askForKey(currentKey() ? 'change' : 'add'))) return false
+  const mode = currentKey() ? 'change' : 'add'
+  if (await refuseKeyWhileBusy(mode)) return false
+  if (!(await askForKey(mode))) return false
   await restartBackend()
   return true
 }
 
 /** Remove the stored key after one question; the engine restarts without it. Resolves true once
- * removed, false if the user cancelled. */
+ * removed, false if the user cancelled or a session is busy. */
 async function removeKey() {
-  const busy = await busySessions()
+  if (await refuseKeyWhileBusy('remove')) return false
   const { response } = await dialog.showMessageBox(mainWindow ?? undefined, {
     type: 'warning',
     buttons: ['Remove Key', 'Cancel'],
     defaultId: 1,
     cancelId: 1,
     message: 'Remove the OpenAI key?',
-    detail:
-      'Iris can’t make notes until you add a key again. Iris’s engine restarts to stop using it.' +
-      (busy.length ? `\n\n${busyDetail(busy)}` : ''),
+    detail: 'Iris can’t make notes until you add a key again.',
   })
   if (response !== 0) return false
   keystore.clear()
@@ -413,13 +426,15 @@ async function confirmBusy(message, detail, button = 'Continue') {
   return response === 0
 }
 
-/** "“Lecture 3” is still recording or making notes…", for a dialog that would stop the engine. */
-function busyDetail(busy) {
-  const names = busy.slice(0, 3).map((s) => `“${s.title || 'Untitled session'}”`).join(', ')
-  return (
-    `${names}${busy.length > 3 ? ' and others' : ''} ${busy.length === 1 ? 'is' : 'are'} ` +
-    'still recording or making notes. What is recorded so far is kept: resume it from the library later.'
-  )
+/** A key change or removal restarts the engine: while a session is busy, say so (OK only) and
+ * resolve true. Restart Engine and Quit still only ask (confirmBusy): they are the way out of a
+ * stuck engine. */
+async function refuseKeyWhileBusy(action) {
+  const busy = await busySessions()
+  if (!busy.length) return false
+  log(`[key] refused to ${action} the key: ${busy.length} session(s) busy`)
+  await dialog.showMessageBox(mainWindow ?? undefined, busyKeyRefusal(busy, action))
+  return true
 }
 
 // ---- security --------------------------------------------------------------------------------

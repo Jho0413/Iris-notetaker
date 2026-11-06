@@ -1,8 +1,10 @@
 // Starts, watches and stops the Iris backend (the engine) for the desktop app. Plain Node, so it
 // is tested without Electron (test/backend.test.cjs).
 //
-// Each start picks a free port and a fresh random token. The backend gets the token, the app's
-// pid (it exits if the app dies: iris/parent.py) and the API key in its environment.
+// Each start picks a free port and a fresh random token. The backend gets the app's pid in its
+// environment (it exits if the app dies: iris/parent.py), and the token and the API key as one
+// line of JSON on its stdin (iris/launch_secrets.py): any process of the same user can read
+// another's environment (`ps eww <pid>`), but not its stdin.
 
 const { spawn: spawnProcess } = require('node:child_process')
 const crypto = require('node:crypto')
@@ -48,9 +50,8 @@ function newToken() {
  * app is opened with `open`; the repo's backend/.env and data/ apply, as with `make dev`.
  */
 function backendCommand({ packaged, resourcesPath, repoDir, userData, port, token, parentPid, apiKey, env }) {
-  const serve = ['-m', 'iris', 'serve', '--host', '127.0.0.1', '--port', String(port)]
-  const iris = { IRIS_API_TOKEN: token, IRIS_PARENT_PID: String(parentPid) }
-  const key = apiKey ? { OPENAI_API_KEY: apiKey } : {}
+  const serve = ['-m', 'iris', 'serve', '--host', '127.0.0.1', '--port', String(port), '--secrets-from-stdin']
+  const stdin = secretsLine({ apiKey, token })
   if (packaged) {
     const keep = ['HOME', 'USER', 'LOGNAME', 'TMPDIR', 'LANG']
     const base = Object.fromEntries(keep.filter((k) => env[k]).map((k) => [k, env[k]]))
@@ -58,15 +59,22 @@ function backendCommand({ packaged, resourcesPath, repoDir, userData, port, toke
       cmd: path.join(resourcesPath, 'backend', 'python', 'bin', 'python3'),
       args: ['-I', '-u', '-B', ...serve],
       cwd: userData,
-      env: { ...base, PATH: '/usr/bin:/bin:/usr/sbin:/sbin', IRIS_DATA_DIR: userData, ...key, ...iris },
+      env: { ...base, PATH: '/usr/bin:/bin:/usr/sbin:/sbin', IRIS_DATA_DIR: userData, IRIS_PARENT_PID: String(parentPid) },
+      stdin,
     }
   }
   return {
     cmd: '/bin/zsh',
     args: ['-lc', `exec uv run python -u ${serve.join(' ')}`],
     cwd: path.join(repoDir, 'backend'),
-    env: { ...env, ...key, ...iris },
+    env: { ...env, IRIS_PARENT_PID: String(parentPid) },
+    stdin,
   }
+}
+
+/** The line `iris serve --secrets-from-stdin` reads: the key (null if none) and the token. */
+function secretsLine({ apiKey, token }) {
+  return JSON.stringify({ openai_api_key: apiKey || null, api_token: token }) + '\n'
 }
 
 /** GET /api/health with the token: true once it answers 200. */
@@ -101,7 +109,8 @@ function rotateLog(file) {
 class Backend extends EventEmitter {
   /**
    * @param {object} opts
-   * @param {(port: number, token: string) => {cmd: string, args: string[], cwd: string, env: object}} opts.command
+   * @param {(port: number, token: string) => {cmd: string, args: string[], cwd: string, env: object, stdin?: string}} opts.command
+ *   `stdin` is written to the process's stdin, which is then closed.
    * @param {string} opts.logFile
    * @param {(line: string) => void} [opts.log]
    * @param {number} [opts.startTimeoutMs]  first launch of a fresh install takes ~40 s (macOS checks each native library)
@@ -149,14 +158,19 @@ class Backend extends EventEmitter {
     const port = await freePort()
     if (this.stopping) throw stoppedError()
     const token = newToken()
-    const { cmd, args, cwd, env } = this.command(port, token)
+    const { cmd, args, cwd, env, stdin = '' } = this.command(port, token)
     fs.mkdirSync(path.dirname(this.logFile), { recursive: true })
     rotateLog(this.logFile)
     const out = fs.createWriteStream(this.logFile, { flags: 'a' })
     out.write(`\n--- ${new Date().toISOString()} starting the backend on port ${port}\n`)
     fs.mkdirSync(cwd, { recursive: true })
-    const child = this.spawn(cmd, args, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'] })
+    const child = this.spawn(cmd, args, { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] })
     this.child = child
+    // A process that exits (or never starts) before reading its stdin makes the write fail with
+    // EPIPE. Unhandled, that error would crash the app; the exit itself is reported below. The
+    // line holds the key, so only the error code is logged.
+    child.stdin.on('error', (err) => this.log(`[backend] couldn't write its stdin: ${err.code ?? 'error'}`))
+    child.stdin.end(stdin)
     child.stdout.pipe(out, { end: false })
     child.stderr.pipe(out, { end: false })
 
@@ -270,4 +284,4 @@ class Backend extends EventEmitter {
   }
 }
 
-module.exports = { Backend, backendCommand, checkHealth, freePort, newToken }
+module.exports = { Backend, backendCommand, checkHealth, freePort, newToken, secretsLine }

@@ -81,8 +81,8 @@ test('the no-key warning fits where Iris runs', () => {
 })
 
 test('key changes are confirmed in words', () => {
-  assert.equal(keyChanged('saved'), 'Key saved. Iris’s engine restarted with it.')
-  assert.equal(keyChanged('removed'), 'Key removed. Iris’s engine restarted without it.')
+  assert.equal(keyChanged('saved'), 'Key saved.')
+  assert.equal(keyChanged('removed'), 'Key removed.')
   assert.doesNotMatch(KEY_ACTION_FAILED, /error|\d{3}/i)
 })
 
