@@ -3,7 +3,8 @@ Python, isolated, in an empty environment). Exits non-zero if any step fails.
 
 Checks that the native libraries load and do real work: PyAV decodes a generated video, OpenCV
 diffs frames and writes a JPEG, resvg rasterizes an SVG; then that the server starts as the app
-starts it (``python -I -m iris serve``) and enforces the API token.
+starts it (``python -I -m iris serve --secrets-from-stdin``, the key and token on stdin) and
+enforces the API token.
 """
 
 import json
@@ -57,23 +58,27 @@ def main(work: Path) -> None:
     png = bytes(resvg_py.svg_to_bytes(svg_string=svg))
     assert png.startswith(b"\x89PNG"), "resvg did not return a PNG"
 
-    step("server: python -I -m iris serve, with and without the token")
+    step("server: python -I -m iris serve --secrets-from-stdin, with and without the token")
     token = "smoke-token-0123456789"
     port = _free_port()
     env = {
         "HOME": os.environ.get("HOME", str(work)),
         "PATH": "/usr/bin:/bin",
         "IRIS_DATA_DIR": str(work / "data"),
-        "IRIS_API_TOKEN": token,
         "IRIS_PARENT_PID": str(os.getpid()),
     }
     server = subprocess.Popen(
-        [sys.executable, "-I", "-m", "iris", "serve", "--port", str(port)],
+        [sys.executable, "-I", "-m", "iris", "serve", "--port", str(port), "--secrets-from-stdin"],
         cwd=work,
         env=env,
+        stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
     )
+    # As the app does: one JSON line, then stdin closed. The key is a placeholder (never used).
+    server.stdin.write(json.dumps({"openai_api_key": "sk-smoke", "api_token": token}).encode())
+    server.stdin.write(b"\n")
+    server.stdin.close()
     try:
         url = f"http://127.0.0.1:{port}/api/health"
         deadline = time.monotonic() + 120
@@ -88,6 +93,9 @@ def main(work: Path) -> None:
                 if time.monotonic() > deadline:
                     raise SystemExit("server did not answer within 120 s") from None
                 time.sleep(0.3)
+        settings = f"http://127.0.0.1:{port}/api/settings"
+        with urllib.request.urlopen(_req(settings, token), timeout=2) as res:
+            assert json.load(res)["api_key_set"] is True, "the key from stdin did not arrive"
         try:
             urllib.request.urlopen(_req(f"http://127.0.0.1:{port}/api/sessions", None), timeout=2)
             raise SystemExit("the server answered without the token")
