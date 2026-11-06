@@ -36,6 +36,7 @@ const policy = require('./src/policy.cjs')
 const { ORIGIN } = require('./src/routes.cjs')
 const { unloadPrompt } = require('./src/unload.cjs')
 const { pdfFileName, PDF_OPTIONS } = require('./src/pdf.cjs')
+const { refusedDebugSwitch } = require('./src/debugging.cjs')
 
 const PACKAGED = app.isPackaged
 const REPO = path.resolve(__dirname, '..')
@@ -58,6 +59,15 @@ function log(line) {
   const stamped = `${new Date().toISOString()} ${line}`
   console.log(stamped)
   mainLog.write(stamped + '\n')
+}
+
+// The packaged app never runs with remote debugging (src/debugging.cjs): it quits before any
+// window or engine. CommonJS allows this top-level return; nothing below runs.
+const debugSwitch = refusedDebugSwitch({ packaged: PACKAGED, hasSwitch: (name) => app.commandLine.hasSwitch(name) })
+if (debugSwitch) {
+  log(`[app] refusing to start with --${debugSwitch}: Iris doesn't run with remote debugging`)
+  mainLog.end(() => app.exit(1))
+  return
 }
 
 // ---- state -----------------------------------------------------------------------------------

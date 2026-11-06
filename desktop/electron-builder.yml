@@ -17,6 +17,17 @@ extraResources:
   # The built UI (npm run build in frontend/), served over app://iris.
   - from: ../frontend/dist
     to: frontend
+# Something running as the user must not be able to start Iris with its own code in it: that code
+# would run as Iris, which the Keychain trusts with the OpenAI key without asking. So no
+# ELECTRON_RUN_AS_NODE, NODE_OPTIONS or --inspect, and only the signed app.asar, checked against
+# the hash in Info.plist, is loaded. Remote debugging has no fuse: main.cjs refuses it
+# (src/debugging.cjs). electron-builder flips the fuses before it signs.
+electronFuses:
+  runAsNode: false
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+  onlyLoadAppFromAsar: true
+  enableEmbeddedAsarIntegrityValidation: true
 electronLanguages: [en]
 npmRebuild: false
 mac:
