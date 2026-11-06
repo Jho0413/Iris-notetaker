@@ -62,12 +62,15 @@ function log(line) {
   mainLog.write(stamped + '\n')
 }
 
-// The packaged app never runs with remote debugging (src/debugging.cjs): it quits before any
-// window or engine. CommonJS allows this top-level return; nothing below runs.
+// The packaged app never runs with remote debugging (src/debugging.cjs): it exits before any
+// window or engine. At once, with the log line written synchronously: Chromium opens the debugging
+// port as soon as the event loop runs. CommonJS allows this top-level return.
 const debugSwitch = refusedDebugSwitch({ packaged: PACKAGED, hasSwitch: (name) => app.commandLine.hasSwitch(name) })
 if (debugSwitch) {
-  log(`[app] refusing to start with --${debugSwitch}: Iris doesn't run with remote debugging`)
-  mainLog.end(() => app.exit(1))
+  const line = `${new Date().toISOString()} [app] refusing to start with --${debugSwitch}: Iris doesn't run with remote debugging`
+  console.error(line)
+  fs.appendFileSync(path.join(LOGS, 'main.log'), line + '\n')
+  process.exit(1)
   return
 }
 
