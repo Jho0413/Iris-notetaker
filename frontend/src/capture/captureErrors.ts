@@ -20,6 +20,11 @@ export function inDesktopApp(): boolean {
   return typeof location !== 'undefined' && location.protocol === 'app:'
 }
 
+const DESKTOP_SCREEN_REFUSED =
+  'Screen recording was cancelled or blocked. Choose a screen or window to record. If macOS ' +
+  'blocked it, allow Iris in System Settings → Privacy & Security → Screen & System Audio ' +
+  'Recording, then quit and reopen Iris.'
+
 export function describeCaptureError(
   err: unknown,
   device: CaptureDevice,
@@ -30,9 +35,7 @@ export function describeCaptureError(
     case 'PermissionDeniedError':
       if (desktopApp) {
         return device === 'screen'
-          ? 'Screen recording was cancelled or blocked. Choose a screen or window to record. If ' +
-              'macOS blocked it, allow Iris in System Settings → Privacy & Security → Screen & ' +
-              'System Audio Recording, then quit and reopen Iris.'
+          ? DESKTOP_SCREEN_REFUSED
           : 'Microphone access was blocked. Allow Iris in System Settings → Privacy & Security → ' +
               'Microphone, then try again.'
       }
@@ -50,6 +53,9 @@ export function describeCaptureError(
     case 'TrackStartError':
       return `The ${device} could not be started. Another app may be using it.`
     case 'AbortError':
+      // The desktop app's picker cancelled (or closed without the permission): Electron rejects
+      // every refused request as AbortError ("Invalid capture constraints"), never NotAllowedError.
+      if (desktopApp && device === 'screen') return DESKTOP_SCREEN_REFUSED
       return `Starting the ${device} was interrupted. Try again.`
     case 'CaptureError':
       return (err as Error).message
