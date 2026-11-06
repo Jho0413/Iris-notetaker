@@ -509,7 +509,8 @@ async function busySessions() {
   return sessions.filter((s) => s.status === 'recording' || s.status === 'processing')
 }
 
-/** If a session is recording or processing, ask before stopping the engine. */
+/** If a session is recording or processing, ask before stopping the engine. `detail`, if any,
+ * comes before the list of busy sessions. */
 async function confirmBusy(message, detail, button = 'Continue') {
   const busy = await busySessions()
   if (!busy.length) return true
@@ -519,7 +520,7 @@ async function confirmBusy(message, detail, button = 'Continue') {
     defaultId: 1,
     cancelId: 1,
     message,
-    detail: `${detail}\n\n${busyDetail(busy)}`,
+    detail: detail ? `${detail}\n\n${busyDetail(busy)}` : busyDetail(busy),
   })
   return response === 0
 }
@@ -704,7 +705,8 @@ if (!app.requestSingleInstanceLock()) {
     if (quitConfirmed) return
     event.preventDefault()
     if (quitAsk) return
-    quitAsk = confirmBusy('Quit Iris?', 'Quitting stops Iris’s engine.', 'Quit')
+    // The sessions alone: the engine is Iris's own business, not the user's.
+    quitAsk = confirmBusy('Quit Iris?', null, 'Quit')
       .then((ok) => {
         if (!ok) return
         quitConfirmed = true

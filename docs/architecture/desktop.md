@@ -192,7 +192,8 @@ stops a recording from any app, with the window closed too:
   display-media handler (and the system picker). Measured with Electron 45.
 - **Closing the window while recording hides it** instead (`hideOnClose`), since closing would end
   the recording; the menu bar or the Dock shows it again. A fullscreen window leaves fullscreen
-  first, so no empty Space is left behind. Quit still asks first ("Quit Iris?"),
+  first, so no empty Space is left behind. Sharing the Iris window itself is the exception: macOS
+  stops capturing a window once it is hidden, so the recording finishes, as for Stop sharing. Quit still asks first ("Quit Iris?"),
   then closes it for real. Reloading still asks "Stop recording?".
 - **The icons** (`assets/`) are the Iris mark (`pages/iris.svg`) at 18 pt, rasterized with resvg:
   black as a template image (macOS tints it for the menu bar) and red while recording.
