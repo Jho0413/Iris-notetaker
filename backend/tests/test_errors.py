@@ -795,19 +795,29 @@ def test_startup_fails_only_the_runs_left_processing(tmp_path):
             assert client.app.state.store.get(sid) == old
 
 
-async def test_a_running_session_is_never_marked_interrupted(tmp_path, monkeypatch):
+async def test_a_run_that_finishes_after_being_marked_interrupted_is_clean(tmp_path, monkeypatch):
+    """A CLI run on the same data while the server starts: marked, but it carries on and ends
+    done with no failure left on it."""
     runner, sid, _ctx = runner_session(tmp_path)
-    started = asyncio.Event()
+    started, release = asyncio.Event(), asyncio.Event()
 
-    async def hang(_ctx) -> None:
+    async def wait(_ctx) -> None:
         started.set()
-        await asyncio.sleep(3600)
+        await release.wait()
 
-    monkeypatch.setitem(STAGES, Stage.INGEST, hang)
+    async def nothing(_ctx) -> None:
+        pass
+
+    for stage in STAGES:
+        monkeypatch.setitem(STAGES, stage, wait if stage == Stage.INGEST else nothing)
     runner.start(sid)
     await started.wait()
-    runner.fail_interrupted()
-    assert runner.store.get(sid).status == SessionStatus.PROCESSING
-    assert runner.store.get(sid).failure_message is None
-    await runner.shutdown()
+    runner.fail_interrupted()  # as the server starting would
+    assert runner.store.get(sid).failure_message == INTERRUPTED_RUN
+    release.set()
+    await runner._tasks[sid]
+    session = runner.store.get(sid)
+    assert session.status == SessionStatus.DONE
+    assert (session.failure_message, session.failure_kind) == (None, None)
+    assert runner.store.failure_detail(sid) is None
     runner.store.close()

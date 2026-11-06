@@ -69,7 +69,9 @@ reaches shutdown at all. So when Iris starts, before any run can start, every se
 `processing` was cut off and is marked failed (`JobRunner.fail_interrupted`, logged with its id and
 stage) with its own message, `INTERRUPTED_RUN` in `models.py` (`failure_kind: general`), at the
 stage it had reached, so **Try again** resumes from there.
-`recording` sessions are left alone: the session page offers to finish them.
+`recording` sessions are left alone: the session page offers to finish them. Developers: a CLI run
+(`iris process`, `iris run`) on the same data is marked too if the server starts or reloads
+meanwhile. It carries on, and its mark is cleared if it finishes; don't press Try again on it.
 
 ## What the user sees
 

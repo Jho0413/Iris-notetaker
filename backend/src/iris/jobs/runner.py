@@ -58,12 +58,14 @@ class JobRunner:
         (a quit or restart mid-run, a crash, a forced quit, power loss). Checked here and not at
         shutdown, which a crash never reaches. The stage it stopped at is kept, and so are the
         finished stages' outputs, so **Try again** resumes from it. ``recording`` sessions are
-        left alone: the session page offers to finish them.
+        left alone: the session page offers to finish them. A CLI run (``iris process``) on the
+        same data while the engine starts is marked too, though it carries on; if it finishes,
+        ``run`` clears the mark.
         """
         for session in self.store.list():
-            if session.status != SessionStatus.PROCESSING or self.is_running(session.id):
+            if session.status != SessionStatus.PROCESSING:
                 continue
-            stage = session.current_stage
+            stage = session.current_stage or "the start"
             log.warning("session %s was interrupted at %s: marked failed", session.id, stage)
             self.store.fail(
                 session.id,
@@ -102,6 +104,8 @@ class JobRunner:
             log.exception("session %s failed", session_id)
             self._fail(session_id, exc)
             return
+        # Also forgets a failure recorded while this run went on (``fail_interrupted``).
+        self.store.clear_error(session_id)
         self._set_status(session_id, SessionStatus.DONE)
 
     def _fail(self, session_id: str, exc: BaseException) -> None:
