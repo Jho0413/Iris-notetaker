@@ -88,6 +88,10 @@ function hideOnClose(state) {
  * `quietStart`: a start from the menu bar is under way with the window left as it was (hidden, or
  * in another Space): only the picker shows, and the window only if the start fails.
  */
+/** How long a page sent "start" has to report it is starting. It does within a render; one that
+ * doesn't is held up by something it shows (e.g. "Leave without saving?" on another page). */
+const START_ANSWER_MS = 3000
+
 const RELAY_START = Object.freeze({ recording: IDLE, listening: false, startPending: false, quietStart: false })
 
 /**
@@ -101,6 +105,8 @@ const RELAY_START = Object.freeze({ recording: IDLE, listening: false, startPend
  *   pageGone      the page was replaced (a reload, the UI after the starting screen) or crashed
  *   windowClosed  the main window is gone
  *   pickerCancelled  the picker was cancelled: the user's choice, so a failed start shows nothing
+ *   startUnanswered  START_ANSWER_MS after a quiet start was sent: a page still idle is held up
+ *                 by something it asks, in a window the user may not see
  *   engineFailed  the engine didn't start: a start waiting for the UI is dropped, so a later
  *                 Restart doesn't start recording without being asked again
  */
@@ -129,6 +135,9 @@ function relay(state, event) {
     }
     case 'pickerCancelled':
       return { state: { ...state, quietStart: false } }
+    case 'startUnanswered':
+      if (!state.quietStart || state.recording.phase !== 'idle') return { state }
+      return { state: { ...state, quietStart: false }, show: true }
     case 'pageGone':
       return { state: { ...state, recording: IDLE, listening: false, quietStart: false } }
     case 'windowClosed':
@@ -143,4 +152,4 @@ function relay(state, event) {
   }
 }
 
-module.exports = { IDLE, RELAY_START, parseReport, trayView, clock, hideOnClose, relay }
+module.exports = { IDLE, RELAY_START, START_ANSWER_MS, parseReport, trayView, clock, hideOnClose, relay }

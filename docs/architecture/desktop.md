@@ -172,8 +172,9 @@ These keep the key from other processes that only run as the user. They don't st
 
 The UI's own `getDisplayMedia` call is answered by Iris's own picker (`pages/picker.html`), opened
 by the main process from its display-media handler, so the Live page's capture code is the same as
-in the browser. With the window closed (a start from the menu bar) it is a window of its own,
-brought to the front even when another app is active. One opens at a time: Chromium holds a
+in the browser. It is always a window of its own, opened in the current Space and brought to the
+front even when another app is active (a start from the menu bar), with the keyboard once macOS
+has made Iris active, so Return records. One opens at a time: Chromium holds a
 second request from the same page until the first is answered, and any other request while it is
 open focuses it and is refused.
 
@@ -226,8 +227,10 @@ stops a recording from any app, with the window closed too:
   the current Space, so it would offer that Space's windows instead of the ones the user is
   looking at. The window shows only if that start fails for another reason than a cancel in the
   picker (the Live page says why; the display-media handler reports a cancel as
-  `pickerCancelled` before the page hears of it), or if the engine fails while the start waits,
-  for the engine's dialog.
+  `pickerCancelled` before the page hears of it), if the page hasn't started within 3 s of being
+  asked (it reports starting within a render, unless held up by a question it asks, such as
+  "Leave without saving?" on the notes editor or Settings), or if the engine fails while the
+  start waits, for the engine's dialog.
 - **The page reports its phase** (`iris-app:recording`, `{phase, startedAt}`), checked once by
   `parseReport`; a reload, a closed window or a crashed renderer resets the icon to idle. A stop
   that fails (the Live page's "Recording stopped", with Try again) shows the window, which may

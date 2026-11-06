@@ -234,3 +234,16 @@ test('a page that goes away or a closed window ends a quiet start', () => {
     assert.equal(state.quietStart, false, type)
   }
 })
+
+test('a quiet start the page never answers shows the window: it is held up by a question it asks', () => {
+  const UNANSWERED = { type: 'startUnanswered' }
+  // "Leave without saving?" on the notes editor blocks the move to the Live page: still idle.
+  assert.deepEqual(run([LISTENING, RECORD, UNANSWERED]).effects, ['start', 'show'])
+  // Answered in time: starting (the picker may still be open), recording, failed or cancelled.
+  assert.deepEqual(run([LISTENING, RECORD, report('requesting'), UNANSWERED]).effects, ['start'])
+  assert.deepEqual(run([LISTENING, RECORD, report('requesting'), report('recording'), UNANSWERED]).effects, ['start'])
+  assert.deepEqual(run([LISTENING, RECORD, report('requesting'), report('idle', 0), UNANSWERED]).effects, ['start', 'show'])
+  assert.deepEqual(run([LISTENING, RECORD, report('requesting'), CANCELLED, report('idle', 0), UNANSWERED]).effects, ['start'])
+  // A start from the Live page's own button is never quiet.
+  assert.deepEqual(run([LISTENING, report('requesting'), report('idle', 0), UNANSWERED]).effects, [])
+})

@@ -499,9 +499,11 @@ ipcMain.handle('iris-picker:open-settings', (event) => {
 // ---- menu bar --------------------------------------------------------------------------------
 
 // The menu bar icon starts and stops a recording, but recording happens in the Live page (its
-// capture code runs in the window), so the icon only relays: "Record Screen…" opens the window
-// and asks the page to start; Stop asks the page to stop, which makes notes as its own Stop does.
+// capture code runs in the window), so the icon only relays: "Record Screen…" asks the page to
+// start (making the window, hidden, if it was closed), and only the picker shows; Stop asks the
+// page to stop, which makes notes as its own Stop does.
 let tray = null
+let startAnswerTimer = null
 let trayTicker = null
 const TRAY_ICONS = {}
 
@@ -561,6 +563,11 @@ function menuBarEvent(event) {
   if (send && mainWindow) {
     log(`[tray] ${send} recording`)
     mainWindow.webContents.send('iris-app:record', send)
+    // A page that doesn't start (held up by a question it asks) gets its window shown.
+    if (send === 'start') {
+      clearTimeout(startAnswerTimer)
+      startAnswerTimer = setTimeout(() => menuBarEvent({ type: 'startUnanswered' }), trayRules.START_ANSWER_MS)
+    }
   }
   if (menuBar.recording !== before) showTray()
 }
