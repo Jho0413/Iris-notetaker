@@ -195,8 +195,10 @@ stops a recording from any app, with the window closed too:
 - **Closing the window while recording hides it** instead (`hideOnClose`), since closing would end
   the recording; the menu bar or the Dock shows it again. A fullscreen window leaves fullscreen
   first, so no empty Space is left behind. Sharing the Iris window itself is the exception: macOS
-  stops capturing a window once it is hidden, so the recording finishes, as for Stop sharing. Quit still asks first ("Quit Iris?"),
-  then closes it for real. Reloading still asks "Stop recording?".
+  stops capturing a window once it is hidden, so the recording finishes, as for Stop sharing.
+  Quit still asks first ("Quit Iris?"), then closes it for real. Reloading still asks "Stop
+  recording?". Leaving the Live page while a failed stop's upload is still retrying keeps it
+  "stopping" until the retry settles, so quitting still asks then.
 - **The icons** (`assets/`) are the Iris mark (`pages/iris.svg`) at 18 pt, rasterized with resvg:
   black as a template image (macOS tints it for the menu bar) and red while recording.
 

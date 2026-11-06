@@ -16,13 +16,14 @@ const IDLE = Object.freeze({ phase: 'idle', startedAt: 0 })
 
 /**
  * A report from the page ({phase, startedAt}), checked once here: the tray's state, or null for
- * anything malformed. `startedAt` (ms since the epoch) matters only while recording.
+ * anything malformed. `startedAt` (ms since the epoch) matters only while recording: a page that
+ * goes away still uploading reports "stopping" without one.
  */
 function parseReport(report) {
   const name = report?.phase
   if (typeof name !== 'string' || !Object.hasOwn(TRAY_PHASE, name)) return null
   const phase = TRAY_PHASE[name]
-  if (phase !== 'recording' && phase !== 'stopping') return { phase, startedAt: 0 }
+  if (phase !== 'recording') return { phase, startedAt: 0 }
   const startedAt = report.startedAt
   if (typeof startedAt !== 'number' || !Number.isFinite(startedAt) || startedAt <= 0) return null
   return { phase, startedAt }

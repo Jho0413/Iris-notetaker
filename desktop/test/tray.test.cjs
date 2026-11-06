@@ -10,8 +10,10 @@ test('the Live page’s phases map onto the tray’s', () => {
   assert.deepEqual(parseReport({ phase: 'idle' }), { phase: 'idle', startedAt: 0 })
   assert.deepEqual(parseReport({ phase: 'requesting' }), { phase: 'starting', startedAt: 0 })
   assert.deepEqual(parseReport({ phase: 'recording', startedAt: T0 }), { phase: 'recording', startedAt: T0 })
-  assert.deepEqual(parseReport({ phase: 'stopping', startedAt: T0 }), { phase: 'stopping', startedAt: T0 })
-  assert.deepEqual(parseReport({ phase: 'finishing', startedAt: T0 }), { phase: 'stopping', startedAt: T0 })
+  assert.deepEqual(parseReport({ phase: 'stopping', startedAt: T0 }), { phase: 'stopping', startedAt: 0 })
+  assert.deepEqual(parseReport({ phase: 'finishing', startedAt: T0 }), { phase: 'stopping', startedAt: 0 })
+  // The Live page left while still uploading: no start time, still finishing.
+  assert.deepEqual(parseReport({ phase: 'stopping', startedAt: 0 }), { phase: 'stopping', startedAt: 0 })
   assert.deepEqual(parseReport({ phase: 'unfinished', startedAt: T0 }), { phase: 'unfinished', startedAt: 0 })
 })
 
@@ -180,4 +182,12 @@ test('a full recording from the menu bar, window closed meanwhile', () => {
   ])
   assert.deepEqual(effects, ['start', 'stop'])
   assert.deepEqual(state.recording, IDLE)
+})
+
+test('a Live page left while its upload is still retrying keeps Iris busy until it settles', () => {
+  // Stop failed, the user went to the library: the page reports stopping, then idle once done.
+  const left = run([LISTENING, report('recording'), report('stopping'), report('unfinished'), report('stopping', 0)])
+  assert.equal(left.state.recording.phase, 'stopping')
+  assert.equal(hideOnClose(left.state.recording), true, 'closing the window would lose the queued chunks')
+  assert.equal(run([report('idle', 0)], left.state).state.recording.phase, 'idle')
 })

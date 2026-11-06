@@ -79,11 +79,19 @@ export function LivePage() {
 
   // If the page goes away mid-recording anyway, end the session so it gets processed. During a
   // start, stopping cancels it: everything granted is released and the empty session discarded.
+  // Until that stop settles the app's menu bar says the upload is finishing, so quitting still asks
+  // (chunks not yet uploaded are only in this page's memory).
   useEffect(() => {
     unmounted.current = false
     return () => {
       unmounted.current = true
-      void capture.current?.stop().catch(() => {})
+      const live = capture.current
+      if (!live) return irisApp()?.recordingChanged('idle', 0)
+      irisApp()?.recordingChanged('stopping', 0)
+      void live
+        .stop()
+        .catch(() => {})
+        .finally(() => irisApp()?.recordingChanged('idle', 0))
     }
   }, [])
 
@@ -195,7 +203,6 @@ export function LivePage() {
   useEffect(() => {
     irisApp()?.recordingChanged(phase, startedAt)
   }, [phase, startedAt])
-  useEffect(() => () => irisApp()?.recordingChanged('idle', 0), [])
   useEffect(
     () =>
       irisApp()?.onRecordCommand((command) => {
