@@ -185,7 +185,8 @@ open focuses it and is refused.
   `getMediaSourceId()`): recording Iris is never wanted, and a window stops being captured once it
   is hidden, as Iris's is while recording. Untitled windows and windows with no image are left out.
 - **Choosing:** click selects, the arrow keys move the selection, Return or a double-click
-  records it, Esc, Cancel or closing the window cancels. The chosen source goes to the page with
+  records it, Esc, Cancel or closing the window cancels, and so does the page that asked closing,
+  reloading or crashing (its request is gone). The chosen source goes to the page with
   all of the Mac's sound as `loopback`; a cancel refuses the request, which the Live page treats as
   a cancelled start (the empty session is discarded). Electron rejects every refused request as
   `AbortError` ("Invalid capture constraints"), never `NotAllowedError`, so in the app
@@ -195,8 +196,9 @@ open focuses it and is refused.
   quit and reopen Iris, as macOS asks), with Open System Settings, and nothing is recorded. Measured
   with Electron 45 on macOS 26: an app that has never asked reports `denied`, the same as one
   turned off (`getMediaAccessStatus('screen')` can't tell them apart), and `getSources` then
-  rejects ("Failed to get sources"), so both are handled the same way. A `getSources` failure with
-  the permission granted shows the same explanation, and the error goes to `main.log`.
+  rejects ("Failed to get sources"), so the picker shows the explanation whenever it rejects (the
+  error and the status go to `main.log`). It is called even without the permission: with the
+  system picker gone it is Iris's only request for it, which is what lists Iris in that pane.
 
 Shared audio is requested with echo cancellation, noise suppression and gain
 control off, since it is a recording of what plays, not a voice in a room; the microphone keeps

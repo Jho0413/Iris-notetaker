@@ -374,7 +374,8 @@ ipcMain.handle('iris-app:save-pdf', async (event, title) => {
 // The Live page's getDisplayMedia call is answered by Iris's own picker (pages/picker.html), not
 // the macOS one: it puts the entire screen first and never offers Iris's own windows (a hidden
 // window stops being captured). What it lists is src/picker.cjs; this opens it and hands back
-// the choice. Thumbnails are about twice the largest card's size, for Retina displays.
+// the choice. Thumbnails: a window card at Retina's 2x, about 1.5x for a lone screen card; larger
+// ones make each opening slower and the JPEGs sent to the page heavier.
 const THUMBNAIL_SIZE = { width: 640, height: 400 }
 
 /** The picker's list, a snapshot: sources from desktopCapturer, thumbnails as data: URLs. */
@@ -421,20 +422,15 @@ async function pickSource() {
   const state = { win: null, list: null, sources: null, page: null, resolve: null }
   picker = state
   const chosen = new Promise((resolve) => (state.resolve = resolve))
-  // Without the Screen Recording permission macOS lists nothing: the picker says how to allow it.
-  // A Mac that never asked reports "denied" too (CGPreflightScreenCaptureAccess), and
-  // getSources then rejects.
-  const status = systemPreferences.getMediaAccessStatus('screen')
-  if (status === 'granted') {
-    try {
-      Object.assign(state, await pickerSnapshot())
-    } catch (err) {
-      log(`[capture] couldn't list screens and windows: ${err} (screen permission: ${status})`)
-    }
-  } else {
-    log(`[capture] no Screen Recording permission (${status}): the picker says how to allow it`)
+  // Without the Screen Recording permission getSources rejects, and the picker says how to allow
+  // it. Asked even then: it is Iris's only request for the permission, which is what lists Iris
+  // in System Settings. A Mac that never asked reports "denied" as well (measured, macOS 26).
+  try {
+    Object.assign(state, await pickerSnapshot())
+  } catch (err) {
+    log(`[capture] couldn't list screens and windows: ${err} (screen permission: ${systemPreferences.getMediaAccessStatus('screen')})`)
+    state.page = { granted: false }
   }
-  state.page ??= { granted: false }
   if (picker !== state) return chosen // cancelled while listing (closePicker)
 
   const win = new BrowserWindow({
@@ -728,9 +724,13 @@ function secureSession(ses) {
       picker.win?.focus()
       return answer(null)
     }
-    // The page that asked going away (its window closed) closes the picker: no one to answer.
+    // The page that asked going away (its window closed, a reload, a crash) closes the picker:
+    // its request is gone, so a choice would record nothing.
     const requester = request.frame ? webContents.fromFrame(request.frame) : null
+    const onNavigation = ({ isMainFrame, isSameDocument }) => isMainFrame && !isSameDocument && closePicker()
     requester?.once('destroyed', closePicker)
+    requester?.once('render-process-gone', closePicker)
+    requester?.on('did-start-navigation', onNavigation)
     let source = null
     try {
       source = await pickSource()
@@ -739,6 +739,8 @@ function secureSession(ses) {
       closePicker()
     } finally {
       requester?.removeListener('destroyed', closePicker)
+      requester?.removeListener('render-process-gone', closePicker)
+      requester?.removeListener('did-start-navigation', onNavigation)
     }
     if (!source) {
       log('[capture] nothing chosen to record')
