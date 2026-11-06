@@ -2,7 +2,13 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { CaptureError } from '../src/capture/captureErrors.ts'
-import { LiveCapture, SHARED_AUDIO, sendBeaconOrKeepalive } from '../src/capture/liveCapture.ts'
+import {
+  LiveCapture,
+  SHARED_AUDIO,
+  type StartWorker,
+  sendBeaconOrKeepalive,
+  startTicker,
+} from '../src/capture/liveCapture.ts'
 
 class FakeTrack extends EventTarget {
   kind: string
@@ -589,4 +595,103 @@ test('sendBeaconOrKeepalive: a beacon where allowed, else a keepalive POST', asy
   }
   assert.equal(sendBeaconOrKeepalive('/x', body, refuse, failing), true)
   await new Promise((r) => setTimeout(r, 0))
+})
+
+// --- The frame ticker (startTicker) ---------------------------------------------------------
+
+/** A worker the test drives: `message()` is one tick from it, `error()` its error event. */
+function fakeWorker(options: { throws?: boolean; errorsWhileStarting?: boolean } = {}) {
+  const worker = { intervalMs: 0, terminated: 0, message: () => {}, error: (_e: Event) => {} }
+  const start: StartWorker = (intervalMs, onMessage, onError) => {
+    if (options.throws) throw new Error('Worker is not defined')
+    worker.intervalMs = intervalMs
+    worker.message = onMessage
+    worker.error = onError
+    if (options.errorsWhileStarting) onError(new Event('error'))
+    return () => void worker.terminated++
+  }
+  return { worker, start }
+}
+
+function tickerTest(t: import('node:test').TestContext) {
+  t.mock.timers.enable({ apis: ['setInterval'] })
+  const warn = t.mock.method(console, 'warn', () => {})
+  const ticks = { count: 0 }
+  return { ticks, tick: () => void ticks.count++, warn }
+}
+
+test('the ticker ticks on the worker, with no page timer', (t) => {
+  const { ticks, tick, warn } = tickerTest(t)
+  const { worker, start } = fakeWorker()
+  const stop = startTicker(1000, tick, start)
+  assert.equal(worker.intervalMs, 1000)
+  worker.message()
+  worker.message()
+  t.mock.timers.tick(5000)
+  assert.equal(ticks.count, 2)
+  stop()
+  assert.equal(worker.terminated, 1)
+  worker.message()
+  assert.equal(ticks.count, 2)
+  assert.equal(warn.mock.callCount(), 0)
+})
+
+test('a worker that cannot be created falls back to a page timer', (t) => {
+  const { ticks, tick, warn } = tickerTest(t)
+  const stop = startTicker(1000, tick, fakeWorker({ throws: true }).start)
+  t.mock.timers.tick(3000)
+  assert.equal(ticks.count, 3)
+  assert.equal(warn.mock.callCount(), 1)
+  stop()
+  t.mock.timers.tick(3000)
+  assert.equal(ticks.count, 3)
+})
+
+test('a worker that errors after it was created (a CSP block) falls back to a page timer, once', (t) => {
+  const { ticks, tick, warn } = tickerTest(t)
+  const { worker, start } = fakeWorker()
+  const stop = startTicker(1000, tick, start)
+  worker.error(new Event('error'))
+  assert.equal(worker.terminated, 1)
+  t.mock.timers.tick(2000)
+  assert.equal(ticks.count, 2)
+  // The failed worker can't add ticks, and a second error doesn't start a second timer.
+  worker.message()
+  worker.error(new Event('error'))
+  t.mock.timers.tick(1000)
+  assert.equal(ticks.count, 3)
+  assert.equal(warn.mock.callCount(), 1)
+  stop()
+  t.mock.timers.tick(3000)
+  assert.equal(ticks.count, 3)
+})
+
+test('a worker that errors before it is returned is terminated and replaced', (t) => {
+  const { ticks, tick } = tickerTest(t)
+  const { worker, start } = fakeWorker({ errorsWhileStarting: true })
+  const stop = startTicker(1000, tick, start)
+  assert.equal(worker.terminated, 1)
+  t.mock.timers.tick(2000)
+  assert.equal(ticks.count, 2)
+  stop()
+})
+
+test('a worker error after stop starts no timer', (t) => {
+  const { ticks, tick, warn } = tickerTest(t)
+  const { worker, start } = fakeWorker()
+  const stop = startTicker(1000, tick, start)
+  stop()
+  worker.error(new Event('error'))
+  t.mock.timers.tick(5000)
+  assert.equal(ticks.count, 0)
+  assert.equal(warn.mock.callCount(), 0)
+})
+
+test('the real worker, where there is no Worker (as in Node), falls back to a page timer', (t) => {
+  const { ticks, tick, warn } = tickerTest(t)
+  const stop = startTicker(1000, tick)
+  t.mock.timers.tick(2000)
+  assert.equal(ticks.count, 2)
+  assert.equal(warn.mock.callCount(), 1)
+  stop()
 })
