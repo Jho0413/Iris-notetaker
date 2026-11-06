@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import { useBlocker, useNavigate } from 'react-router-dom'
+import { useBlocker, useLocation, useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import { CaptureError } from '../capture/captureErrors'
 import { EndSessionError } from '../capture/endSession'
 import { LiveCapture } from '../capture/liveCapture'
+import { menuBar, type LiveLocationState } from '../capture/menuBar'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { Icon } from '../components/Icon'
 import { UNREACHABLE } from '../session/messages'
@@ -11,6 +12,7 @@ import { act } from '../session/request'
 import { formatClock, liveProgress } from '../session/state'
 import { useSessionStream } from '../session/useSessionStream'
 import { useTitle } from '../session/useTitle'
+import { irisApp } from '../settings/appBridge'
 
 /**
  * `unfinished`: capture has stopped, but telling the backend to make notes failed;
@@ -42,6 +44,7 @@ function finishError(err: unknown): string {
 
 export function LivePage() {
   const navigate = useNavigate()
+  const location = useLocation()
   const [title, setTitle] = useState('')
   const [phase, setPhase] = useState<Phase>('idle')
   const [sessionId, setSessionId] = useState<string | null>(null)
@@ -76,11 +79,13 @@ export function LivePage() {
 
   // If the page goes away mid-recording anyway, end the session so it gets processed. During a
   // start, stopping cancels it: everything granted is released and the empty session discarded.
+  // Until that stop settles the app's menu bar says the upload is finishing, so quitting still asks
+  // (capture/menuBar.ts: chunks not yet uploaded are only in this window's memory).
   useEffect(() => {
     unmounted.current = false
     return () => {
       unmounted.current = true
-      void capture.current?.stop().catch(() => {})
+      menuBar.left(capture.current?.stop())
     }
   }, [])
 
@@ -177,9 +182,37 @@ export function LivePage() {
     if (id) navigate(`/sessions/${id}`)
   }
   const stopRef = useRef(stopAndOpen)
+  /** Start, unless a recording is already under way (or stopped and not yet finished). */
+  function startIfIdle() {
+    if (phase === 'idle') void start()
+  }
+  const startRef = useRef(startIfIdle)
   useEffect(() => {
     stopRef.current = stopAndOpen
+    startRef.current = startIfIdle
   })
+
+  // The desktop app's menu bar icon (capture/menuBar.ts). It shows what this page is doing, and
+  // its Record and Stop go through the same start() and stop as the buttons here.
+  useEffect(() => {
+    menuBar.phase(phase, startedAt)
+  }, [phase, startedAt])
+  useEffect(
+    () =>
+      irisApp()?.onRecordCommand((command) => {
+        if (command === 'stop') void stopRef.current()
+      }),
+    [],
+  )
+  const startRequest = (location.state as LiveLocationState | null)?.startRequest
+  const handledStart = useRef<number | undefined>(undefined)
+  useEffect(() => {
+    // Once per request: StrictMode runs effects twice, and a reload keeps the location state.
+    if (!startRequest || handledStart.current === startRequest) return
+    handledStart.current = startRequest
+    navigate('.', { replace: true, state: null })
+    startRef.current()
+  }, [startRequest, navigate])
 
   if (phase === 'unfinished' || phase === 'finishing') {
     return (

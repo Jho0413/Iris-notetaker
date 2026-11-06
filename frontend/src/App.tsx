@@ -1,4 +1,5 @@
 import { createBrowserRouter, Link, NavLink, Outlet, RouterProvider } from 'react-router-dom'
+import { useRecordFromMenuBar } from './capture/menuBar'
 import { Icon, Mark, type IconName } from './components/Icon'
 import { useTheme, type ThemeChoice } from './components/theme'
 import { LibraryPage } from './pages/LibraryPage'
@@ -34,6 +35,7 @@ function ThemeSwitch() {
 }
 
 function Layout() {
+  useRecordFromMenuBar()
   return (
     <>
       <a className="skip-link" href="#main">

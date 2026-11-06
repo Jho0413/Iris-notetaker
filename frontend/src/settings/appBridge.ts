@@ -9,7 +9,15 @@ export interface IrisApp {
   /** Saves the page, as printed, as a PDF named after `title`, where the user chooses; resolves
    * once saved, or cancelled. */
   savePdf(title: string): Promise<{ done: boolean }>
+  /** Tells the app the Live page's phase, and when recording started (ms since the epoch), for
+   * the menu bar icon. */
+  recordingChanged(phase: string, startedAt: number): void
+  /** Calls `listener` when "Record Screen…" or Stop is chosen in the menu bar; returns the
+   * unsubscribe. */
+  onRecordCommand(listener: (command: RecordCommand) => void): () => void
 }
+
+export type RecordCommand = 'start' | 'stop'
 
 declare global {
   interface Window {

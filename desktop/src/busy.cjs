@@ -33,4 +33,15 @@ function busyKeyRefusal(busy, action) {
   }
 }
 
-module.exports = { busyDetail, busyKeyRefusal }
+/**
+ * The sessions that quitting, or restarting the engine, would cut short: from /api/sessions, those
+ * making notes, and those recording only while `capturing` (the Live page has a capture going, or
+ * holds what it captured, still to upload). A session left "recording" by an earlier quit or crash
+ * isn't busy: nothing is capturing it, and its session page offers Finish.
+ */
+function busyNow(sessions, { capturing }) {
+  if (!Array.isArray(sessions)) return []
+  return sessions.filter((s) => s?.status === 'processing' || (capturing && s?.status === 'recording'))
+}
+
+module.exports = { busyDetail, busyKeyRefusal, busyNow }
