@@ -22,6 +22,16 @@ test('the policy allows only the app and the hashed inline scripts', () => {
   assert.match(csp, /frame-ancestors 'none'/)
 })
 
+test("workers load only from the app's own files, as the live frame timer does (#39)", () => {
+  const directives = contentSecurityPolicy('<script>theme()</script>').split('; ')
+  // Workers follow the first of worker-src, child-src and script-src that is set.
+  const workers = ['worker-src', 'child-src', 'script-src']
+    .map((name) => directives.find((d) => d.startsWith(`${name} `)))
+    .find(Boolean)
+  assert.match(workers, /'self'/)
+  assert.doesNotMatch(workers, /blob:|data:/)
+})
+
 test("the frontend's index.html theme script is covered", () => {
   const index = path.join(__dirname, '..', '..', 'frontend', 'index.html')
   const html = fs.readFileSync(index, 'utf8')

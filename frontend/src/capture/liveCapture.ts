@@ -476,22 +476,59 @@ function encodeFrame(
   return new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', JPEG_QUALITY))
 }
 
+/** Start the timer worker ticking every `intervalMs`; returns a function that terminates it. May throw. */
+export type StartWorker = (intervalMs: number, onMessage: () => void, onError: (event: Event) => void) => () => void
+
 /**
- * Calls `tick` every `intervalMs`. The timer runs in a worker: the user is usually looking at
- * what they share, so this tab is in the background, where page timers are heavily throttled.
+ * Calls `tick` every `intervalMs`; returns a function that stops. The timer runs in a worker: the
+ * user is usually looking at what they share, so this tab is in the background, where page timers
+ * are heavily throttled. A worker that can't run falls back to a page timer, throttled but still
+ * ticking. Such a worker can throw at once (no Worker support) or report an error event later: a
+ * Content-Security-Policy block arrives that way (the desktop app blocked a blob: worker, #39),
+ * so both fall back.
  */
-function startTicker(intervalMs: number, tick: () => void): () => void {
-  try {
-    const source = `setInterval(() => postMessage(0), ${intervalMs})`
-    const url = URL.createObjectURL(new Blob([source], { type: 'text/javascript' }))
-    const worker = new Worker(url)
-    worker.onmessage = () => tick()
-    return () => {
-      worker.terminate()
-      URL.revokeObjectURL(url)
-    }
-  } catch {
-    const id = window.setInterval(tick, intervalMs)
-    return () => window.clearInterval(id)
+export function startTicker(intervalMs: number, tick: () => void, startWorker: StartWorker = startTimerWorker): () => void {
+  let stopped = false
+  let pageTimer: ReturnType<typeof setInterval> | undefined
+  let terminateWorker: (() => void) | undefined
+  const usingWorker = () => !stopped && pageTimer === undefined
+
+  const fallBack = (why: string, cause: unknown) => {
+    if (!usingWorker()) return
+    console.warn(`The frame timer ${why}; using a page timer instead`, cause)
+    terminateWorker?.()
+    pageTimer = setInterval(tick, intervalMs)
   }
+
+  try {
+    terminateWorker = startWorker(
+      intervalMs,
+      () => {
+        if (usingWorker()) tick()
+      },
+      (event) => fallBack('worker failed', event),
+    )
+    if (pageTimer !== undefined) terminateWorker() // it failed before startWorker returned
+  } catch (err) {
+    fallBack('worker could not start', err)
+  }
+
+  return () => {
+    stopped = true
+    terminateWorker?.()
+    clearInterval(pageTimer)
+  }
+}
+
+/**
+ * The worker is a file of its own, which Vite builds into the app's assets, so it loads from the
+ * app's own origin and no Content-Security-Policy exception is needed (Vite needs `new URL(...)`
+ * written inside `new Worker(...)` to find it).
+ */
+const startTimerWorker: StartWorker = (intervalMs, onMessage, onError) => {
+  const worker = new Worker(new URL('./frameTicker.worker.ts', import.meta.url), { type: 'module' })
+  worker.onmessage = () => onMessage()
+  worker.onerror = onError
+  worker.postMessage(intervalMs)
+  return () => worker.terminate()
 }
