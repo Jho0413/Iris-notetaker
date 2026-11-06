@@ -4,7 +4,7 @@ import { api } from '../api/client'
 import { CaptureError } from '../capture/captureErrors'
 import { EndSessionError } from '../capture/endSession'
 import { LiveCapture } from '../capture/liveCapture'
-import type { LiveLocationState } from '../capture/menuBar'
+import { menuBar, type LiveLocationState } from '../capture/menuBar'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { Icon } from '../components/Icon'
 import { UNREACHABLE } from '../session/messages'
@@ -80,18 +80,12 @@ export function LivePage() {
   // If the page goes away mid-recording anyway, end the session so it gets processed. During a
   // start, stopping cancels it: everything granted is released and the empty session discarded.
   // Until that stop settles the app's menu bar says the upload is finishing, so quitting still asks
-  // (chunks not yet uploaded are only in this page's memory).
+  // (capture/menuBar.ts: chunks not yet uploaded are only in this window's memory).
   useEffect(() => {
     unmounted.current = false
     return () => {
       unmounted.current = true
-      const live = capture.current
-      if (!live) return irisApp()?.recordingChanged('idle', 0)
-      irisApp()?.recordingChanged('stopping', 0)
-      void live
-        .stop()
-        .catch(() => {})
-        .finally(() => irisApp()?.recordingChanged('idle', 0))
+      menuBar.left(capture.current?.stop())
     }
   }, [])
 
@@ -201,7 +195,7 @@ export function LivePage() {
   // The desktop app's menu bar icon (capture/menuBar.ts). It shows what this page is doing, and
   // its Record and Stop go through the same start() and stop as the buttons here.
   useEffect(() => {
-    irisApp()?.recordingChanged(phase, startedAt)
+    menuBar.phase(phase, startedAt)
   }, [phase, startedAt])
   useEffect(
     () =>
