@@ -119,7 +119,8 @@ whole request body ahead of the socket. Server-sent events stream event by event
   request to OpenAI (listing the models, `src/keycheck.cjs`): rejected (401/403), unreachable, or
   OpenAI unable to check, each says so in the window and nothing is saved.
 - **The main window's bridge** (`pages/preload-main.cjs`) gives the Iris UI three actions, plus
-  the menu bar's recording state and commands (see "Menu bar"), and nothing to read: `changeKey()` opens the key window, then restarts the engine with the new key,
+  the menu bar's recording state and commands (see "Menu bar"), and nothing to read:
+  `changeKey()` opens the key window, then restarts the engine with the new key,
   `removeKey()` asks once, deletes the key and restarts the engine without it (both refuse, with
   OK only, while a session is recording or making notes: the restart would cut it short;
   `src/busy.cjs` words it), and `savePdf(title)` asks where to save, then prints the page (its print
@@ -177,16 +178,21 @@ stops a recording from any app, with the window closed too:
   upload, or stopped with notes not started ("Recording stopped", the Live page's Try again),
   it offers only Show Iris and Quit.
 - **Recording still happens in the Live page**, whose capture code runs in the window. The main
-  process only relays: Record Screen… shows the window (making it if it was closed) and, once the
-  UI has loaded and subscribed (`iris-app:record-listening`), sends it `start`; the UI opens
-  `/live`, which starts as if its button was pressed. Stop sends `stop`, which runs the Live page's
-  own Stop, so the notes are made as usual. A stop is never queued for a page that loads later.
+  process only relays (`relay` in `src/tray.cjs`, a pure reducer): Record Screen… shows the window
+  (making it if it was closed) and, once the UI has loaded and subscribed
+  (`iris-app:record-listening`), sends it `start`; the UI opens `/live`, which starts as if its
+  button was pressed. Stop sends `stop`, which runs the Live page's own Stop, so the notes are made
+  as usual. A stop is never queued for a page that loads later; a start waiting for the UI is
+  dropped if the window closes or the engine fails to start first.
 - **The page reports its phase** (`iris-app:recording`, `{phase, startedAt}`), checked once by
-  `parseReport`; a reload, a closed window or a crashed renderer resets the icon to idle.
+  `parseReport`; a reload, a closed window or a crashed renderer resets the icon to idle. A stop
+  that fails (the Live page's "Recording stopped", with Try again) shows the window, which may
+  have been hidden.
 - **`getDisplayMedia` needs no user gesture here:** Electron passes a request without one to its
   display-media handler (and the system picker). Measured with Electron 45.
 - **Closing the window while recording hides it** instead (`hideOnClose`), since closing would end
-  the recording; the menu bar or the Dock shows it again. Quit still asks first ("Quit Iris?"),
+  the recording; the menu bar or the Dock shows it again. A fullscreen window leaves fullscreen
+  first, so no empty Space is left behind. Quit still asks first ("Quit Iris?"),
   then closes it for real. Reloading still asks "Stop recording?".
 - **The icons** (`assets/`) are the Iris mark (`pages/iris.svg`) at 18 pt, rasterized with resvg:
   black as a template image (macOS tints it for the menu bar) and red while recording.

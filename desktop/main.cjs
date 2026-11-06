@@ -117,9 +117,7 @@ let keyWindow = null
 let keyPrompt = null // {resolve} while the key screen is open
 let quitConfirmed = false
 let quitting = false
-let recording = trayRules.IDLE // what the Live page last reported (src/tray.cjs)
-let pageListening = false // the main window's UI is subscribed to record commands
-let startPending = false // "Record Screen…" waiting for that UI to load
+let menuBar = trayRules.RELAY_START // the menu bar's relay to the Live page (src/tray.cjs)
 
 // ---- windows ---------------------------------------------------------------------------------
 
@@ -159,21 +157,22 @@ function showMainWindow() {
   // While recording, closing the window would end it: hide the window instead. The menu bar
   // shows the recording, stops it and shows the window again. Quitting closes it for real.
   win.on('close', (event) => {
-    if (quitConfirmed || !trayRules.hideOnClose(recording)) return
+    if (quitConfirmed || !trayRules.hideOnClose(menuBar.recording)) return
     event.preventDefault()
-    win.hide()
+    // Hiding a fullscreen window would leave its empty Space on screen: leave fullscreen first.
+    if (!win.isFullScreen()) return win.hide()
+    win.once('leave-full-screen', () => win.hide())
+    win.setFullScreen(false)
   })
   win.on('closed', () => {
-    if (mainWindow === win) {
-      mainWindow = null
-      startPending = false // closed before the UI loaded: the start is cancelled
-      pageGone()
-    }
+    if (mainWindow !== win) return
+    mainWindow = null
+    menuBarEvent({ type: 'windowClosed' }) // closed before the UI loaded: a start is cancelled
   })
   // A reload or a new page (the starting screen, then the UI): what the old page reported, and
   // its subscription, went with it. Client-side routes are same-document and keep both.
   win.webContents.on('did-start-navigation', ({ isMainFrame, isSameDocument }) => {
-    if (isMainFrame && !isSameDocument) pageGone()
+    if (isMainFrame && !isSameDocument && mainWindow === win) menuBarEvent({ type: 'pageGone' })
   })
   // A page refusing to unload (beforeunload): the live page while it records, Settings with an
   // unsaved change. Electron would cancel the close or reload silently, so ask here
@@ -189,7 +188,7 @@ function showMainWindow() {
   const crashes = []
   win.webContents.on('render-process-gone', async (_e, details) => {
     log(`[window] renderer gone: ${details.reason}`)
-    if (mainWindow === win) pageGone()
+    if (mainWindow === win) menuBarEvent({ type: 'pageGone' })
     if (details.reason === 'clean-exit' || mainWindow !== win) return
     const now = Date.now()
     crashes.push(now)
@@ -389,8 +388,11 @@ function createTray() {
 }
 
 const TRAY_ACTIONS = {
-  record: startFromMenuBar,
-  stop: stopFromMenuBar,
+  record: () => {
+    showMainWindow() // making it if it was closed; the start waits for its UI to load
+    menuBarEvent({ type: 'record' })
+  },
+  stop: () => menuBarEvent({ type: 'stop' }),
   show: () => showMainWindow(),
   quit: () => app.quit(),
 }
@@ -398,63 +400,44 @@ const TRAY_ACTIONS = {
 /** The icon, the time beside it and the menu for what the Live page last reported. */
 function showTray() {
   if (!tray) return
-  const view = trayRules.trayView(recording, Date.now())
+  const view = trayRules.trayView(menuBar.recording, Date.now())
   tray.setImage(trayIcon(view.recording))
   tray.setTitle(view.title, { fontType: 'monospacedDigit' })
   tray.setContextMenu(
     Menu.buildFromTemplate(view.items.map(({ id, ...item }) => (id ? { ...item, click: TRAY_ACTIONS[id] } : item))),
   )
   // Only the time changes each second; the menu is rebuilt when the phase does.
-  if (recording.phase === 'recording') {
-    trayTicker ??= setInterval(() => tray.setTitle(trayRules.trayView(recording, Date.now()).title, { fontType: 'monospacedDigit' }), 1000)
+  if (menuBar.recording.phase === 'recording') {
+    trayTicker ??= setInterval(
+      () => tray.setTitle(trayRules.trayView(menuBar.recording, Date.now()).title, { fontType: 'monospacedDigit' }),
+      1000,
+    )
   } else if (trayTicker) {
     clearInterval(trayTicker)
     trayTicker = null
   }
 }
 
-/** "Record Screen…": open the window and ask the UI to start, once it has loaded if the window
- * was closed or the engine is still starting. */
-function startFromMenuBar() {
-  showMainWindow()
-  startPending = true
-  sendStartWhenListening()
-}
-
-function sendStartWhenListening() {
-  if (!startPending || !pageListening || !mainWindow) return
-  startPending = false
-  log('[tray] start recording')
-  mainWindow.webContents.send('iris-app:record', 'start')
-}
-
-/** Stop: offered only while the page records, so it is listening. Never queued for a later page. */
-function stopFromMenuBar() {
-  if (!pageListening || !mainWindow) return
-  log('[tray] stop recording')
-  mainWindow.webContents.send('iris-app:record', 'stop')
-}
-
-/** The main window's page went away: it no longer records or listens. */
-function pageGone() {
-  pageListening = false
-  if (recording.phase === 'idle') return
-  recording = trayRules.IDLE
-  showTray()
+/** Apply a relay event (src/tray.cjs) and carry out what it asks for. */
+function menuBarEvent(event) {
+  const before = menuBar.recording
+  const { state, send, show, malformed } = trayRules.relay(menuBar, event)
+  menuBar = state
+  if (malformed) log('[tray] ignored a malformed recording report')
+  if (show) showMainWindow()
+  if (send && mainWindow) {
+    log(`[tray] ${send} recording`)
+    mainWindow.webContents.send('iris-app:record', send)
+  }
+  if (menuBar.recording !== before) showTray()
 }
 
 ipcMain.on('iris-app:record-listening', (event) => {
-  if (!policy.fromIrisWindow(event, mainWindow)) return
-  pageListening = true
-  sendStartWhenListening()
+  if (policy.fromIrisWindow(event, mainWindow)) menuBarEvent({ type: 'listening' })
 })
 
 ipcMain.on('iris-app:recording', (event, report) => {
-  if (!policy.fromIrisWindow(event, mainWindow)) return
-  const next = trayRules.parseReport(report)
-  if (!next) return log('[tray] ignored a malformed recording report')
-  recording = next
-  showTray()
+  if (policy.fromIrisWindow(event, mainWindow)) menuBarEvent({ type: 'report', report })
 })
 
 // ---- backend ---------------------------------------------------------------------------------
@@ -471,6 +454,7 @@ async function startBackend() {
     // Stopped on purpose (quit, restart) or superseded by a newer start: nothing to report.
     if (quitting || err.stopped || mine !== startCount) return
     log(`[backend] failed to start: ${err.message}`)
+    menuBarEvent({ type: 'engineFailed' })
     return offerRestart("Iris's engine didn't start.", err.message)
   }
   showUiWhenReady()
