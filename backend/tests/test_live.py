@@ -18,7 +18,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from iris.config import Settings
-from iris.live.replay import encode_webm
+from iris.live.replay import encode_webm, has_video
 from iris.llm.errors import UserFacingError
 from iris.llm.usage import append_record
 from iris.models import (
@@ -47,6 +47,7 @@ from iris.sources.browser_live import (
 )
 from iris.store.layout import SessionPaths, read_model, session_paths
 from tests.test_api import wait_for_status
+from tests.test_ingest import make_media
 
 RATE = 48_000
 SECONDS = 6
@@ -474,3 +475,9 @@ def test_live_session_produces_notes_like_an_upload(
     wait_until_idle(client, sid)
     assert client.get(f"/api/sessions/{sid}").json()["status"] == "done"
     assert read_model(root / "frames.json", FrameIndex) == index
+
+
+def test_replay_records_a_file_without_video_as_audio_only(tmp_path: Path):
+    """``iris replay-live`` starts the session as the Live page would for that file."""
+    assert has_video(make_media(tmp_path / "talk.mp4", video=True, seconds=1))
+    assert not has_video(make_media(tmp_path / "call.wav", video=False, seconds=1))
