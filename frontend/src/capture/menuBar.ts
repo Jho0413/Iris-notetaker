@@ -3,21 +3,23 @@
 import { useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { irisApp } from '../settings/appBridge.ts'
+import type { CaptureMode } from './liveCapture.ts'
 
-/** Location state asking the Live page to start. A fresh value per request, so asking again
- * while the page is already open starts too. */
+/** Location state asking the Live page to start recording `mode`. `id` is fresh per request, so
+ * asking again while the page is already open starts too. */
 export interface LiveLocationState {
-  startRequest?: number
+  startRequest?: { id: number; mode: CaptureMode }
 }
 
-/** For the layout: "Record Screen…" opens the Live page, which then starts. */
+/** For the layout: "Record Audio" or "Record Screen…" opens the Live page, which then starts. */
 export function useRecordFromMenuBar() {
   const navigate = useNavigate()
   useEffect(
     () =>
       irisApp()?.onRecordCommand((command) => {
-        if (command !== 'start') return // Stop is the Live page's own
-        const state: LiveLocationState = { startRequest: Date.now() }
+        if (command === 'stop') return // Stop is the Live page's own
+        const mode = command === 'start-audio' ? 'audio' : 'screen'
+        const state: LiveLocationState = { startRequest: { id: Date.now(), mode } }
         navigate('/live', { state })
       }),
     [navigate],
@@ -38,14 +40,16 @@ export function menuBarPhase(pagePhase: string, leftUploads: number): string {
  * a page that was left reports late (when its upload settles), and must not overwrite what a newer
  * Live page reported.
  */
-export function menuBarReporter(send: (phase: string, startedAt: number) => void) {
-  let page = { phase: 'idle', startedAt: 0 }
+export function menuBarReporter(send: (phase: string, startedAt: number, macSoundRefused: boolean) => void) {
+  const idle = { phase: 'idle', startedAt: 0, macSoundRefused: false }
+  let page = idle
   let leftUploads = 0
-  const tell = () => send(menuBarPhase(page.phase, leftUploads), page.startedAt)
+  const tell = () => send(menuBarPhase(page.phase, leftUploads), page.startedAt, page.macSoundRefused)
   return {
-    /** The Live page's phase now. */
-    phase(phase: string, startedAt: number) {
-      page = { phase, startedAt }
+    /** The Live page's phase now; `macSoundRefused`: macOS refused the Mac's sound to its audio
+     * recording. */
+    phase(phase: string, startedAt: number, macSoundRefused = false) {
+      page = { phase, startedAt, macSoundRefused }
       tell()
     },
     /** The Live page went away; `stillStopping`: its stop, still uploading what it captured. */
@@ -59,10 +63,12 @@ export function menuBarReporter(send: (phase: string, startedAt: number) => void
             tell()
           })
       }
-      page = { phase: 'idle', startedAt: 0 }
+      page = idle
       tell()
     },
   }
 }
 
-export const menuBar = menuBarReporter((phase, startedAt) => irisApp()?.recordingChanged(phase, startedAt))
+export const menuBar = menuBarReporter((phase, startedAt, macSoundRefused) =>
+  irisApp()?.recordingChanged(phase, startedAt, macSoundRefused),
+)

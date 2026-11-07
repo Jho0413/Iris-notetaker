@@ -9,15 +9,16 @@ export interface IrisApp {
   /** Saves the page, as printed, as a PDF named after `title`, where the user chooses; resolves
    * once saved, or cancelled. */
   savePdf(title: string): Promise<{ done: boolean }>
-  /** Tells the app the Live page's phase, and when recording started (ms since the epoch), for
-   * the menu bar icon. */
-  recordingChanged(phase: string, startedAt: number): void
-  /** Calls `listener` when "Record Screen…" or Stop is chosen in the menu bar; returns the
-   * unsubscribe. */
+  /** Tells the app the Live page's phase, when recording started (ms since the epoch), and
+   * whether macOS refused the Mac's sound to an audio recording, for the menu bar icon (which
+   * then shows the window, whose page says how to allow it). */
+  recordingChanged(phase: string, startedAt: number, macSoundRefused: boolean): void
+  /** Calls `listener` when "Record Audio", "Record Screen…" or Stop is chosen in the menu bar;
+   * returns the unsubscribe. */
   onRecordCommand(listener: (command: RecordCommand) => void): () => void
 }
 
-export type RecordCommand = 'start' | 'stop'
+export type RecordCommand = 'start-audio' | 'start-screen' | 'stop'
 
 declare global {
   interface Window {

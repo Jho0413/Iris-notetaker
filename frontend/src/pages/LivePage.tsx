@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { useBlocker, useLocation, useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
-import { CaptureError } from '../capture/captureErrors'
+import { CaptureError, inDesktopApp } from '../capture/captureErrors'
 import { EndSessionError } from '../capture/endSession'
-import { LiveCapture } from '../capture/liveCapture'
+import { type CaptureMode, LiveCapture } from '../capture/liveCapture'
 import { menuBar, type LiveLocationState } from '../capture/menuBar'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { Icon } from '../components/Icon'
@@ -19,7 +19,6 @@ import { irisApp } from '../settings/appBridge'
  * `finishing`: retrying that request.
  */
 type Phase = 'idle' | 'requesting' | 'recording' | 'stopping' | 'unfinished' | 'finishing'
-
 
 /**
  * Plain words for a capture failure. Messages from the capture module are ours and shown as they
@@ -54,7 +53,12 @@ export function LivePage() {
   const capture = useRef<LiveCapture | null>(null)
   const stopping = useRef(false)
   const unmounted = useRef(false)
+  const [mode, setMode] = useState<CaptureMode>('screen')
   const [display, setDisplay] = useState<MediaStream | null>(null)
+  const [macSound, setMacSound] = useState(false)
+  const desktopApp = inDesktopApp()
+  // macOS refused the Mac's sound: only the mic is recorded (a browser never has it).
+  const macSoundRefused = desktopApp && mode === 'audio' && !macSound && phase === 'recording'
   const recording = phase === 'recording'
   const elapsed = recording || phase === 'stopping' ? (now - startedAt) / 1000 : 0
 
@@ -89,11 +93,12 @@ export function LivePage() {
     }
   }, [])
 
-  async function start() {
+  async function start(mode: CaptureMode) {
     setError(null)
+    setMode(mode)
     setPhase('requesting')
     const { data, error: apiError } = await api
-      .POST('/api/live', { body: { title: title.trim() || 'Live session' } })
+      .POST('/api/live', { body: { title: title.trim() || 'Live session', screen: mode === 'screen' } })
       .catch(() => ({ data: undefined, error: true }))
     if (apiError || !data) {
       setPhase('idle')
@@ -109,11 +114,15 @@ export function LivePage() {
     }
     // Sharing stopped from the browser's own controls, the mic went away or the recorder failed:
     // finish. Held before start() so leaving the page during a prompt cancels the start.
-    const live = new LiveCapture(data.id, { onEnded: () => void stopRef.current() })
+    const live = new LiveCapture(data.id, {
+      onEnded: () => void stopRef.current(),
+      onMacSoundEnded: () => setMacSound(false),
+    })
     capture.current = live
     try {
-      const screen = await live.start()
-      setDisplay(screen)
+      const started = await live.start(mode)
+      setDisplay(started.screen)
+      setMacSound(started.macSound)
       setSessionId(data.id)
       const t = Date.now()
       setStartedAt(t)
@@ -183,8 +192,8 @@ export function LivePage() {
   }
   const stopRef = useRef(stopAndOpen)
   /** Start, unless a recording is already under way (or stopped and not yet finished). */
-  function startIfIdle() {
-    if (phase === 'idle') void start()
+  function startIfIdle(mode: CaptureMode) {
+    if (phase === 'idle') void start(mode)
   }
   const startRef = useRef(startIfIdle)
   useEffect(() => {
@@ -195,8 +204,8 @@ export function LivePage() {
   // The desktop app's menu bar icon (capture/menuBar.ts). It shows what this page is doing, and
   // its Record and Stop go through the same start() and stop as the buttons here.
   useEffect(() => {
-    menuBar.phase(phase, startedAt)
-  }, [phase, startedAt])
+    menuBar.phase(phase, startedAt, macSoundRefused)
+  }, [phase, startedAt, macSoundRefused])
   useEffect(
     () =>
       irisApp()?.onRecordCommand((command) => {
@@ -208,10 +217,10 @@ export function LivePage() {
   const handledStart = useRef<number | undefined>(undefined)
   useEffect(() => {
     // Once per request: StrictMode runs effects twice, and a reload keeps the location state.
-    if (!startRequest || handledStart.current === startRequest) return
-    handledStart.current = startRequest
+    if (!startRequest || handledStart.current === startRequest.id) return
+    handledStart.current = startRequest.id
     navigate('.', { replace: true, state: null })
-    startRef.current()
+    startRef.current(startRequest.mode)
   }, [startRequest, navigate])
 
   if (phase === 'unfinished' || phase === 'finishing') {
@@ -246,6 +255,27 @@ export function LivePage() {
   }
 
   if (phase === 'idle' || phase === 'requesting') {
+    const requesting = phase === 'requesting'
+    const choices: { mode: CaptureMode; icon: 'mic' | 'screen'; label: string; detail: string; waiting: string }[] = [
+      {
+        mode: 'audio',
+        icon: 'mic',
+        label: 'Record audio',
+        detail: desktopApp
+          ? "Your microphone and the Mac's sound, so both sides of a call."
+          : 'Your microphone only. To include a call\'s sound, record the screen and share its tab.',
+        waiting: 'Starting… Allow the microphone if asked.',
+      },
+      {
+        mode: 'screen',
+        icon: 'screen',
+        label: 'Record audio + screen',
+        detail: desktopApp
+          ? 'Also a screen or window you choose, with its sound.'
+          : 'Also a screen, window or tab you choose. Share a tab to include its sound.',
+        waiting: desktopApp ? 'Choose what to record…' : 'Choose what to share in the browser dialog…',
+      },
+    ]
     return (
       <div className="page-narrow">
         <div className="page-head">
@@ -254,13 +284,7 @@ export function LivePage() {
             <p className="lede">Start recording, then get on with your session. Stop when it ends and the notes follow.</p>
           </div>
         </div>
-        <form
-          className="setup"
-          onSubmit={(e) => {
-            e.preventDefault()
-            void start()
-          }}
-        >
+        <div className="setup">
           <div className="field">
             <label htmlFor="live-title">Title</label>
             <input
@@ -268,17 +292,25 @@ export function LivePage() {
               className="input"
               value={title}
               placeholder="Live session"
-              disabled={phase === 'requesting'}
+              disabled={requesting}
               onChange={(e) => setTitle(e.target.value)}
             />
           </div>
-          <div>
-            <p style={{ margin: '0 0 6px', fontWeight: 500 }}>What Iris records</p>
-            <ul>
-              <li>One screen, window or browser tab that you choose. Share a tab to include its audio.</li>
-              <li>Your microphone.</li>
-              <li>Everything is saved on this computer as it's captured, so closing the tab keeps what was recorded.</li>
-            </ul>
+          <div className="choices choices-inline" aria-busy={requesting}>
+            {choices.map((c) => (
+              <button
+                key={c.mode}
+                type="button"
+                className="choice"
+                disabled={requesting}
+                data-waiting={requesting && mode === c.mode ? '' : undefined}
+                onClick={() => void start(c.mode)}
+              >
+                <Icon name={c.icon} />
+                <strong>{c.label}</strong>
+                <span>{requesting && mode === c.mode ? c.waiting : c.detail}</span>
+              </button>
+            ))}
           </div>
           {error && (
             <div className="banner banner-error" role="alert">
@@ -288,13 +320,11 @@ export function LivePage() {
               </div>
             </div>
           )}
-          <div className="form-actions">
-            <button className="btn btn-primary btn-lg" disabled={phase === 'requesting'}>
-              <Icon name="record" />
-              {phase === 'requesting' ? 'Choose what to share in the browser dialog…' : error ? 'Try again' : 'Start recording'}
-            </button>
-          </div>
-        </form>
+          <p className="setup-note">
+            Everything is saved on this computer as it's captured, so closing {desktopApp ? 'Iris' : 'the tab'} keeps
+            what was recorded.
+          </p>
+        </div>
       </div>
     )
   }
@@ -308,12 +338,24 @@ export function LivePage() {
           <span className="num" aria-hidden="true">{formatClock(elapsed)}</span>
         </span>
         <span className="capture-status">
-          <span>
-            <Icon name="screen" /> Screen shared
-          </span>
+          {display && (
+            <span>
+              <Icon name="screen" /> Screen shared
+            </span>
+          )}
           <span>
             <Icon name="mic" /> Microphone on
           </span>
+          {mode === 'audio' &&
+            (macSound ? (
+              <span>
+                <Icon name="system" /> Mac's sound on
+              </span>
+            ) : (
+              <span className="warn">
+                <Icon name="system" /> {desktopApp ? "Mac's sound off" : 'Microphone only'}
+              </span>
+            ))}
         </span>
         <span className="spacer" />
         <button type="button" className="btn btn-stop" onClick={() => void stopAndOpen()} disabled={phase === 'stopping'}>
@@ -334,21 +376,41 @@ export function LivePage() {
             </div>
           </div>
         )}
-        <video
-          // The recording view mounts after capture starts, so attach the stream on mount.
-          ref={(el) => {
-            if (el && el.srcObject !== display) el.srcObject = display
-          }}
-          className="preview"
-          autoPlay
-          muted
-          playsInline
-          aria-label="Preview of the shared screen"
-        />
+        {macSoundRefused && (
+          <div className="banner banner-warning" role="alert">
+            <Icon name="alert" />
+            <div className="banner-body">
+              <p>
+                <strong>The Mac's sound isn't being recorded,</strong> only your microphone, so the other
+                side of a call is missing. To record it, allow Iris in System Settings → Privacy &amp;
+                Security → Screen &amp; System Audio Recording → System Audio Recording Only, then start a
+                new recording.
+              </p>
+            </div>
+          </div>
+        )}
+        {mode === 'audio' && !desktopApp && (
+          <p className="after">In a browser, Iris records your microphone only.</p>
+        )}
+        {display && (
+          <video
+            // The recording view mounts after capture starts, so attach the stream on mount.
+            ref={(el) => {
+              if (el && el.srcObject !== display) el.srcObject = display
+            }}
+            className="preview"
+            autoPlay
+            muted
+            playsInline
+            aria-label="Preview of the shared screen"
+          />
+        )}
         <p className="live-progress num">{progress || 'Iris processes the session as you record.'}</p>
         <p className="after">
-          When you stop (or stop sharing from the browser), Iris uploads the rest and finishes the
-          notes. You can close this window afterwards and find the session in the library.
+          {display
+            ? 'When you stop (or stop sharing from the browser), Iris uploads the rest and finishes the notes.'
+            : 'When you stop, Iris uploads the rest and finishes the notes.'}{' '}
+          You can close this window afterwards and find the session in the library.
         </p>
       </div>
 

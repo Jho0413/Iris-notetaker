@@ -270,7 +270,8 @@ export interface paths {
          * Post Frame
          * @description Body: one JPEG screen frame. ``t`` is seconds since recording started (the audio's clock).
          *
-         *     Posting the same frame again is a no-op; a different body for a stored ``t`` is a 409.
+         *     Posting the same frame again is a no-op; a different body for a stored ``t`` is a 409, and so
+         *     is any frame for an audio-only recording.
          */
         post: operations["post_frame_api_live__session_id__frame_post"];
         delete?: never;
@@ -470,6 +471,12 @@ export interface components {
              * @default Live session
              */
             title: string;
+            /**
+             * Screen
+             * @description Whether the browser shares a screen and posts frames. False: audio only.
+             * @default true
+             */
+            screen: boolean;
         };
         /** Notes */
         Notes: {
