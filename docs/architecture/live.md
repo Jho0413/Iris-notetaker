@@ -56,9 +56,9 @@ Shared-audio modes:
   what plays, not a voice in a room); the microphone keeps them.
 
 **The session is made only once what is recorded has been granted** (`POST /live` comes after
-the screen, the mic and the Mac's sound are answered), so asking for permissions never leaves a
-session behind, even if Iris is quit or crashes meanwhile, and nothing counts as recording until
-then.
+the screen, the mic and the Mac's sound are answered), so a permission prompt never leaves a
+session behind, even if Iris is quit or crashes while it is open, and nothing counts as recording
+until then. A start cancelled while `POST /live` is in flight deletes the session once it is made.
 
 What happens when capture is interrupted:
 

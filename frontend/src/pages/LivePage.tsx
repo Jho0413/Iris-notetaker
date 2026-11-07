@@ -114,7 +114,8 @@ export function LivePage() {
   }, [recording])
 
   // If the page goes away mid-recording anyway, end the session so it gets processed. During a
-  // start, stopping cancels it: everything granted is released and the empty session discarded.
+  // start, stopping cancels it: everything granted is released (and a session made meanwhile is
+  // deleted).
   // Until that stop settles the app's menu bar says the upload is finishing, so quitting still asks
   // (capture/menuBar.ts: chunks not yet uploaded are only in this window's memory).
   useEffect(() => () => menuBar.left(capture.current?.stop()), [])

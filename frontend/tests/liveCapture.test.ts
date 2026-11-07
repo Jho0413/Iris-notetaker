@@ -1044,6 +1044,21 @@ test('cancelled while the session is being made: the session is deleted', async 
   assert.ok(t.mic.stopped)
 })
 
+test('cancelled before the session is made, which arrives later: it is deleted when it does', async () => {
+  const t = setup()
+  let made: (id: string) => void = () => {}
+  const live = new LiveCapture(() => new Promise((resolve) => (made = resolve)), fast, t.env as never)
+  const starting = live.start('audio')
+  await tick()
+  await live.stop() // e.g. the page left while POST /live was in flight
+  await assert.rejects(starting, /cancelled/)
+  assert.deepEqual(t.calls, [], 'no session yet, so nothing to delete')
+  made('s1') // the session the engine made meanwhile
+  await tick()
+  assert.deepEqual(t.calls.map((c) => `${c.method} ${c.url}`), ['DELETE /api/sessions/s1'])
+  assert.equal(FakeRecorder.created.length, 0)
+})
+
 test('a refused screen share is not retried without audio', async () => {
   const asked: unknown[] = []
   const t = setup({

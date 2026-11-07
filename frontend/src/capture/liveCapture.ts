@@ -161,6 +161,7 @@ export class LiveCapture {
   private resuming?: Promise<StartedRecording>
   private finished = false
   private startFailed = false
+  private sessionDiscarded = false
   private opening?: Promise<StartedRecording>
   private cancelled = false
   private cancelOpening?: (err: CaptureError) => void
@@ -205,9 +206,9 @@ export class LiveCapture {
    * recording starts with the mic alone). On failure (permission denied, the picker cancelled, an
    * unsupported browser, the session not made, sharing stopped or the recorder failing before
    * recording began, or `stop()` called meanwhile) everything acquired is released at once, a
-   * session already made is deleted, and a `CaptureError` with a user-facing message is thrown. A failure while a permission prompt is
-   * still open doesn't wait for the prompt: a stream granted afterwards is stopped as soon as it
-   * arrives.
+   * session already made is deleted, and a `CaptureError` with a user-facing message is thrown.
+   * A failure while a permission prompt is still open doesn't wait for the prompt: a stream
+   * granted afterwards is stopped as soon as it arrives, and so is a session made afterwards.
    */
   async start(mode: CaptureMode): Promise<StartedRecording> {
     const cancelled = new Promise<never>((_, reject) => (this.cancelOpening = reject))
@@ -264,7 +265,11 @@ export class LiveCapture {
 
     const got = await this.acquire(mode)
     this.id = await this.createSession()
-    this.throwIfCancelled() // cancelled while the session was made: start()'s cleanup deletes it
+    if (this.cancelled) {
+      // Cancelled while it was being made: start()'s cleanup may have run before the id was known.
+      this.discardSession()
+      this.throwIfCancelled()
+    }
     const mixer = this.env.mixAudio()
     this.mixer = mixer
     this.mixIn()
@@ -539,9 +544,10 @@ export class LiveCapture {
    */
   private onPageHideWhileStarting = () => this.cancel('Recording was cancelled before it started.')
 
-  /** Delete a session made by a start that then failed; before one is made there is none. */
+  /** Delete a session made by a start that then failed (once; before one is made there is none). */
   private discardSession() {
-    if (!this.id) return
+    if (!this.id || this.sessionDiscarded) return
+    this.sessionDiscarded = true
     const url = `/api/sessions/${this.id}`
     void this.env.fetch(url, { method: 'DELETE', keepalive: true }).catch(() => {})
   }
