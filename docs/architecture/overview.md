@@ -20,8 +20,8 @@ it.
 
 - **Users:** one person, running locally on a laptop. No accounts or hosting.
 - **Input:** an uploaded recording, or live capture in the browser or in the macOS desktop app:
-  the mic with a screen share, or audio alone (in the desktop app, the mic and the Mac's sound,
-  so both sides of a call). The desktop app records any screen or window with system audio. Later, integrations
+  the mic (in the desktop app with the Mac's sound, so both sides of a call), with a screen share
+  that can be turned on and off at any time. The desktop app records any screen or window with system audio. Later, integrations
   such as meeting platforms.
 - **Visuals:** anything shown on screen (handwriting, sketches, diagrams, slides) is rebuilt as a
   clean visual: typeset maths, plotted graphs, rendered diagrams, tables, illustrations, or a
@@ -91,8 +91,8 @@ Iris.app
 - **The backend can't outlive the app.** It stops on quit and, if the app crashes or is
   force-quit, exits on its own once the app's process is gone (`IRIS_PARENT_PID`).
 - **Capture** goes through the UI's own `getDisplayMedia` call, answered by Iris's own picker
-  (the entire screen first, then app windows, never Iris's own) with system audio, or, for Record
-  audio, with the Mac's sound alone and no picker.
+  (the entire screen first, then app windows, never Iris's own) for the picture, and the Mac's
+  sound on its own capture with no picker, for the whole recording.
 
 Details, decisions and measurements: [`desktop.md`](desktop.md).
 
@@ -116,7 +116,7 @@ is in the session, so adding a source never touches the pipeline.
 |---|---|---|
 | File upload | Built | PyAV over the file |
 | Browser live | Built | `getUserMedia` / `getDisplayMedia`, chunks posted to the backend ([`live.md`](live.md)); with a screen or audio only |
-| Desktop capture | Built (macOS) | The desktop app: the browser live source, with any screen or window and system audio from Iris's picker, or the Mac's sound alone |
+| Desktop capture | Built (macOS) | The desktop app: the browser live source, with the Mac's sound on its own capture throughout and any screen or window from Iris's picker, turned on and off at any time |
 | Meeting platforms | Later | Zoom, Meet or Teams integrations that stream the call |
 
 ## Key libraries

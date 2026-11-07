@@ -8,14 +8,25 @@ Recording in the browser, and processing the session while it records. The stage
 The Live page starts one of two recordings, each with one click:
 
 - **Record audio:** the microphone and, in the desktop app, the Mac's sound (the other side of a
-  call), mixed into one track. No screen is shared. In a browser it is the microphone alone, and
-  the page says so (a browser can share a tab's sound only while that tab is shared).
-- **Record audio + screen:** Iris asks for a screen, window or tab to share, then for the
-  microphone.
+  call), mixed into one track. No screen is shared at first. In a browser it is the microphone
+  alone while nothing is shared, and the page says so (a browser can record a tab's sound only
+  while that tab is shared).
+- **Record audio + screen:** the same, with a screen, window or tab shared from the start: Iris
+  asks for it first, then for the microphone.
 
-Audio is uploaded in 5-second chunks and the screen at about one frame per second, on the same
-clock. The audio sources are always mixed into the one track that is recorded, even when the
-microphone is the only one, so the recording stays one stream however many sources it has.
+**The screen can be turned on and off at any time** during a recording (**Share screen** and
+**Stop sharing** in the recording bar, and in the desktop app's menu bar). Each Share screen opens
+the picker, so a window can be followed by the entire screen. A share that ends on its own (the
+browser's or macOS's Stop sharing, or the shared window closing) turns the screen off and the
+recording carries on: only Stop ends capturing. In the desktop app the Mac's sound is recorded
+throughout, on its own capture, so a share asks for the picture alone (its sound would be heard
+twice, and turning the screen on or off leaves no gap in it). In a browser a shared tab's sound is
+mixed in while it is shared.
+
+Audio is uploaded in 5-second chunks and, while the screen is on, about one frame per second, on
+the same clock, with the time the screen was turned on or off (`POST /live/{id}/screen`). The
+audio sources are always mixed into the one track that is recorded, even when the microphone is
+the only one, so the recording stays one stream as sources join and leave.
 Failed uploads are retried, and making notes waits until everything has arrived before the
 session is finished.
 
@@ -24,7 +35,9 @@ session is finished.
 - **Make notes:** upload the rest and finish the session.
 - **Continue recording:** capture again in the same recording. While stopped, the microphone, the
   Mac's sound and any shared screen are released (macOS's indicators go off), so continuing asks
-  for them again: with a screen, the picker opens again (cancelling it leaves it stopped). The
+  for them again: if the screen was on at Stop, the picker opens again (cancelling it carries on
+  with the screen off). Stop turns the screen off and Continue on again at the same recorded
+  time, so the notes treat the share after Continue as a new one. The
   recorder is paused, not ended, so the audio stays one WebM stream, and its timestamps leave the
   stopped time out (measured in Electron 45); frames are timed the same way. The session's clock
   is the recorded time, so the engine needs nothing for it.
@@ -41,17 +54,17 @@ with `uv run iris run <session_id>`.
 | Chrome, Edge | Yes | Tab audio when sharing a tab (keep "Also share tab audio" on). System audio when sharing the entire screen on Windows and ChromeOS. On macOS, tab audio only | Supported. A live session with a real mic and screen share works in Chrome |
 | Firefox | Yes | None (Firefox can't share audio) | Expected to work; not checked yet |
 | Safari | Yes | None | Untested; Iris says so if the browser can't record WebM audio |
-| Iris for macOS ([`desktop.md`](desktop.md)) | Yes | System audio with any screen or window, from Iris's picker; with Record audio, the Mac's sound alone, with no picker and no Screen Recording permission | Supported. Live recordings of a window with sound, and of audio alone, work end to end |
+| Iris for macOS ([`desktop.md`](desktop.md)) | Yes | The Mac's sound throughout, on its own capture with no picker and no Screen Recording permission; the screen, from Iris's picker, adds the picture alone | Supported. Live recordings of a window with sound, and of audio alone, work end to end |
 
 Shared-audio modes:
 
-- **Mic only:** Record audio in a browser, or sharing a window or screen without audio. Only the
-  microphone is recorded.
-- **Mic plus the Mac's sound:** Record audio in the desktop app. If macOS refuses the Mac's sound
-  (System Audio Recording), the recording runs with the microphone, and the page says how to allow
-  it ([`desktop.md`](desktop.md), "Capture").
-- **Mic plus shared audio:** sharing a tab (or a screen, where supported) with audio. Both are mixed
-  into one track. Use headphones, or the mic also picks up the shared audio from your speakers.
+- **Mic only:** in a browser while nothing is shared, or sharing a window or screen without
+  audio. Only the microphone is recorded.
+- **Mic plus the Mac's sound:** every recording in the desktop app, whether or not the screen is
+  shared. If macOS refuses the Mac's sound (System Audio Recording), the recording runs with the
+  microphone, and the page says how to allow it ([`desktop.md`](desktop.md), "Capture").
+- **Mic plus shared audio:** in a browser, sharing a tab (or a screen, where supported) with
+  audio, while it is shared. Both are mixed into one track. Use headphones, or the mic also picks up the shared audio from your speakers.
   Shared audio is recorded without echo cancellation, noise suppression or gain control (it is
   what plays, not a voice in a room); the microphone keeps them.
 
@@ -68,8 +81,9 @@ What happens when capture is interrupted:
 - **Sharing stopped, or you leave the Live page or close the tab, before recording starts** (for
   example while the mic prompt is still open): the start fails and everything granted is stopped.
   A session made in the moment before recording began is deleted.
-- **"Stop sharing" in the browser's own bar, or the mic is disconnected:** the recording finishes and
-  is processed.
+- **"Stop sharing" in the browser's or macOS's own controls, or the shared window closes:** the
+  screen turns off and the recording carries on, as with Stop sharing in Iris.
+- **The mic is disconnected:** the recording finishes and is processed.
 - **Backend unreachable:** uploads are retried. Stop waits up to 30 seconds, then shows an error.
   The page then shows **Recording stopped**: **Try again** resends what is still queued, then ends
   the session. Audio is never discarded while the tab stays open. Screen frames are queued up to
@@ -118,12 +132,15 @@ Live + Session pages ◀──── SSE events (progress only; the notes once d
 
 ### Capture and store
 
-`POST /live` says whether the recording shares a screen (`screen`, false for Record audio); it is
-stored as `live/capture.json` before the lanes start, so a lane restarted later reads it too. The
-browser posts 5 s WebM chunks (`seq` 0, 1, 2, ...) and, with a screen, ~1 fps JPEG frames (`t` =
-seconds since start, the audio's clock; an audio-only recording refuses frames with 409). Each is
-stored atomically under `live/` and never modified; the route then wakes the lane that consumes it
-and returns without waiting for any processing.
+`POST /live` says whether the screen is shared from the start (`screen`, false for Record audio):
+if it is, the screen is stored as turned on at 0 s before the lanes start. The browser posts 5 s
+WebM chunks (`seq` 0, 1, 2, ...), ~1 fps JPEG frames while the screen is on, and each time the
+screen is turned on or off (`POST /live/{id}/screen?t=&on=`, stored as an empty file
+`live/screen/<t_ms>.on` or `.off`); `t` is seconds since start, the audio's clock. Each is stored
+atomically under `live/`, keyed by `seq` or `t` so a retry is a no-op, and never modified; the
+route then wakes the lane that consumes it and returns without waiting for any processing. Uploads
+are retried in parallel, so they can land in any order: a screen change can arrive after frames
+that came later.
 
 ### Lanes
 
@@ -135,9 +152,9 @@ which holds what each lane has finished and up to when:
 | Watermark | Meaning | Advanced by |
 |---|---|---|
 | `transcribed_to` (T_a) | the transcript is complete up to here | audio lane |
-| `closed_to` (T_m) | every moment that ends by here is closed | screen lane; with no screen shared no moment can open, so it follows T_a |
+| `closed_to` (T_m) | every moment that ends by here is closed | screen lane; while the screen is off no moment can open, so it follows T_a up to the next frame or screen-on |
 | `selected_to` (T_s) | every closed moment that ends by here has been read | select lane; once every closed moment is read, it follows T_m |
-| `horizon` | `min(T_a, T_s)`: evidence before it is final (select publishes in time order: nothing it reads later starts before T_s). With no screen it is T_a: sections are written from the speech as it is transcribed | (derived) |
+| `horizon` | `min(T_a, T_s)`: evidence before it is final (select publishes in time order: nothing it reads later starts before T_s). While the screen is off it is T_a: sections are written from the speech as it is transcribed | (derived) |
 
 Lanes wait on watermarks (an `asyncio.Condition`), never poll. A lane that has finished (after
 stop) or failed counts as "through" any time, so nothing downstream waits forever.
@@ -145,7 +162,7 @@ stop) or failed counts as "through" any time, so nothing downstream waits foreve
 | Lane | Input | Does | Publishes |
 |---|---|---|---|
 | **Audio** | `live/audio/*.webm` | Decodes the contiguous run of chunks into one PCM stream (`live/audio.pcm`, placed by timestamp exactly as ingest does). Cuts windows in the decoded audio (so never at a chunk edge) at the quietest point 5–15 s after the last cut, deciding each cut only once that whole range plus a second is decoded, so cuts depend on the audio alone and a restarted lane reuses its cached windows (`live/transcript_windows/`). Transcribes at most `IRIS_LIVE_TRANSCRIBE_CONCURRENCY` windows at once, each prompted (whisper-1) with the tail of the text committed when it is sent: normally the previous window. Every window is sent the spoken language (the Settings page or `IRIS_TRANSCRIBE_LANGUAGE`, default `en`, fixed when the session starts), so a misdetected first window can't pass its language on through the prompt; a cached window is reused only if it was sent the same language. Commits windows in order; a window still failing after its temporary-error retries (or on any other error) fails the lane | transcript segments, T_a, `TRANSCRIPT_CHUNK` |
-| **Screen** | `live/frames/*.jpg` | Holds frames back `IRIS_LIVE_FRAME_HOLDBACK_S` (session time) to order them, samples them onto the `frame_fps` grid and normalises them with ingest's own helpers (size fixed by the first readable frame), writing `frames/` with ingest's names and bytes, and feeds `MomentDetector` the frames read back from `frames/`, as detect reads them. An audio-only recording (`live/capture.json`) has no frames: T_m follows T_a | closed moments, T_m, `MOMENT_FOUND` |
+| **Screen** | `live/frames/*.jpg`, `live/screen/` | Holds frames and screen-offs back `IRIS_LIVE_FRAME_HOLDBACK_S` (session time: the latest frame or screen change, or T_a while no frames come) to order them, samples frames onto the `frame_fps` grid and normalises them with ingest's own helpers (size fixed by each share's first readable frame), writing `frames/` with ingest's names and bytes, and feeds `MomentDetector` the frames read back from `frames/`, as detect reads them. At a screen-off the open moment ends there (`screen_off`) and the detector starts afresh. While the screen is off (an audio-only recording throughout) T_m follows T_a | closed moments, T_m, `MOMENT_FOUND` |
 | **Select** | closed moments + transcript | Gates each moment until T_a ≥ its end + `IRIS_LIVE_SPEECH_PAD_S`, aligns it, and reads it with the select stage's batch step and one call in flight (moments that pass the gate meanwhile go together in the next batch, up to `selection_batch_size`; visual ids continue across batches). Renders each figure in the background (`IRIS_LIVE_RENDER_CONCURRENCY`) by the render stage's rules: an API error gives the source crop, uncached, so the render stage tries it again at stop | contents, visuals, T_s, `VISUAL_SELECTED`, `VISUAL_RENDERED` |
 | **Draft** | timeline | Writes notes sections ahead of stop; no draft is made or shown. Packs the evidence before the horizon into sections like write does. A section that closes before the horizon is *frozen*: written once, with the payload and cache key write computes for it at stop (`notes_sections/`). Nothing past the horizon is written live: the sections still open are write's at stop. A payload whose call fails (after its temporary-error retries) is retried after a minute; one that fails twice, or once with a blocking error, is given up until it changes, and the write stage retries it at stop | `notes_sections/`, `NOTES_UPDATED` (`completed_parts`: sections written, for the Live page's progress line) |
 
@@ -161,7 +178,16 @@ Inputs arrive in pieces, so each lane has a rule for putting them back together:
   retry), then decoding resumes at the next WebM cluster and the gap is silence, as in ingest.
   Frames are ordered by holding them back briefly; a frame later than that is skipped live, and
   recorded as skipped input only if ingest would have sampled it (its grid cell has no earlier
-  frame).
+  frame). A screen-off timed at or before a frame already fed, a frame from before a
+  screen-off already applied (it belongs to the share that ended there), or a frame from before
+  T_m (its share's screen-on landed after the transcript passed it) is skipped input too: stop
+  then runs detect again from everything captured.
+- *The screen turned off and on:* ingest writes the off times to `frames.json` (`screen_off`) and
+  sizes each share from its own first frame, so a small window shared first doesn't shrink the
+  entire screen shared later. Detect ends the open moment at each off time and compares a share's
+  frames only with each other, so what was shown is placed only while it was shared: speech
+  while nothing is shared isn't aligned with the last screen, and sections can break there. The
+  live screen lane applies the same rules, so its moments are promoted at stop.
 - *Content built up over time:* `MomentDetector` keeps a slide build or a worked example as one
   moment with ordered builds, and closes it only when the next screen has settled and lasted
   `min_moment_s`, so a brief switch to another window never splits it. Open moments are not read.
