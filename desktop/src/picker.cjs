@@ -56,4 +56,14 @@ function chosenId(list, id) {
   return [...list.screens, ...list.windows].some((item) => item.id === id) ? id : null
 }
 
-module.exports = { SCREEN_SETTINGS_URL, listSources, defaultSelection, chosenId }
+/**
+ * A display-media request for the Mac's sound alone (the Live page's "Record audio"): answered
+ * with `{audio: 'loopback'}` and no picker. Nothing is chosen, and with no screen source macOS
+ * asks for no Screen Recording permission (measured, Electron 45, macOS 26). A request with a
+ * picture must get one: answering it with sound only is refused.
+ */
+function soundOnly(request) {
+  return !request.videoRequested && Boolean(request.audioRequested)
+}
+
+module.exports = { SCREEN_SETTINGS_URL, listSources, defaultSelection, chosenId, soundOnly }

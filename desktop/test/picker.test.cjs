@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict')
 const { test } = require('node:test')
-const { listSources, defaultSelection, chosenId } = require('../src/picker.cjs')
+const { listSources, defaultSelection, chosenId, soundOnly } = require('../src/picker.cjs')
 
 const screen = (id, displayId) => ({ id: `screen:${id}:0`, name: 'Entire screen', displayId, hasThumbnail: true })
 const win = (id, name, hasThumbnail = true) => ({ id: `window:${id}:0`, name, displayId: '', hasThumbnail })
@@ -72,4 +72,11 @@ test('the chosen id must be one the picker offered', () => {
   for (const id of ['window:100:0', 'screen:2:0', 'window:7:0 ', '', null, undefined, 7, { id: 'screen:1:0' }]) {
     assert.equal(chosenId(list, id), null, String(id))
   }
+})
+
+test('only a request for sound with no picture is answered without the picker', () => {
+  assert.equal(soundOnly({ videoRequested: false, audioRequested: true }), true)
+  assert.equal(soundOnly({ videoRequested: true, audioRequested: true }), false)
+  assert.equal(soundOnly({ videoRequested: true, audioRequested: false }), false)
+  assert.equal(soundOnly({ videoRequested: false, audioRequested: false }), false)
 })

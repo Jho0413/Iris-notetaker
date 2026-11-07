@@ -7,14 +7,19 @@ const actions = (view) => view.items.filter((i) => i.id).map((i) => i.id)
 const labels = (view) => view.items.filter((i) => i.label).map((i) => i.label)
 
 test('the Live page’s phases map onto the tray’s', () => {
-  assert.deepEqual(parseReport({ phase: 'idle' }), { phase: 'idle', startedAt: 0 })
-  assert.deepEqual(parseReport({ phase: 'requesting' }), { phase: 'starting', startedAt: 0 })
-  assert.deepEqual(parseReport({ phase: 'recording', startedAt: T0 }), { phase: 'recording', startedAt: T0 })
-  assert.deepEqual(parseReport({ phase: 'stopping', startedAt: T0 }), { phase: 'stopping', startedAt: 0 })
-  assert.deepEqual(parseReport({ phase: 'finishing', startedAt: T0 }), { phase: 'stopping', startedAt: 0 })
+  assert.deepEqual(parseReport({ phase: 'idle' }), IDLE)
+  assert.deepEqual(parseReport({ phase: 'requesting' }), { phase: 'starting', startedAt: 0, macSoundRefused: false })
+  assert.deepEqual(parseReport({ phase: 'recording', startedAt: T0, macSoundRefused: false }), {
+    phase: 'recording',
+    startedAt: T0,
+    macSoundRefused: false,
+  })
+  assert.equal(parseReport({ phase: 'recording', startedAt: T0, macSoundRefused: true }).macSoundRefused, true)
+  assert.deepEqual(parseReport({ phase: 'stopping', startedAt: T0 }), { phase: 'stopping', startedAt: 0, macSoundRefused: false })
+  assert.deepEqual(parseReport({ phase: 'finishing', startedAt: T0 }), { phase: 'stopping', startedAt: 0, macSoundRefused: false })
   // The Live page left while still uploading: no start time, still finishing.
-  assert.deepEqual(parseReport({ phase: 'stopping', startedAt: 0 }), { phase: 'stopping', startedAt: 0 })
-  assert.deepEqual(parseReport({ phase: 'unfinished', startedAt: T0 }), { phase: 'unfinished', startedAt: 0 })
+  assert.deepEqual(parseReport({ phase: 'stopping', startedAt: 0 }), { phase: 'stopping', startedAt: 0, macSoundRefused: false })
+  assert.deepEqual(parseReport({ phase: 'unfinished', startedAt: T0 }), { phase: 'unfinished', startedAt: 0, macSoundRefused: false })
 })
 
 test('a malformed report is refused, not guessed at', () => {
@@ -31,15 +36,17 @@ test('a malformed report is refused, not guessed at', () => {
     { phase: 'recording', startedAt: -5 },
     { phase: 'recording', startedAt: Number.NaN },
     { phase: 'recording', startedAt: Infinity },
-    { phase: 'recording', startedAt: '1800000000000' },
+    { phase: 'recording', startedAt: '1800000000000', macSoundRefused: false },
+    { phase: 'recording', startedAt: T0 }, // whether the Mac's sound was refused
+    { phase: 'recording', startedAt: T0, macSoundRefused: 'no' },
   ]) {
     assert.equal(parseReport(bad), null, JSON.stringify(bad))
   }
 })
 
-test('idle: Record Screen…, and nothing that says it is recording', () => {
+test('idle: Record Audio and Record Screen…, and nothing that says it is recording', () => {
   const view = trayView(IDLE, T0)
-  assert.deepEqual(actions(view), ['record', 'show', 'quit'])
+  assert.deepEqual(actions(view), ['recordAudio', 'recordScreen', 'show', 'quit'])
   assert.equal(view.recording, false)
   assert.equal(view.title, '')
 })
@@ -49,7 +56,7 @@ test('recording: the red icon, the elapsed time beside it, and Stop', () => {
   assert.equal(view.recording, true)
   assert.equal(view.title, '1:05')
   assert.deepEqual(actions(view), ['stop', 'show', 'quit'])
-  assert.ok(!actions(view).includes('record'), 'no second recording while one runs')
+  assert.ok(!actions(view).some((a) => a.startsWith('record')), 'no second recording while one runs')
 })
 
 test('while starting or stopping, neither Record nor Stop is offered', () => {
@@ -64,11 +71,11 @@ test('while starting or stopping, neither Record nor Stop is offered', () => {
 test('a full start and stop from the menu bar', () => {
   // What the page reports, in order, for one recording started and stopped from the tray.
   const reports = [
-    [{ phase: 'idle', startedAt: 0 }, ['record', 'show', 'quit']],
+    [{ phase: 'idle', startedAt: 0 }, ['recordAudio', 'recordScreen', 'show', 'quit']],
     [{ phase: 'requesting', startedAt: 0 }, ['show', 'quit']],
-    [{ phase: 'recording', startedAt: T0 }, ['stop', 'show', 'quit']],
+    [{ phase: 'recording', startedAt: T0, macSoundRefused: false }, ['stop', 'show', 'quit']],
     [{ phase: 'stopping', startedAt: T0 }, ['show', 'quit']],
-    [{ phase: 'idle', startedAt: 0 }, ['record', 'show', 'quit']], // the page left for the session
+    [{ phase: 'idle', startedAt: 0 }, ['recordAudio', 'recordScreen', 'show', 'quit']], // the page left for the session
   ]
   for (const [report, expected] of reports) {
     assert.deepEqual(actions(trayView(parseReport(report), T0 + 5000)), expected, report.phase)
@@ -100,8 +107,12 @@ function run(events, state = RELAY_START) {
   }
   return { state, effects }
 }
-const report = (phase, startedAt = T0) => ({ type: 'report', report: { phase, startedAt } })
-const RECORD = { type: 'record' }
+const report = (phase, startedAt = T0, macSoundRefused = false) => ({
+  type: 'report',
+  report: { phase, startedAt, macSoundRefused },
+})
+const RECORD = { type: 'record', mode: 'screen' }
+const RECORD_AUDIO = { type: 'record', mode: 'audio' }
 const STOP = { type: 'stop' }
 const LISTENING = { type: 'listening' }
 
@@ -113,18 +124,18 @@ test('Record with the window closed: one start, sent only once the UI listens', 
     LISTENING,
     LISTENING, // the Live page subscribes too
   ])
-  assert.deepEqual(effects, ['start'])
-  assert.equal(state.startPending, false)
+  assert.deepEqual(effects, ['start-screen'])
+  assert.equal(state.startPending, null)
 })
 
 test('Record with the UI already up starts at once', () => {
-  assert.deepEqual(run([LISTENING, RECORD]).effects, ['start'])
+  assert.deepEqual(run([LISTENING, RECORD]).effects, ['start-screen'])
 })
 
 test('a window closed before its UI loaded cancels the start', () => {
   const { state, effects } = run([RECORD, { type: 'windowClosed' }, LISTENING])
   assert.deepEqual(effects, [])
-  assert.equal(state.startPending, false)
+  assert.equal(state.startPending, null)
 })
 
 test('an engine that fails to start drops the waiting start, so Restart doesn’t record unasked', () => {
@@ -181,7 +192,7 @@ test('a full recording from the menu bar, window closed meanwhile', () => {
     report('stopping'),
     report('idle'), // the page left for the session
   ])
-  assert.deepEqual(effects, ['start', 'stop'])
+  assert.deepEqual(effects, ['start-screen', 'stop'])
   assert.deepEqual(state.recording, IDLE)
 })
 
@@ -197,15 +208,15 @@ const CANCELLED = { type: 'pickerCancelled' }
 
 test('Record from the menu bar shows only the picker: the window stays as it was', () => {
   // The start, the picker answered, recording: nothing asks for the window.
-  assert.deepEqual(run([RECORD, LISTENING, report('requesting'), report('recording')]).effects, ['start'])
+  assert.deepEqual(run([RECORD, LISTENING, report('requesting'), report('recording')]).effects, ['start-screen'])
   const { state } = run([LISTENING, RECORD, report('requesting'), report('recording')])
   assert.equal(state.quietStart, false, 'done once it records')
 })
 
 test('a cancel in the picker shows nothing; a start that fails otherwise shows the window', () => {
-  assert.deepEqual(run([LISTENING, RECORD, report('requesting'), CANCELLED, report('idle', 0)]).effects, ['start'])
+  assert.deepEqual(run([LISTENING, RECORD, report('requesting'), CANCELLED, report('idle', 0)]).effects, ['start-screen'])
   // E.g. the microphone blocked after a source was chosen: the Live page says why.
-  assert.deepEqual(run([LISTENING, RECORD, report('requesting'), report('idle', 0)]).effects, ['start', 'show'])
+  assert.deepEqual(run([LISTENING, RECORD, report('requesting'), report('idle', 0)]).effects, ['start-screen', 'show'])
 })
 
 test("a start from the Live page's own button never shows the window: it is in front already", () => {
@@ -215,7 +226,7 @@ test("a start from the Live page's own button never shows the window: it is in f
 test('an idle report before the start reaches the page keeps the start quiet until it ends', () => {
   // The Live page reports idle as it opens, then starts.
   const { effects } = run([RECORD, LISTENING, report('idle', 0), report('requesting'), report('idle', 0)])
-  assert.deepEqual(effects, ['start', 'show'])
+  assert.deepEqual(effects, ['start-screen', 'show'])
 })
 
 test('a failed start is shown once: the next start from the page itself is not quiet', () => {
@@ -238,12 +249,35 @@ test('a page that goes away or a closed window ends a quiet start', () => {
 test('a quiet start the page never answers shows the window: it is held up by a question it asks', () => {
   const UNANSWERED = { type: 'startUnanswered' }
   // "Leave without saving?" on the notes editor blocks the move to the Live page: still idle.
-  assert.deepEqual(run([LISTENING, RECORD, UNANSWERED]).effects, ['start', 'show'])
+  assert.deepEqual(run([LISTENING, RECORD, UNANSWERED]).effects, ['start-screen', 'show'])
   // Answered in time: starting (the picker may still be open), recording, failed or cancelled.
-  assert.deepEqual(run([LISTENING, RECORD, report('requesting'), UNANSWERED]).effects, ['start'])
-  assert.deepEqual(run([LISTENING, RECORD, report('requesting'), report('recording'), UNANSWERED]).effects, ['start'])
-  assert.deepEqual(run([LISTENING, RECORD, report('requesting'), report('idle', 0), UNANSWERED]).effects, ['start', 'show'])
-  assert.deepEqual(run([LISTENING, RECORD, report('requesting'), CANCELLED, report('idle', 0), UNANSWERED]).effects, ['start'])
+  assert.deepEqual(run([LISTENING, RECORD, report('requesting'), UNANSWERED]).effects, ['start-screen'])
+  assert.deepEqual(run([LISTENING, RECORD, report('requesting'), report('recording'), UNANSWERED]).effects, ['start-screen'])
+  assert.deepEqual(run([LISTENING, RECORD, report('requesting'), report('idle', 0), UNANSWERED]).effects, ['start-screen', 'show'])
+  assert.deepEqual(run([LISTENING, RECORD, report('requesting'), CANCELLED, report('idle', 0), UNANSWERED]).effects, ['start-screen'])
   // A start from the Live page's own button is never quiet.
   assert.deepEqual(run([LISTENING, report('requesting'), report('idle', 0), UNANSWERED]).effects, [])
+})
+
+test('Record Audio starts an audio recording, also once the UI loads, with no window shown', () => {
+  assert.deepEqual(run([LISTENING, RECORD_AUDIO, report('requesting'), report('recording')]).effects, ['start-audio'])
+  assert.deepEqual(run([RECORD_AUDIO, LISTENING]).effects, ['start-audio'])
+  // A start that fails (the microphone blocked) shows the window, which says why.
+  assert.deepEqual(run([LISTENING, RECORD_AUDIO, report('requesting'), report('idle', 0)]).effects, [
+    'start-audio',
+    'show',
+  ])
+  assert.deepEqual(run([LISTENING, { type: 'record', mode: 'video' }]).effects, [], 'an unknown mode starts nothing')
+})
+
+test("macOS refusing the Mac's sound shows the window once: the page says how to allow it", () => {
+  const refused = report('recording', T0, true)
+  const atStart = run([LISTENING, RECORD_AUDIO, report('requesting'), refused, refused])
+  assert.deepEqual(atStart.effects, ['start-audio', 'show'])
+  // Refused later in the recording (macOS asked meanwhile), and from the page's own button.
+  assert.deepEqual(run([LISTENING, report('requesting'), report('recording'), refused]).effects, ['show'])
+  // The next recording starts afresh.
+  assert.deepEqual(run([report('stopping'), report('idle', 0), report('recording'), refused], atStart.state).effects, [
+    'show',
+  ])
 })

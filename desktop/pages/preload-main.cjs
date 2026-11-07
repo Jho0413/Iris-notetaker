@@ -14,14 +14,19 @@ contextBridge.exposeInMainWorld('irisApp', {
   /** Save the page, as printed, as a PDF named after `title`, where the user chooses.
    * Resolves {done: true} once saved, {done: false} if cancelled. */
   savePdf: (title) => ipcRenderer.invoke('iris-app:save-pdf', String(title)),
-  /** The Live page's phase, and when recording started (ms since the epoch), for the menu bar
-   * icon (desktop/src/tray.cjs). */
-  recordingChanged: (phase, startedAt) =>
-    ipcRenderer.send('iris-app:recording', { phase: String(phase), startedAt: Number(startedAt) }),
-  /** Call `listener` with "start" or "stop" when the menu bar asks. Returns the unsubscribe. */
+  /** The Live page's phase, when recording started (ms since the epoch), and whether macOS
+   * refused the Mac's sound to an audio recording, for the menu bar icon (desktop/src/tray.cjs). */
+  recordingChanged: (phase, startedAt, macSoundRefused) =>
+    ipcRenderer.send('iris-app:recording', {
+      phase: String(phase),
+      startedAt: Number(startedAt),
+      macSoundRefused: Boolean(macSoundRefused),
+    }),
+  /** Call `listener` with "start-audio", "start-screen" or "stop" when the menu bar asks.
+   * Returns the unsubscribe. */
   onRecordCommand: (listener) => {
     const relay = (_event, command) => {
-      if (command === 'start' || command === 'stop') listener(command)
+      if (command === 'start-audio' || command === 'start-screen' || command === 'stop') listener(command)
     }
     ipcRenderer.on('iris-app:record', relay)
     ipcRenderer.send('iris-app:record-listening')
