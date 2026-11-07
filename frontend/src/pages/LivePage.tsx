@@ -5,6 +5,7 @@ import { CaptureError, inDesktopApp } from '../capture/captureErrors'
 import { EndSessionError } from '../capture/endSession'
 import {
   type CaptureMode,
+  canShareScreen,
   clockStart,
   LiveCapture,
   macSoundRefused,
@@ -79,9 +80,13 @@ export function LivePage() {
   const capture = useRef<LiveCapture | null>(null)
   const stopping = useRef(false)
   const [mode, setMode] = useState<CaptureMode>('screen')
+  // The screen share, for its preview; kept while stopped for Continue's label (LiveCapture itself
+  // decides whether Continue asks for a screen again).
   const [display, setDisplay] = useState<MediaStream | null>(null)
+  const [sharing, setSharing] = useState(false) // Share screen: the picker is open
   const [macSound, setMacSound] = useState(false)
   const desktopApp = inDesktopApp()
+  const canShare = typeof navigator !== 'undefined' && canShareScreen(navigator.mediaDevices)
   const recording = phase === 'recording'
   const continuing = phase === 'continuing'
   // The stopped page shows while asking to continue too, its buttons waiting.
@@ -90,7 +95,7 @@ export function LivePage() {
   // Started and not yet handed over (or thrown away): leaving the page would end it.
   const open = recording || stopped
   // Told to the menu bar while stopped too, so a refusal brings the window up once per recording.
-  const soundRefused = open && macSoundRefused(desktopApp, mode, { macSound })
+  const soundRefused = open && macSoundRefused(desktopApp, { macSound })
   const elapsed = recordedMs(clock, now) / 1000
 
   useTitle(recording ? `● Recording ${formatClock(elapsed)}` : stopped ? `Stopped ${formatClock(elapsed)}` : 'Record live')
@@ -134,10 +139,12 @@ export function LivePage() {
       if (!data) throw new CaptureError(UNREACHABLE)
       return data.id
     }
-    // Sharing stopped from the browser's own controls, the mic went away or the recorder failed:
-    // finish. Held before start() so leaving the page during a prompt cancels the start.
+    // The mic went away or the recorder failed: finish. Sharing stopped from the browser's or
+    // macOS's own controls only turns the screen off. Held before start() so leaving the page
+    // during a prompt cancels the start.
     const live = new LiveCapture(createSession, {
       onEnded: () => void stopRef.current(),
+      onScreenEnded: () => setDisplay(null),
       onMacSoundEnded: () => setMacSound(false),
     })
     capture.current = live
@@ -219,14 +226,14 @@ export function LivePage() {
     setPhase('stopped')
   }
 
-  /** Capture again in the same recording (with a screen, the picker opens again). */
+  /** Capture again in the same recording (if the screen was on, the picker opens again). */
   async function continueRecording() {
     const live = capture.current
     if (!live || phase !== 'stopped' || busy) return
     setPhase('continuing')
     setError(null)
     try {
-      const again = await live.resume(mode)
+      const again = await live.resume()
       setDisplay(again.screen)
       setMacSound(again.macSound)
       const t = Date.now()
@@ -237,6 +244,29 @@ export function LivePage() {
       setPhase('stopped') // still stopped: nothing recorded is lost
       setError(captureError(err))
     }
+  }
+
+  /** Turn the screen on: the picker opens; the recording carries on whatever is chosen. */
+  async function shareScreen() {
+    const live = capture.current
+    if (!live || phase !== 'recording' || sharing || display) return
+    setSharing(true)
+    setError(null)
+    try {
+      const shared = await live.startScreen()
+      if (shared) setDisplay(shared) // null: stopped meanwhile, so nothing is shared
+    } catch (err) {
+      setError(captureError(err))
+    } finally {
+      setSharing(false)
+    }
+  }
+
+  /** Turn the screen off: the recording carries on with the audio. */
+  function stopSharing() {
+    if (phase !== 'recording') return
+    capture.current?.stopScreen()
+    setDisplay(null)
   }
 
   /**
@@ -284,6 +314,8 @@ export function LivePage() {
     startRef.current = startIfIdle
     commandRef.current = (command) => {
       if (command === 'stop') pause()
+      else if (command === 'share-screen') void shareScreen()
+      else if (command === 'stop-sharing') stopSharing()
       else if (command === 'continue') void continueRecording()
       else if (command === 'make-notes' && phase === 'stopped' && !busy) void stopAndOpen()
       else if ((command === 'start-over' || command === 'discard') && phase === 'stopped' && !busy) {
@@ -297,9 +329,10 @@ export function LivePage() {
   // While recording, the app is told when the clock would have started without the stopped time,
   // so its clock shows the same elapsed time as the page's.
   const reportedStart = recording ? clockStart(clock) : 0
+  const screenOn = recording && display !== null
   useEffect(() => {
-    menuBar.phase(phase, reportedStart, soundRefused)
-  }, [phase, reportedStart, soundRefused])
+    menuBar.phase(phase, reportedStart, soundRefused, screenOn)
+  }, [phase, reportedStart, soundRefused, screenOn])
   useEffect(() => irisApp()?.onRecordCommand((command) => commandRef.current(command)), [])
   const startRequest = (location.state as LiveLocationState | null)?.startRequest
   const handledStart = useRef<number | undefined>(undefined)
@@ -359,7 +392,7 @@ export function LivePage() {
         icon: 'screen',
         label: 'Record audio + screen',
         detail: desktopApp
-          ? 'Also a screen or window you choose, with its sound.'
+          ? 'Also a screen or window you choose.'
           : 'Also a screen, window or tab you choose. Share a tab to include its sound.',
         waiting: desktopApp ? 'Choose what to record…' : 'Choose what to share in the browser dialog…',
       },
@@ -442,8 +475,7 @@ export function LivePage() {
           <span>
             <Icon name="mic" /> Microphone {stopped ? 'off' : 'on'}
           </span>
-          {mode === 'audio' &&
-            desktopApp &&
+          {desktopApp &&
             !stopped &&
             (macSound ? (
               <span>
@@ -456,6 +488,24 @@ export function LivePage() {
             ))}
         </span>
         <span className="spacer" />
+        {recording &&
+          canShare &&
+          (display ? (
+            <button type="button" className="btn" onClick={stopSharing} aria-label="Stop sharing">
+              <Icon name="screen" /> <span className="btn-label">Stop sharing</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="btn"
+              onClick={() => void shareScreen()}
+              disabled={sharing}
+              aria-label={sharing ? 'Choose what to share' : 'Share screen'}
+            >
+              {/* On a phone-width window only the icon shows (index.css). */}
+              <Icon name="screen" /> <span className="btn-label">{sharing ? 'Choose what to share…' : 'Share screen'}</span>
+            </button>
+          ))}
         {recording && (
           <button type="button" className="btn btn-stop" onClick={pause}>
             <Icon name="stop" /> Stop
@@ -484,7 +534,7 @@ export function LivePage() {
               <Icon name="check" /> Make notes
             </button>
             <button type="button" className="btn btn-lg" onClick={() => void continueRecording()} disabled={busy}>
-              <Icon name="record" /> {continuing ? (mode === 'screen' ? 'Choose what to record…' : 'Continuing…') : 'Continue recording'}
+              <Icon name="record" /> {continuing ? (display ? 'Choose what to record…' : 'Continuing…') : 'Continue recording'}
             </button>
             <div className="stop-choices-pair">
               <button type="button" className="btn" onClick={() => setConfirming('start-over')} disabled={busy}>
@@ -517,8 +567,11 @@ export function LivePage() {
             </div>
           </div>
         )}
-        {mode === 'audio' && !desktopApp && !stopped && (
-          <p className="after">In a browser, Iris records your microphone only.</p>
+        {!desktopApp && !display && !stopped && (
+          <p className="after">
+            In a browser, only your microphone is recorded while nothing is shared. To include a call's sound,
+            share its tab.
+          </p>
         )}
         {display && !stopped && (
           <video
@@ -537,7 +590,7 @@ export function LivePage() {
         {!stopped && (
           <p className="after">
             When you stop, you choose: make notes, continue, start over or discard.
-            {display && ' Stopping the share from the browser makes the notes.'}
+            {display && ' If sharing stops, the screen turns off and the recording carries on.'}
           </p>
         )}
       </div>

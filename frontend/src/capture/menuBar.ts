@@ -40,16 +40,18 @@ export function menuBarPhase(pagePhase: string, leftUploads: number): string {
  * a page that was left reports late (when its upload settles), and must not overwrite what a newer
  * Live page reported.
  */
-export function menuBarReporter(send: (phase: string, startedAt: number, macSoundRefused: boolean) => void) {
-  const idle = { phase: 'idle', startedAt: 0, macSoundRefused: false }
+export function menuBarReporter(
+  send: (phase: string, startedAt: number, macSoundRefused: boolean, screen: boolean) => void,
+) {
+  const idle = { phase: 'idle', startedAt: 0, macSoundRefused: false, screen: false }
   let page = idle
   let leftUploads = 0
-  const tell = () => send(menuBarPhase(page.phase, leftUploads), page.startedAt, page.macSoundRefused)
+  const tell = () => send(menuBarPhase(page.phase, leftUploads), page.startedAt, page.macSoundRefused, page.screen)
   return {
-    /** The Live page's phase now; `macSoundRefused`: macOS refused the Mac's sound to its audio
-     * recording. */
-    phase(phase: string, startedAt: number, macSoundRefused = false) {
-      page = { phase, startedAt, macSoundRefused }
+    /** The Live page's phase now; `macSoundRefused`: macOS refused the Mac's sound to its
+     * recording; `screen`: the screen is shared now. */
+    phase(phase: string, startedAt: number, macSoundRefused = false, screen = false) {
+      page = { phase, startedAt, macSoundRefused, screen }
       tell()
     },
     /** The Live page went away; `stillStopping`: its stop, still uploading what it captured. */
@@ -69,6 +71,6 @@ export function menuBarReporter(send: (phase: string, startedAt: number, macSoun
   }
 }
 
-export const menuBar = menuBarReporter((phase, startedAt, macSoundRefused) =>
-  irisApp()?.recordingChanged(phase, startedAt, macSoundRefused),
+export const menuBar = menuBarReporter((phase, startedAt, macSoundRefused, screen) =>
+  irisApp()?.recordingChanged(phase, startedAt, macSoundRefused, screen),
 )
