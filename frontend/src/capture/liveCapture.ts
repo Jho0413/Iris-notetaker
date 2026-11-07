@@ -82,6 +82,14 @@ export function browserEnv(): CaptureEnv {
   }
 }
 
+/**
+ * macOS refused the Mac's sound to an audio recording in the desktop app, so only the mic is
+ * recorded: the Live page says how to allow it. A browser never records it, so nothing is refused.
+ */
+export function macSoundRefused(desktopApp: boolean, mode: CaptureMode, started: Pick<StartedRecording, 'macSound'>): boolean {
+  return desktopApp && mode === 'audio' && !started.macSound
+}
+
 /** What a started recording captures, for the Live page to show. */
 export interface StartedRecording {
   /** The shared screen, for its preview; null for an audio recording. */
@@ -211,7 +219,9 @@ export class LiveCapture {
       this.ended('microphone-ended', 'The microphone was disconnected, so the recording was finished.'),
     )
     const sound = !screen && this.env.macSound ? await getMacSound(devices) : null
-    const macSound = sound ? hasLiveAudio(this.acquired(sound)) : false
+    if (sound) this.acquired(sound) // stopped at once if cancelled meanwhile
+    this.throwIfCancelled() // cancelled while a request that then failed was open
+    const macSound = sound ? hasLiveAudio(sound) : false
     sound?.getAudioTracks()[0]?.addEventListener('ended', this.onMacSoundEnded)
 
     const sources = [display, mic, sound].filter((s): s is MediaStream => !!s && hasLiveAudio(s))

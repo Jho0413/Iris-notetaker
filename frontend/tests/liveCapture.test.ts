@@ -5,6 +5,7 @@ import { CaptureError } from '../src/capture/captureErrors.ts'
 import {
   LiveCapture,
   SHARED_AUDIO,
+  macSoundRefused,
   type StartWorker,
   sendBeaconOrKeepalive,
   startTicker,
@@ -677,6 +678,29 @@ test("stop while the Mac's sound is being asked for cancels the start and releas
   await tick()
   assert.ok(t.mic.stopped && t.macSound.stopped)
   assert.equal(FakeRecorder.created.length, 0)
+})
+
+test("stop while the Mac's sound is asked for, which then fails: no recorder or mixer is made", async () => {
+  let refuse: (err: unknown) => void = () => {}
+  const t = audioSetup({ sound: () => new Promise((_, reject) => (refuse = reject)) })
+  const live = capture(t.env)
+  const starting = live.start('audio')
+  await tick()
+  await within(live.stop())
+  await assert.rejects(within(starting), /cancelled/)
+  refuse(new DOMException('Invalid capture constraints', 'AbortError'))
+  await tick()
+  await tick()
+  assert.equal(FakeRecorder.created.length, 0)
+  assert.equal(t.mixed.length, 0)
+  assert.ok(t.mic.stopped)
+})
+
+test("the Mac's sound counts as refused only for an audio recording in the app", () => {
+  assert.equal(macSoundRefused(true, 'audio', { macSound: false }), true)
+  assert.equal(macSoundRefused(true, 'audio', { macSound: true }), false)
+  assert.equal(macSoundRefused(true, 'screen', { macSound: false }), false, 'the sound comes with the share')
+  assert.equal(macSoundRefused(false, 'audio', { macSound: false }), false, 'a browser records the mic alone')
 })
 
 test('a browser without MediaRecorder says it cannot record audio', async () => {

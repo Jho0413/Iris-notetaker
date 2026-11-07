@@ -3,7 +3,7 @@ import { useBlocker, useLocation, useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import { CaptureError, inDesktopApp } from '../capture/captureErrors'
 import { EndSessionError } from '../capture/endSession'
-import { type CaptureMode, LiveCapture } from '../capture/liveCapture'
+import { type CaptureMode, LiveCapture, macSoundRefused } from '../capture/liveCapture'
 import { menuBar, type LiveLocationState } from '../capture/menuBar'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { Icon } from '../components/Icon'
@@ -57,8 +57,7 @@ export function LivePage() {
   const [display, setDisplay] = useState<MediaStream | null>(null)
   const [macSound, setMacSound] = useState(false)
   const desktopApp = inDesktopApp()
-  // macOS refused the Mac's sound: only the mic is recorded (a browser never has it).
-  const macSoundRefused = desktopApp && mode === 'audio' && !macSound && phase === 'recording'
+  const soundRefused = phase === 'recording' && macSoundRefused(desktopApp, mode, { macSound })
   const recording = phase === 'recording'
   const elapsed = recording || phase === 'stopping' ? (now - startedAt) / 1000 : 0
 
@@ -204,8 +203,8 @@ export function LivePage() {
   // The desktop app's menu bar icon (capture/menuBar.ts). It shows what this page is doing, and
   // its Record and Stop go through the same start() and stop as the buttons here.
   useEffect(() => {
-    menuBar.phase(phase, startedAt, macSoundRefused)
-  }, [phase, startedAt, macSoundRefused])
+    menuBar.phase(phase, startedAt, soundRefused)
+  }, [phase, startedAt, soundRefused])
   useEffect(
     () =>
       irisApp()?.onRecordCommand((command) => {
@@ -377,7 +376,7 @@ export function LivePage() {
             </div>
           </div>
         )}
-        {macSoundRefused && (
+        {soundRefused && (
           <div className="banner banner-warning" role="alert">
             <Icon name="alert" />
             <div className="banner-body">
