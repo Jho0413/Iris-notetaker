@@ -347,13 +347,14 @@ export function LivePage() {
             <Icon name="mic" /> Microphone on
           </span>
           {mode === 'audio' &&
+            desktopApp &&
             (macSound ? (
               <span>
                 <Icon name="system" /> Mac's sound on
               </span>
             ) : (
               <span className="warn">
-                <Icon name="system" /> {desktopApp ? "Mac's sound off" : 'Microphone only'}
+                <Icon name="system" /> Mac's sound off
               </span>
             ))}
         </span>
