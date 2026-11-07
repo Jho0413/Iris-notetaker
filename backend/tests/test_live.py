@@ -25,7 +25,6 @@ from iris.models import (
     LIVE_WITHOUT_AUDIO,
     UNREADABLE_LIVE_AUDIO,
     FrameIndex,
-    LiveCapture,
     SourceKind,
     UsageRecord,
 )
@@ -41,9 +40,12 @@ from iris.sources.browser_live import (
     find_cluster,
     fit,
     missing_audio_chunks,
-    read_capture,
+    screen_changes,
+    screen_offs,
+    split_shares,
     store_audio_chunk,
     store_frame,
+    store_screen_change,
 )
 from iris.store.layout import SessionPaths, read_model, session_paths
 from tests.test_api import wait_for_status
@@ -268,6 +270,24 @@ def test_frames_downscaled_and_letterboxed_to_one_size(paths: SessionPaths):
     assert wide[:50].mean() < 10 and wide[100:140].mean() > 50  # black bars above and below
 
 
+def test_each_share_is_sized_from_its_own_first_frame(paths: SessionPaths):
+    """A small window shared first doesn't shrink the entire screen shared after it."""
+    store_screen_change(paths, 0.0, on=True)
+    store_frame(paths, 0.0, jpeg(COLOURS[0], (160, 120)))  # a small window
+    store_frame(paths, 1.0, jpeg(COLOURS[1], (320, 120)))  # the window got wider: letterboxed
+    store_screen_change(paths, 2.5, on=False)
+    store_screen_change(paths, 9.0, on=True)
+    store_frame(paths, 9.2, b"\xff\xd8\xff truncated")  # unreadable: the next frame sizes it
+    store_frame(paths, 10.0, jpeg(COLOURS[2], (1280, 800)))  # the entire screen
+    store_frame(paths, 11.0, jpeg(COLOURS[3], (640, 400)))
+    index = finalize_frames(paths, fps=1.0, max_width=640)
+    assert index.screen_off == [2.5]
+    assert (index.width, index.height) == (160, 120)  # the first share's
+    sizes = [cv2.imread(str(paths.root / f.path)).shape[:2] for f in index.frames]
+    assert [f.t for f in index.frames] == [0.0, 1.0, 10.0, 11.0]
+    assert sizes == [(120, 160), (120, 160), (400, 640), (400, 640)]
+
+
 def test_finalize_frames_is_repeatable_and_removes_stale_frames(paths: SessionPaths):
     stale = paths.frames_dir / "999999999.jpg"
     stale.write_bytes(b"old")
@@ -321,19 +341,50 @@ def test_live_input_is_validated(client: TestClient):
     assert client.post("/api/live/nope/end").status_code == 404
 
 
-def test_an_audio_only_recording_is_recorded_as_such_and_refuses_frames(
-    client: TestClient, settings: Settings, webm: bytes
-):
+def post_screen(client: TestClient, sid: str, t: float | str, on: bool | str) -> int:
+    on = str(on).lower() if isinstance(on, bool) else on
+    return client.post(f"/api/live/{sid}/screen?t={t}&on={on}").status_code
+
+
+def test_a_screen_recording_starts_with_the_screen_on(client: TestClient, settings: Settings):
+    shared = start(client)  # a screen recording is the default
+    assert screen_changes(session_paths(settings.sessions_dir, shared)) == [(0.0, True)]
+    sid = client.post("/api/live", json={"title": "call", "screen": False}).json()["id"]
+    assert screen_changes(session_paths(settings.sessions_dir, sid)) == []
+
+
+def test_the_screen_is_turned_on_and_off_during_a_recording(client: TestClient, settings: Settings):
     sid = client.post("/api/live", json={"title": "call", "screen": False}).json()["id"]
     paths = session_paths(settings.sessions_dir, sid)
-    assert read_capture(paths) == LiveCapture(screen=False)
-    assert post_audio(client, sid, 0, split(webm)[0]) == 204
-    assert post_frame(client, sid, 1.0, jpeg(COLOURS[0])) == 409
-    assert not paths.live_frames_dir.exists() or not any(paths.live_frames_dir.iterdir())
-    # A screen recording is the default.
-    shared = start(client)
-    assert read_capture(session_paths(settings.sessions_dir, shared)) == LiveCapture(screen=True)
-    assert post_frame(client, shared, 1.0, jpeg(COLOURS[0])) == 204
+    assert post_screen(client, sid, 12.5, True) == 204
+    assert post_frame(client, sid, 13.0, jpeg(COLOURS[0])) == 204  # frames come while it is on
+    assert post_screen(client, sid, 40.25, False) == 204
+    assert post_screen(client, sid, 40.25, False) == 204  # a retry: no-op
+    # Stop, then Continue with the screen: off and on at the same time, off first.
+    assert post_screen(client, sid, 60.0, True) == 204
+    assert post_screen(client, sid, 60.0, False) == 204
+    assert screen_changes(paths) == [(12.5, True), (40.25, False), (60.0, False), (60.0, True)]
+    assert screen_offs(paths) == [40.25, 60.0]
+
+
+def test_screen_changes_are_validated(client: TestClient):
+    sid = start(client)
+    for t in ("nan", "inf", "-1", "86401"):
+        assert post_screen(client, sid, t, True) == 422
+    assert post_screen(client, sid, 1.0, "maybe") == 422
+    assert client.post(f"/api/live/{sid}/screen?t=1").status_code == 422  # on is required
+    assert post_screen(client, "nope", 1.0, True) == 404
+    assert client.post(f"/api/live/{sid}/end", json={"allow_gaps": True}).status_code == 200
+    assert post_screen(client, sid, 2.0, False) == 409  # no longer recording
+
+
+def test_frames_split_into_shares_where_the_screen_was_turned_off():
+    frames = [(t, Path(f"{t}.jpg")) for t in (0.0, 1.0, 2.0, 5.0, 6.0, 9.0)]
+    shares = split_shares(frames, [2.0, 3.0, 4.0, 8.0])
+    # At an off time, a frame is the next share's; offs with no frames between them give none.
+    assert [[t for t, _ in share] for share in shares] == [[0.0, 1.0], [2.0], [5.0, 6.0], [9.0]]
+    assert split_shares(frames, []) == [frames]
+    assert split_shares([], [1.0]) == []
 
 
 def test_repeated_chunk_with_other_content_conflicts(client: TestClient, webm: bytes):

@@ -1,26 +1,30 @@
 """Browser live source: audio chunks and screen frames posted by the UI while recording.
 
 Capture (while recording, through ``api/routes/live.py``):
-  - What is captured: ``live/capture.json`` (``LiveCapture``), written when the recording starts.
-    An audio-only recording posts no frames.
+  - The screen: every time the shared screen is turned on or off, an empty file
+    ``live/screen/<t_ms:09d>.on`` or ``.off``. A recording can start with the screen on or off
+    and turn it on and off any number of times; frames are posted only while it is on.
   - Audio: MediaRecorder timeslice chunks, stored as ``live/audio/<seq:06d>.webm``. The chunks are
     consecutive byte ranges of one WebM stream (only chunk 0 has the header), so concatenated in
     ``seq`` order they form a valid stream whose timestamps start at 0 when recording started.
   - Frames: JPEG screenshots, stored as ``live/frames/<t_ms:09d>.jpg``, where ``t`` is seconds
     since recording started (the same clock as the audio).
 
-  Chunks are keyed by ``seq`` and frames by ``t``, so chunks arriving out of order land in the
-  right place and a chunk posted twice (a client retry) is stored once. Each file is written
-  atomically. Ingest never modifies the captured files, so a session can be re-ingested (retried)
-  at any time, and the session stays its own recording.
+  Chunks are keyed by ``seq``, frames and screen changes by ``t``, so chunks arriving out of order
+  land in the right place and a chunk posted twice (a client retry) is stored once. Each file is
+  written atomically. Ingest never modifies the captured files, so a session can be re-ingested
+  (retried) at any time, and the session stays its own recording.
 
 Ingest (when recording ends) writes the standard layout, exactly like the upload source:
   - ``audio.wav``: the chunks decoded in order as 16 kHz mono. Audio is placed by its timestamps,
     so a missing chunk becomes silence of the same length rather than pulling later speech
     earlier, which keeps audio and screen aligned.
   - ``frames/`` + ``frames.json``: captured frames sampled onto the ``frame_fps`` grid, scaled to
-    at most ``frame_max_width`` wide and letterboxed to one size, because detection compares
-    frames pixel by pixel and a shared window can change size mid-session.
+    at most ``frame_max_width`` wide and letterboxed to one size per share, because detection
+    compares frames pixel by pixel and a shared window can change size mid-share. Each share (the
+    frames between two times the screen was turned off) is sized from its own first frame, so a
+    small window shared first doesn't shrink the entire screen shared later; frames are never
+    compared across a screen-off. The off times go in ``frames.json`` (``screen_off``).
 """
 
 import asyncio
@@ -45,11 +49,10 @@ from iris.models import (
     UNREADABLE_LIVE_AUDIO,
     FrameIndex,
     FrameRef,
-    LiveCapture,
 )
 from iris.pipeline.context import StageContext
 from iris.sources.upload import JPEG_QUALITY, output_size
-from iris.store.layout import SessionPaths, read_model, write_model
+from iris.store.layout import SessionPaths, write_model
 
 log = logging.getLogger(__name__)
 
@@ -71,6 +74,7 @@ FRAME_WORKERS = 4
 
 _AUDIO_NAME = re.compile(r"^(\d{6})\.webm$")
 _FRAME_NAME = re.compile(r"^(\d{9})\.jpg$")
+_SCREEN_CHANGE_NAME = re.compile(r"^(\d{9})\.(on|off)$")
 
 
 class ChunkConflict(Exception):
@@ -88,25 +92,6 @@ def audio_chunk_path(paths: SessionPaths, seq: int) -> Path:
     return paths.live_audio_dir / f"{seq:06d}.webm"
 
 
-def store_capture(paths: SessionPaths, capture: LiveCapture) -> None:
-    paths.live_dir.mkdir(parents=True, exist_ok=True)
-    write_model(paths.live_capture, capture)
-
-
-def read_capture(paths: SessionPaths) -> LiveCapture:
-    """What the recording captures. A recording started before ``capture.json`` existed shared its
-    screen; so does one whose file is unreadable, which only means its notes wait for stop."""
-    try:
-        return read_model(paths.live_capture, LiveCapture)
-    except FileNotFoundError:
-        return LiveCapture()
-    except ValueError:
-        log.warning(
-            "%s is unreadable; treating the recording as sharing a screen", paths.live_capture
-        )
-        return LiveCapture()
-
-
 def store_audio_chunk(paths: SessionPaths, seq: int, data: bytes) -> bool:
     """Store audio chunk ``seq``. Returns False if this exact chunk was already stored."""
     return _store_once(audio_chunk_path(paths, seq), data)
@@ -115,6 +100,13 @@ def store_audio_chunk(paths: SessionPaths, seq: int, data: bytes) -> bool:
 def store_frame(paths: SessionPaths, t: float, data: bytes) -> bool:
     """Store a frame captured ``t`` s after recording started. False if already stored."""
     return _store_once(paths.live_frames_dir / frame_name(t), data)
+
+
+def store_screen_change(paths: SessionPaths, t: float, on: bool) -> bool:
+    """Store that the screen was turned on (or off) ``t`` s after recording started. False if
+    already stored. Off and on at the same ``t`` (Stop, then Continue) are two changes."""
+    name = f"{round(t * 1000):09d}.{'on' if on else 'off'}"
+    return _store_once(paths.live_screen_dir / name, b"")
 
 
 def _store_once(path: Path, data: bytes) -> bool:
@@ -157,6 +149,40 @@ def captured_frames(paths: SessionPaths) -> list[tuple[float, Path]]:
         if m := _FRAME_NAME.match(p.name):
             found.append((int(m.group(1)) / 1000, p))
     return sorted(found)
+
+
+def screen_changes(paths: SessionPaths) -> list[tuple[float, bool]]:
+    """Stored screen changes as ``(t, on)``, in time order; at the same ``t``, off comes first
+    (sharing stopped, then a new share started)."""
+    if not paths.live_screen_dir.is_dir():
+        return []
+    found = []
+    for p in paths.live_screen_dir.iterdir():
+        if m := _SCREEN_CHANGE_NAME.match(p.name):
+            found.append((int(m.group(1)) / 1000, m.group(2) == "on"))
+    return sorted(found)
+
+
+def screen_offs(paths: SessionPaths) -> list[float]:
+    """When the screen was turned off, in time order: what was shown before is not on screen
+    after. An off while it was already off changes nothing, so every off is listed."""
+    return [t for t, on in screen_changes(paths) if not on]
+
+
+def split_shares(
+    frames: Sequence[tuple[float, Path]], offs: Sequence[float]
+) -> list[list[tuple[float, Path]]]:
+    """``frames`` (in time order) split where the screen was turned off: a frame at or after an
+    off time belongs to the next share. Empty shares are left out."""
+    shares: list[list[tuple[float, Path]]] = [[]]
+    pending = iter(sorted(offs))
+    off = next(pending, None)
+    for frame in frames:
+        while off is not None and frame[0] >= off:
+            shares.append([])
+            off = next(pending, None)
+        shares[-1].append(frame)
+    return [share for share in shares if share]
 
 
 # --- Ingest -----------------------------------------------------------------------------------
@@ -424,8 +450,8 @@ def finalize_frames(paths: SessionPaths, fps: float, max_width: int) -> FrameInd
 
     As in the upload source, ``frames.json`` is the commit point: it is removed first and written
     atomically at the end. Frames are sampled onto the ``k/fps`` grid by timestamp (the browser
-    sends about one per second, unevenly). Unreadable frames are skipped. No frames (audio-only
-    capture) gives an empty index.
+    sends about one per second, unevenly), then sized per share (``split_shares``). Unreadable
+    frames are skipped. No frames (audio-only capture) gives an empty index.
 
     The live screen lane builds the same frames one at a time with ``GridSampler`` and
     ``FrameNormaliser``; this batch version decodes frames in parallel but writes the same names
@@ -434,30 +460,38 @@ def finalize_frames(paths: SessionPaths, fps: float, max_width: int) -> FrameInd
     paths.frame_index.unlink(missing_ok=True)
     clear_frames(paths)
 
-    picked = _sample_on_grid(captured_frames(paths), fps)
-    size: tuple[int, int] | None = None  # (width, height), from the first readable frame
-    first = 0
-    while size is None and first < len(picked):
-        image = _read_frame(picked[first][1])
-        if image is None:
-            first += 1
-            continue
-        height, width = image.shape[:2]
-        size = output_size(width, height, 0, max_width)
-
+    offs = screen_offs(paths)
+    shares = split_shares(_sample_on_grid(captured_frames(paths), fps), offs)
+    first_size: tuple[int, int] | None = None
     refs: list[FrameRef] = []
-    if size is not None:
-        target = size
+    with ThreadPoolExecutor(FRAME_WORKERS) as pool:
+        for share in shares:
+            size, first = _share_size(share, max_width)
+            if size is None:
+                continue
+            first_size = first_size or size
 
-        def convert(item: tuple[float, Path]) -> FrameRef | None:
-            return _convert_frame(item[0], item[1], paths.frames_dir, target)
+            def convert(item: tuple[float, Path], size: tuple[int, int] = size) -> FrameRef | None:
+                return _convert_frame(item[0], item[1], paths.frames_dir, size)
 
-        with ThreadPoolExecutor(FRAME_WORKERS) as pool:
-            refs = [ref for ref in pool.map(convert, picked[first:]) if ref is not None]
-    width, height = size or (0, 0)
-    index = FrameIndex(fps=fps, width=width, height=height, frames=refs)
+            refs += [ref for ref in pool.map(convert, share[first:]) if ref is not None]
+    width, height = first_size or (0, 0)
+    index = FrameIndex(fps=fps, width=width, height=height, frames=refs, screen_off=offs)
     write_model(paths.frame_index, index)
     return index
+
+
+def _share_size(
+    share: Sequence[tuple[float, Path]], max_width: int
+) -> tuple[tuple[int, int] | None, int]:
+    """The share's output size (from its first readable frame) and that frame's position; no
+    size if none is readable."""
+    for i, (_, src) in enumerate(share):
+        image = _read_frame(src)
+        if image is not None:
+            height, width = image.shape[:2]
+            return output_size(width, height, 0, max_width), i
+    return None, len(share)
 
 
 def clear_frames(paths: SessionPaths) -> None:
@@ -497,14 +531,20 @@ def _sample_on_grid(frames: list[tuple[float, Path]], fps: float) -> list[tuple[
 class FrameNormaliser:
     """Writes sampled frames to ``frames/`` one at a time, as ``finalize_frames`` does.
 
-    The output size is fixed by the first readable frame; later frames are scaled and letterboxed
-    to it. Not thread-safe: call ``add`` from one thread at a time, in time order.
+    The output size is fixed by the share's first readable frame; later frames are scaled and
+    letterboxed to it. ``new_share`` starts the next share (the screen was turned off). Not
+    thread-safe: call ``add`` from one thread at a time, in time order.
     """
 
     def __init__(self, frames_dir: Path, max_width: int):
         self.frames_dir = frames_dir
         self.max_width = max_width
-        self.size: tuple[int, int] | None = None  # (width, height)
+        self.size: tuple[int, int] | None = None  # (width, height) of this share
+        self.first_size: tuple[int, int] | None = None  # of the first share (FrameIndex)
+
+    def new_share(self) -> None:
+        """The screen was turned off: the next frame fixes the size again."""
+        self.size = None
 
     def add(self, t: float, src: Path) -> FrameRef | None:
         """Normalise the frame captured at ``t``; None if it is unreadable."""
@@ -514,6 +554,7 @@ class FrameNormaliser:
         if self.size is None:
             height, width = image.shape[:2]
             self.size = output_size(width, height, 0, self.max_width)
+            self.first_size = self.first_size or self.size
         return _write_frame(t, src, image, self.frames_dir, self.size)
 
 

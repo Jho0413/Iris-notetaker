@@ -96,16 +96,6 @@ class Session(BaseModel):
     cost_partial: bool = False
 
 
-# --- Live capture ------------------------------------------------------------------------------
-
-
-class LiveCapture(BaseModel):
-    """What a live recording captures, chosen when it starts (``POST /live``)."""
-
-    # False: audio only. No frames are posted, so the live lanes don't wait for a screen.
-    screen: bool = True
-
-
 # --- Ingest output -----------------------------------------------------------------------------
 
 
@@ -118,9 +108,15 @@ class FrameRef(BaseModel):
 
 class FrameIndex(BaseModel):
     fps: float
+    # The first frames' size. A live recording's screen can be turned off and on again with
+    # another source, and each share keeps its own size (``screen_off``).
     width: int
     height: int
     frames: list[FrameRef]
+    # Live recordings: when the shared screen was turned off (seconds, in time order). What was
+    # shown before is not on screen after, so a moment ends there, and frames after it are a new
+    # share, compared only with each other.
+    screen_off: list[float] = []
 
 
 # --- Transcribe output -------------------------------------------------------------------------

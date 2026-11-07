@@ -98,7 +98,8 @@ class LiveProcessor:
         if lane := self.lanes.get(Lane.AUDIO):
             lane.wake()
 
-    def notify_frame(self) -> None:
+    def notify_screen(self) -> None:
+        """A frame or a screen change arrived."""
         if lane := self.lanes.get(Lane.SCREEN):
             lane.wake()
 
