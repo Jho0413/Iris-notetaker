@@ -5,7 +5,10 @@ import { CaptureError } from '../src/capture/captureErrors.ts'
 import {
   LiveCapture,
   SHARED_AUDIO,
+  clockStart,
   macSoundRefused,
+  pausedClock,
+  recordedMs,
   type StartWorker,
   sendBeaconOrKeepalive,
   startTicker,
@@ -54,6 +57,9 @@ class FakeRecorder extends EventTarget {
   }
   emit(text: string) {
     this.ondataavailable?.({ data: new Blob([text]) })
+  }
+  requestData() {
+    this.emit('flushed') // what the recorder held, delivered at once
   }
   pause() {
     this.state = 'paused'
@@ -784,7 +790,8 @@ test('stop pauses the recording and releases every source; continue carries on i
   assert.ok(sentT < 0.5 && sentT >= 0, `frame at ${sentT} s`)
   recorder.emit('b')
   await live.stop()
-  assert.deepEqual(JSON.parse(t.posted('/end')[0].body as string), { audio_chunks: 3, allow_gaps: false })
+  // 'a', the chunk flushed at Stop, 'b', and the last one: one stream.
+  assert.deepEqual(JSON.parse(t.posted('/end')[0].body as string), { audio_chunks: 4, allow_gaps: false })
   assert.ok(display2.stopped && t.mics[1].stopped)
 })
 
@@ -795,7 +802,7 @@ test('make notes straight from stopped: the last chunk is sent and the session e
   FakeRecorder.created[0].emit('a')
   live.pause()
   await live.stop()
-  assert.equal(t.posted('/audio').length, 2)
+  assert.equal(t.posted('/audio').length, 3) // 'a', flushed at Stop, the last one
   assert.equal(t.posted('/end').length, 1)
 })
 
@@ -856,8 +863,8 @@ test('discard stops everything, sends nothing more, and deletes the session', as
   t.env.page.dispatchEvent(new Event('pagehide'))
   assert.deepEqual(
     t.calls.map((c) => `${c.method} ${c.url}`),
-    ['DELETE /api/sessions/s1'],
-    'no chunk, no end request, no beacon',
+    ['POST /api/live/s1/audio?seq=0', 'DELETE /api/sessions/s1'],
+    'the chunk flushed at Stop, then nothing more: no chunk, no end request, no beacon',
   )
   assert.equal(t.beacons.length, 0)
 })
@@ -882,6 +889,100 @@ test('the mic going away while stopped ends nothing: it was let go', async () =>
   t.mics[0].end()
   assert.deepEqual(reasons, [])
   await live.stop()
+})
+
+test("stop sends what the recorder holds at once, so leaving while stopped doesn't lose it", async () => {
+  const t = resumableSetup()
+  const live = capture(t.env)
+  await live.start('audio')
+  live.pause()
+  await tick()
+  assert.equal(t.posted('/audio').length, 1, 'uploaded while stopped')
+})
+
+test('a failed discard leaves the recording untouched: it can be continued and finished', async () => {
+  const t = resumableSetup()
+  const live = capture(t.env)
+  await live.start('audio')
+  const recorder = FakeRecorder.created[0]
+  live.pause()
+  t.failWhen((url) => url === '/api/sessions/s1')
+  await assert.rejects(live.discard(), /wasn't deleted/)
+  t.failWhen(() => false)
+  assert.equal(recorder.state, 'paused')
+  await live.resume('audio')
+  recorder.emit('b')
+  await live.stop()
+  // The chunk flushed at Stop, the one after Continue, and the last one: none lost.
+  assert.deepEqual(JSON.parse(t.posted('/end')[0].body as string), { audio_chunks: 3, allow_gaps: false })
+})
+
+test('sharing that ends while a continue is still asking fails the continue; it stays stopped', async () => {
+  const t = resumableSetup()
+  const live = capture(t.env)
+  await live.start('screen')
+  live.pause()
+  const display2 = new FakeTrack('video')
+  t.env.mediaDevices.getDisplayMedia = async () => stream(display2)
+  let grant: (s: unknown) => void = () => {}
+  t.env.mediaDevices.getUserMedia = () => new Promise((resolve) => (grant = resolve))
+  const continuing = live.resume('screen')
+  await tick()
+  display2.end() // "Stop sharing" while the mic prompt is open
+  grant(stream(new FakeTrack('audio')))
+  await assert.rejects(continuing, /Screen sharing stopped before the recording continued/)
+  assert.equal(FakeRecorder.created[0].state, 'paused')
+  assert.deepEqual(t.mixed[0].live, [])
+})
+
+test('discard while a continue is still asking deletes the recording and stops what comes late', async () => {
+  const t = resumableSetup()
+  const live = capture(t.env)
+  await live.start('audio')
+  live.pause()
+  let grant: (s: unknown) => void = () => {}
+  t.env.mediaDevices.getUserMedia = () => new Promise((resolve) => (grant = resolve))
+  const continuing = live.resume('audio')
+  await tick()
+  await live.discard()
+  const late = new FakeTrack('audio')
+  grant(stream(late))
+  await assert.rejects(continuing, CaptureError)
+  assert.ok(late.stopped)
+  assert.equal(t.posted('/end').length, 0)
+})
+
+test("the Mac's sound is let go on Stop and asked for again on Continue", async () => {
+  const sounds: FakeTrack[] = []
+  const t = audioSetup({
+    sound: async () => {
+      const sound = new FakeTrack('audio') // a fresh capture each time, as the app gives
+      sounds.push(sound)
+      return stream(sound)
+    },
+  })
+  t.env.mediaDevices.getUserMedia = async () => stream(new FakeTrack('audio')) // a fresh mic too
+  const live = capture(t.env)
+  await live.start('audio')
+  live.pause()
+  assert.ok(sounds[0].stopped)
+  assert.deepEqual(t.mixed[0].live, [])
+  const again = await live.resume('audio')
+  assert.equal(again.macSound, true)
+  assert.equal(t.asked.length, 2, 'asked for once per start and continue')
+  assert.equal(sources(t)[1], sounds[1])
+  await live.stop()
+})
+
+test("the recording's clock leaves stopped time out, and the menu bar's start matches it", () => {
+  let clock = { recordedMs: 0, since: 1_000 }
+  assert.equal(recordedMs(clock, 13_000), 12_000)
+  clock = pausedClock(clock, 13_000) // Stop at 12 s
+  assert.deepEqual(clock, { recordedMs: 12_000, since: 0 })
+  assert.equal(recordedMs(clock, 99_000), 12_000, 'frozen while stopped')
+  clock = { ...clock, since: 50_000 } // Continue
+  assert.equal(recordedMs(clock, 53_000), 15_000)
+  assert.equal(53_000 - clockStart(clock), 15_000, "the menu bar's elapsed time")
 })
 
 test('a refused screen share is not retried without audio', async () => {

@@ -304,3 +304,25 @@ test("a stopped recording's choices reach the page; the ones that delete it show
   assert.deepEqual(run([LISTENING, report('recording'), { type: 'choice', choice: 'discard' }]).effects, [])
   assert.deepEqual(run([{ type: 'pageGone' }, { type: 'choice', choice: 'continue' }], stopped.state).effects, [])
 })
+
+test('a Continue from the menu bar is quiet: the window shows only if it fails, not for a cancel', () => {
+  const stopped = run([LISTENING, report('recording'), STOP, report('stopped', 0)]).state
+  const CONTINUE = { type: 'choice', choice: 'continue' }
+  assert.deepEqual(run([CONTINUE, report('continuing', 0), report('recording')], stopped).effects, ['continue'])
+  // E.g. the mic blocked: back to stopped, and the page says why.
+  assert.deepEqual(run([CONTINUE, report('continuing', 0), report('stopped', 0)], stopped).effects, ['continue', 'show'])
+  assert.deepEqual(run([CONTINUE, report('continuing', 0), CANCELLED, report('stopped', 0)], stopped).effects, ['continue'])
+})
+
+test("the Mac's sound refused brings the window up once per recording, not after each Continue", () => {
+  const refused = (phase, startedAt = T0) => ({ type: 'report', report: { phase, startedAt, macSoundRefused: true } })
+  const { effects } = run([
+    LISTENING,
+    report('requesting'),
+    refused('recording'),
+    refused('stopped', 0),
+    refused('continuing', 0),
+    refused('recording'),
+  ])
+  assert.deepEqual(effects, ['show'])
+})

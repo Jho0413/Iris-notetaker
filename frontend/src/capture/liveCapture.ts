@@ -98,6 +98,33 @@ export function macSoundRefused(desktopApp: boolean, mode: CaptureMode, started:
   return desktopApp && mode === 'audio' && !started.macSound
 }
 
+/**
+ * The recording's clock, which leaves stopped time out: what was recorded before (`recordedMs`)
+ * plus the time since capture last (re)started (`since`, ms since the epoch; 0 while stopped).
+ */
+export interface RecordingClock {
+  recordedMs: number
+  since: number
+}
+
+/** How long has been recorded at `now`. */
+export function recordedMs(clock: RecordingClock, now: number): number {
+  return clock.recordedMs + (clock.since ? Math.max(0, now - clock.since) : 0)
+}
+
+/** The clock stopped at `now`: what was recorded is kept, nothing more counts. */
+export function pausedClock(clock: RecordingClock, now: number): RecordingClock {
+  return { recordedMs: recordedMs(clock, now), since: 0 }
+}
+
+/**
+ * When the clock would have started had it never stopped: what the menu bar is told, so its
+ * elapsed time (now minus this) matches the page's.
+ */
+export function clockStart(clock: RecordingClock): number {
+  return clock.since - clock.recordedMs
+}
+
 /** What a started recording captures, for the Live page to show. */
 export interface StartedRecording {
   /** The shared screen, for its preview; null for an audio recording. */
@@ -254,7 +281,11 @@ export class LiveCapture {
     if (!this.recording || this.paused || this.stopping || this.resuming) return
     this.paused = true
     this.pausedAt = performance.now()
-    if (this.recorder?.state === 'recording') this.recorder.pause()
+    if (this.recorder?.state === 'recording') {
+      // Send what the recorder holds now: if the page goes away while stopped, it is uploaded.
+      this.recorder.requestData()
+      this.recorder.pause()
+    }
     this.stopFrames?.()
     this.stopFrames = undefined
     this.releaseSources()
@@ -271,6 +302,13 @@ export class LiveCapture {
       try {
         const got = await this.acquire(mode)
         if (!this.paused || this.stopping) throw new CaptureError('The recording was finished meanwhile.')
+        // Ended while the next prompt was open: their 'ended' was ignored while stopped.
+        if (got.screen && got.screen.getVideoTracks()[0]?.readyState !== 'live') {
+          throw new CaptureError('Screen sharing stopped before the recording continued. Continue again to share.')
+        }
+        if (!hasLiveAudio(got.mic)) {
+          throw new CaptureError('The microphone was disconnected before the recording continued. Try again.')
+        }
         this.pausedMs += performance.now() - this.pausedAt
         this.mixIn()
         if (this.recorder?.state === 'paused') this.recorder.resume()
@@ -289,9 +327,9 @@ export class LiveCapture {
   }
 
   /**
-   * Throw the recording away: stop everything, send nothing more, and delete the session. Throws
-   * if the delete request fails (the recording is already stopped and released then), so calling
-   * it again retries the delete.
+   * Throw the recording away: delete the session, then stop everything and send nothing more.
+   * The delete goes first: if it fails, this throws and the recording is untouched (still
+   * stopped, or recording), so it can be continued, finished, or discarded again.
    */
   async discard(): Promise<void> {
     if (this.opening) {
@@ -300,14 +338,6 @@ export class LiveCapture {
       await this.opening.catch(() => {})
       return
     }
-    this.recording = false
-    this.paused = false
-    this.finished = true
-    this.queue.close()
-    if (this.recorder) this.recorder.ondataavailable = null
-    this.release()
-    this.env.page.removeEventListener('beforeunload', this.onBeforeUnload)
-    this.env.page.removeEventListener('pagehide', this.onPageHide)
     const res = await this.env
       .fetch(`/api/sessions/${this.sessionId}`, { method: 'DELETE' })
       .catch((err: unknown) => {
@@ -317,6 +347,15 @@ export class LiveCapture {
     if (!res.ok && res.status !== 404) {
       throw new CaptureError("Iris couldn't delete the recording. Try again.")
     }
+    // The session is gone, so the backend refuses anything sent from here on anyway.
+    this.recording = false
+    this.paused = false
+    this.finished = true
+    this.queue.close()
+    if (this.recorder) this.recorder.ondataavailable = null
+    this.release()
+    this.env.page.removeEventListener('beforeunload', this.onBeforeUnload)
+    this.env.page.removeEventListener('pagehide', this.onPageHide)
   }
 
   /**
@@ -324,7 +363,9 @@ export class LiveCapture {
    * the mic and, in the desktop app, the Mac's sound (if macOS refuses it, there is none). Each is
    * kept for release (`this.sources`), or stopped at once if the start was cancelled meanwhile.
    */
-  private async acquire(mode: CaptureMode): Promise<{ screen: MediaStream | null; sound: MediaStream | null }> {
+  private async acquire(
+    mode: CaptureMode,
+  ): Promise<{ screen: MediaStream | null; mic: MediaStream; sound: MediaStream | null }> {
     const devices = this.env.mediaDevices!
     const screen = mode === 'screen'
     const display = screen ? this.acquired(await getDisplay(devices)) : null
@@ -346,7 +387,7 @@ export class LiveCapture {
     if (sound) this.acquired(sound) // stopped at once if cancelled meanwhile
     this.throwIfCancelled() // cancelled while a request that then failed was open
     sound?.getAudioTracks()[0]?.addEventListener('ended', this.onMacSoundEnded)
-    return { screen: display, sound }
+    return { screen: display, mic, sound }
   }
 
   /** Mix every source with live audio that isn't mixed in yet into the recorded track. */

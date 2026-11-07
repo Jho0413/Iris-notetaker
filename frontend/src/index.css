@@ -373,7 +373,6 @@ button.choice:disabled:not([data-waiting]) { opacity: 0.55; }
 .recorder .after { color: var(--text-2); max-width: 46ch; margin: 0; }
 .setup { display: flex; flex-direction: column; gap: 20px; }
 .setup .setup-note { margin: 0; color: var(--text-2); }
-/* One line whatever it holds, so the recorder never moves as counts arrive. */
 .recbar .rec-label-stopped { color: var(--text-2); }
 .recbar .rec-label-stopped .rec-dot { animation: none; background: var(--text-2); }
 .recorder .clock-stopped { color: var(--text-2); }
@@ -387,6 +386,7 @@ button.choice:disabled:not([data-waiting]) { opacity: 0.55; }
 .stop-choices-pair .btn { flex: 1; }
 .btn-danger-quiet { color: var(--recording); }
 .btn-danger-quiet:hover { color: var(--recording); }
+/* One line whatever it holds, so the recorder never moves as counts arrive. */
 .recorder .live-progress { margin: 0; min-height: 1.5em; color: var(--text-2); font-size: 0.875rem; }
 
 /* ---- Session ----------------------------------------------------------------------------------- */

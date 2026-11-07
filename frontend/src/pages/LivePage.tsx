@@ -3,7 +3,15 @@ import { useBlocker, useLocation, useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import { CaptureError, inDesktopApp } from '../capture/captureErrors'
 import { EndSessionError } from '../capture/endSession'
-import { type CaptureMode, LiveCapture, macSoundRefused } from '../capture/liveCapture'
+import {
+  type CaptureMode,
+  clockStart,
+  LiveCapture,
+  macSoundRefused,
+  pausedClock,
+  type RecordingClock,
+  recordedMs,
+} from '../capture/liveCapture'
 import { menuBar, type LiveLocationState } from '../capture/menuBar'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { Icon } from '../components/Icon'
@@ -15,11 +23,20 @@ import { useTitle } from '../session/useTitle'
 import { irisApp, type RecordCommand } from '../settings/appBridge'
 
 /**
- * `stopped`: capture is paused (Stop): make notes, continue, start over or discard.
+ * `stopped`: capture is paused (Stop): make notes, continue, start over or discard; `continuing`:
+ * asking for the sources again (Continue), still stopped until they are granted.
  * `stopping`: finishing the upload to make notes. `unfinished`: capture has ended, but telling the
  * backend to make notes failed; `finishing`: retrying that request.
  */
-type Phase = 'idle' | 'requesting' | 'recording' | 'stopped' | 'stopping' | 'unfinished' | 'finishing'
+type Phase =
+  | 'idle'
+  | 'requesting'
+  | 'recording'
+  | 'stopped'
+  | 'continuing'
+  | 'stopping'
+  | 'unfinished'
+  | 'finishing'
 
 /** A choice on the stopped page that deletes what was recorded, so it is confirmed first. */
 type Destructive = 'discard' | 'start-over'
@@ -54,9 +71,9 @@ export function LivePage() {
   const [error, setError] = useState<string | null>(null)
   // The recording's clock leaves stopped time out: what was recorded before, plus the time since
   // capture last (re)started (`since`, 0 while stopped).
-  const [clock, setClock] = useState({ recordedMs: 0, since: 0 })
+  const [clock, setClock] = useState<RecordingClock>({ recordedMs: 0, since: 0 })
   const [now, setNow] = useState(0)
-  const [busy, setBusy] = useState<'continue' | 'discard' | null>(null)
+  const [discarding, setDiscarding] = useState(false)
   const [confirming, setConfirming] = useState<Destructive | null>(null)
   const [discarded, setDiscarded] = useState(false)
   const capture = useRef<LiveCapture | null>(null)
@@ -66,12 +83,16 @@ export function LivePage() {
   const [display, setDisplay] = useState<MediaStream | null>(null)
   const [macSound, setMacSound] = useState(false)
   const desktopApp = inDesktopApp()
-  const soundRefused = phase === 'recording' && macSoundRefused(desktopApp, mode, { macSound })
   const recording = phase === 'recording'
-  const stopped = phase === 'stopped'
+  const continuing = phase === 'continuing'
+  // The stopped page shows while asking to continue too, its buttons waiting.
+  const stopped = phase === 'stopped' || continuing
+  const busy = continuing || discarding
   // Started and not yet handed over (or thrown away): leaving the page would end it.
   const open = recording || stopped
-  const elapsed = (clock.recordedMs + (clock.since ? now - clock.since : 0)) / 1000
+  // Told to the menu bar while stopped too, so a refusal brings the window up once per recording.
+  const soundRefused = open && macSoundRefused(desktopApp, mode, { macSound })
+  const elapsed = recordedMs(clock, now) / 1000
 
   useTitle(recording ? `● Recording ${formatClock(elapsed)}` : stopped ? `Stopped ${formatClock(elapsed)}` : 'Record live')
 
@@ -204,7 +225,7 @@ export function LivePage() {
     if (!live || phase !== 'recording') return
     live.pause()
     const t = Date.now()
-    setClock((c) => ({ recordedMs: c.recordedMs + (c.since ? t - c.since : 0), since: 0 }))
+    setClock((c) => pausedClock(c, t))
     setNow(t)
     setError(null)
     setPhase('stopped')
@@ -214,7 +235,7 @@ export function LivePage() {
   async function continueRecording() {
     const live = capture.current
     if (!live || phase !== 'stopped' || busy) return
-    setBusy('continue')
+    setPhase('continuing')
     setError(null)
     try {
       const again = await live.resume(mode)
@@ -225,9 +246,8 @@ export function LivePage() {
       setNow(t)
       setPhase('recording')
     } catch (err) {
-      setError(captureError(err)) // still stopped: nothing recorded is lost
-    } finally {
-      setBusy(null)
+      setPhase('stopped') // still stopped: nothing recorded is lost
+      setError(captureError(err))
     }
   }
 
@@ -239,15 +259,15 @@ export function LivePage() {
     const live = capture.current
     setConfirming(null)
     if (!live || busy) return
-    setBusy('discard')
+    setDiscarding(true)
     setError(null)
     try {
       await live.discard()
     } catch (err) {
-      setError(captureError(err))
+      setError(captureError(err)) // not deleted: the recording is still there, stopped
       return
     } finally {
-      setBusy(null)
+      setDiscarding(false)
     }
     capture.current = null
     setSessionId(null)
@@ -277,8 +297,10 @@ export function LivePage() {
     commandRef.current = (command) => {
       if (command === 'stop') pause()
       else if (command === 'continue') void continueRecording()
-      else if (command === 'make-notes' && stopped) void stopAndOpen()
-      else if ((command === 'start-over' || command === 'discard') && stopped) setConfirming(command)
+      else if (command === 'make-notes' && phase === 'stopped' && !busy) void stopAndOpen()
+      else if ((command === 'start-over' || command === 'discard') && phase === 'stopped' && !busy) {
+        setConfirming(command)
+      }
     }
   })
 
@@ -286,7 +308,7 @@ export function LivePage() {
   // its Record and Stop go through the same start() and stop as the buttons here.
   // While recording, the app is told when the clock would have started without the stopped time,
   // so its clock shows the same elapsed time as the page's.
-  const reportedStart = recording ? clock.since - clock.recordedMs : 0
+  const reportedStart = recording ? clockStart(clock) : 0
   useEffect(() => {
     menuBar.phase(phase, reportedStart, soundRefused)
   }, [phase, reportedStart, soundRefused])
@@ -470,18 +492,18 @@ export function LivePage() {
           <section className="stop-choices" aria-labelledby="stop-choices-title">
             <h2 id="stop-choices-title">Recording stopped at {formatClock(elapsed)}</h2>
             <p>Nothing more is recorded. What would you like to do with it?</p>
-            <button type="button" className="btn btn-primary btn-lg" onClick={() => void stopAndOpen()} disabled={!!busy}>
+            <button type="button" className="btn btn-primary btn-lg" onClick={() => void stopAndOpen()} disabled={busy}>
               <Icon name="check" /> Make notes
             </button>
-            <button type="button" className="btn btn-lg" onClick={() => void continueRecording()} disabled={!!busy}>
-              <Icon name="record" /> {busy === 'continue' ? (mode === 'screen' ? 'Choose what to record…' : 'Continuing…') : 'Continue recording'}
+            <button type="button" className="btn btn-lg" onClick={() => void continueRecording()} disabled={busy}>
+              <Icon name="record" /> {continuing ? (mode === 'screen' ? 'Choose what to record…' : 'Continuing…') : 'Continue recording'}
             </button>
             <div className="stop-choices-pair">
-              <button type="button" className="btn" onClick={() => setConfirming('start-over')} disabled={!!busy}>
+              <button type="button" className="btn" onClick={() => setConfirming('start-over')} disabled={busy}>
                 <Icon name="retry" /> Start over
               </button>
-              <button type="button" className="btn btn-danger-quiet" onClick={() => setConfirming('discard')} disabled={!!busy}>
-                <Icon name="trash" /> {busy === 'discard' ? 'Discarding…' : 'Discard'}
+              <button type="button" className="btn btn-danger-quiet" onClick={() => setConfirming('discard')} disabled={busy}>
+                <Icon name="trash" /> {discarding ? 'Discarding…' : 'Discard'}
               </button>
             </div>
           </section>
@@ -494,7 +516,7 @@ export function LivePage() {
             </div>
           </div>
         )}
-        {soundRefused && (
+        {soundRefused && recording && (
           <div className="banner banner-warning" role="alert">
             <Icon name="alert" />
             <div className="banner-body">

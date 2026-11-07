@@ -8,6 +8,7 @@ const TRAY_PHASE = {
   requesting: 'starting',
   recording: 'recording',
   stopped: 'stopped',
+  continuing: 'starting', // asking for the sources again, as a start does
   stopping: 'stopping',
   finishing: 'stopping',
   unfinished: 'unfinished',
@@ -17,18 +18,21 @@ const IDLE = Object.freeze({ phase: 'idle', startedAt: 0, macSoundRefused: false
 
 /**
  * A report from the page ({phase, startedAt, macSoundRefused}), checked once here: the tray's
- * state, or null for anything malformed. `startedAt` (ms since the epoch) and `macSoundRefused`
- * (an audio recording that macOS refused the Mac's sound, so only the mic is recorded) matter
- * only while recording: a page that goes away still uploading reports "stopping" without one.
+ * state, or null for anything malformed. `startedAt` (ms since the epoch) matters only while
+ * recording: a page that goes away still uploading reports "stopping" without one.
+ * `macSoundRefused`: macOS refused the Mac's sound to this audio recording, so only the mic is
+ * recorded; required while recording, and kept while stopped and continuing, so the window shows
+ * once per recording, not again after each Continue.
  */
 function parseReport(report) {
   const name = report?.phase
   if (typeof name !== 'string' || !Object.hasOwn(TRAY_PHASE, name)) return null
   const phase = TRAY_PHASE[name]
-  if (phase !== 'recording') return { phase, startedAt: 0, macSoundRefused: false }
-  const { startedAt, macSoundRefused } = report
+  const macSoundRefused = report.macSoundRefused === true
+  if (phase !== 'recording') return { phase, startedAt: 0, macSoundRefused }
+  const { startedAt } = report
   if (typeof startedAt !== 'number' || !Number.isFinite(startedAt) || startedAt <= 0) return null
-  if (typeof macSoundRefused !== 'boolean') return null
+  if (typeof report.macSoundRefused !== 'boolean') return null
   return { phase, startedAt, macSoundRefused }
 }
 
@@ -110,7 +114,8 @@ function hideOnClose(state) {
 /** A stopped recording's choices from the menu bar: the command each sends the page, and whether
  * the window shows (the page confirms the ones that delete the recording). */
 const STOPPED_CHOICES = {
-  continue: { send: 'continue', show: false },
+  // Like a start from the menu bar: quiet (only a picker shows), and the window shows if it fails.
+  continue: { send: 'continue', show: false, quiet: true },
   makeNotes: { send: 'make-notes', show: false },
   startOver: { send: 'start-over', show: true },
   discard: { send: 'discard', show: true },
@@ -120,9 +125,9 @@ const STOPPED_CHOICES = {
  * The relay between the menu bar and the main window's UI. `recording`: what the Live page last
  * reported. `listening`: the UI has subscribed to commands. `startPending`: the start command
  * ('start-audio' or 'start-screen') waiting for the UI to load (the window was closed, or the
- * engine is still starting), or null. `quietStart`: a start from the menu bar is under way with
- * the window left as it was (hidden, or in another Space): only the picker shows (none for
- * audio), and the window only if the start fails.
+ * engine is still starting), or null. `quietStart`: a start (or a stopped recording's Continue)
+ * from the menu bar is under way with the window left as it was (hidden, or in another Space):
+ * only the picker shows (none for audio), and the window only if it fails.
  */
 const RELAY_START = Object.freeze({ recording: IDLE, listening: false, startPending: null, quietStart: false })
 
@@ -165,7 +170,8 @@ function relay(state, event) {
     case 'choice': {
       const choice = Object.hasOwn(STOPPED_CHOICES, event.choice) ? STOPPED_CHOICES[event.choice] : null
       if (!choice || !state.listening || state.recording.phase !== 'stopped') return { state }
-      return { state, send: choice.send, ...(choice.show && { show: true }) }
+      const next = choice.quiet ? { ...state, quietStart: true } : state
+      return { state: next, send: choice.send, ...(choice.show && { show: true }) }
     }
     case 'listening':
       if (state.startPending) {
@@ -177,9 +183,11 @@ function relay(state, event) {
       if (!recording) return { state, malformed: true }
       // A stop that failed (the Live page's Try again): the window may be hidden, so show it.
       const stopFailed = state.recording.phase === 'stopping' && recording.phase === 'unfinished'
-      // A quiet start that ended without recording (and wasn't cancelled): the page says why.
+      // A quiet start (or Continue) that ended without recording, and wasn't cancelled in the
+      // picker: the page says why.
       const startEnded = state.recording.phase === 'starting' && recording.phase !== 'starting'
-      const startFailed = state.quietStart && startEnded && recording.phase === 'idle'
+      const backTo = recording.phase === 'idle' || recording.phase === 'stopped'
+      const startFailed = state.quietStart && startEnded && backTo
       // macOS refused the Mac's sound (at the start or later): the page says how to allow it,
       // and a call's other side isn't recorded meanwhile, so show it even mid-call, once.
       const soundRefused = recording.macSoundRefused && !state.recording.macSoundRefused
