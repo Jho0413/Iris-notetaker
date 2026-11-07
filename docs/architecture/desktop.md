@@ -218,14 +218,24 @@ with Screen Recording denied and the sound played by another process:
 - **Allowed:** one live "System audio" track with all of the Mac's sound. Chromium turns echo
   cancellation, noise suppression and gain control on for it by default, hence the constraints
   above.
-- **Refused at macOS's prompt:** `getDisplayMedia` still resolves, with a track that has already
-  ended and carries only silence; macOS remembers the answer and doesn't ask again. The Live page
-  treats a missing or ended track as refused: it records the microphone alone, shows how to allow
-  it, and the menu bar relay shows the window once (`macSoundRefused` in the page's report).
-- **The prompt doesn't hold the capture up:** the sound flows while it is open. A track that ends
-  later in the recording (refused then) is reported the same way.
+- **Refused, in a later launch:** `getDisplayMedia` still resolves, with a track that has already
+  ended; macOS remembers the answer and doesn't ask again. The Live page treats a missing or ended
+  track as refused: it records the microphone alone, shows how to allow it (then quit and reopen
+  Iris), and the menu bar relay shows the window once (`macSoundRefused` in the page's report). A
+  track that ends during a recording is reported the same way.
+- **Refused at the prompt, in the same launch:** macOS asks during the first Record audio, without
+  holding the capture up. Refusing then (measured in the packaged app) leaves the track live but
+  silent, for that recording and later ones until Iris is reopened, so Iris can't tell and says
+  nothing: the recording has the microphone only. Pure silence can't tell it either: an allowed
+  Mac with nothing playing also gives exact zeros, and Electron reports no status for this
+  permission (`getMediaAccessStatus` covers the microphone, camera and screen). Reopening Iris
+  shows the banner.
 - **Turning the switch off in System Settings** after allowing didn't stop the capture in a new
   launch; only refusing at the prompt did.
+- **Echo without headphones:** the microphone also hears the call from the speakers. Measured
+  with speech from another app through the MacBook's speakers: the microphone's copy, 30 ms
+  late, was at most about 1/20 of the Mac's sound in the mix (-26 dB): no audible doubling, and
+  the transcript was unaffected.
 - **Nothing shows** in the menu bar while it runs (no recording indicator).
 - A request for a picture answered with sound only is refused ("Video was requested, but no video
   stream was provided"), so Record audio + screen always goes through the picker.

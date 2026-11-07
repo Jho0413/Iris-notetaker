@@ -384,8 +384,8 @@ export function LivePage() {
               <p>
                 <strong>The Mac's sound isn't being recorded,</strong> only your microphone, so the other
                 side of a call is missing. To record it, allow Iris in System Settings → Privacy &amp;
-                Security → Screen &amp; System Audio Recording → System Audio Recording Only, then start a
-                new recording.
+                Security → Screen &amp; System Audio Recording → System Audio Recording Only, then quit and
+                reopen Iris.
               </p>
             </div>
           </div>
