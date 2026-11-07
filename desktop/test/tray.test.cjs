@@ -326,3 +326,11 @@ test("the Mac's sound refused brings the window up once per recording, not after
   ])
   assert.deepEqual(effects, ['show'])
 })
+
+test('closing the window while a Continue asks hides it: the recording is still open', () => {
+  const continuing = parseReport({ phase: 'continuing', startedAt: 0 })
+  assert.equal(continuing.phase, 'continuing')
+  assert.equal(hideOnClose(continuing), true)
+  assert.deepEqual(actions(trayView(continuing, T0)), ['show', 'quit'])
+  assert.match(labels(trayView(continuing, T0)).join(' '), /Continuing/)
+})

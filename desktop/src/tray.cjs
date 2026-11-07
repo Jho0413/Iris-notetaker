@@ -8,7 +8,7 @@ const TRAY_PHASE = {
   requesting: 'starting',
   recording: 'recording',
   stopped: 'stopped',
-  continuing: 'starting', // asking for the sources again, as a start does
+  continuing: 'continuing', // asking for the sources again; like a start, but the recording is open
   stopping: 'stopping',
   finishing: 'stopping',
   unfinished: 'unfinished',
@@ -85,6 +85,8 @@ function trayView(state, now) {
       return { recording: true, title: '', items: [status('Finishing the upload…'), SHOW, SEPARATOR, QUIT] }
     case 'starting':
       return { recording: false, title: '', items: [status('Starting…'), SHOW, SEPARATOR, QUIT] }
+    case 'continuing':
+      return { recording: false, title: '', items: [status('Continuing…'), SHOW, SEPARATOR, QUIT] }
     case 'unfinished':
       // The Live page offers Try again: the recording is kept, its notes not started yet.
       return { recording: false, title: '', items: [status('Recording stopped'), SHOW, SEPARATOR, QUIT] }
@@ -108,8 +110,11 @@ function trayView(state, now) {
  * recording, and the menu bar can still stop it and show the window again.
  */
 function hideOnClose(state) {
-  return state.phase === 'recording' || state.phase === 'stopped' || state.phase === 'stopping'
+  return ['recording', 'stopped', 'continuing', 'stopping'].includes(state.phase)
 }
+
+/** Asking for sources (a start, or a stopped recording's Continue), so a picker may be open. */
+const asking = (phase) => phase === 'starting' || phase === 'continuing'
 
 /** A stopped recording's choices from the menu bar: the command each sends the page, and whether
  * the window shows (the page confirms the ones that delete the recording). */
@@ -185,7 +190,7 @@ function relay(state, event) {
       const stopFailed = state.recording.phase === 'stopping' && recording.phase === 'unfinished'
       // A quiet start (or Continue) that ended without recording, and wasn't cancelled in the
       // picker: the page says why.
-      const startEnded = state.recording.phase === 'starting' && recording.phase !== 'starting'
+      const startEnded = asking(state.recording.phase) && !asking(recording.phase)
       const backTo = recording.phase === 'idle' || recording.phase === 'stopped'
       const startFailed = state.quietStart && startEnded && backTo
       // macOS refused the Mac's sound (at the start or later): the page says how to allow it,

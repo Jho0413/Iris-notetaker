@@ -253,7 +253,9 @@ stops a recording from any app, with the window closed too:
 - **Idle:** Record Audio, Record Screen…, Open Iris, Quit Iris. **Recording:** the icon turns red with the
   elapsed time beside it, and the menu offers Stop. **Stopped** (the Live page's Stop): Continue
   Recording, Make Notes, Start Over… and Discard Recording…; the last two show the window, where
-  the page asks first. While starting, finishing the upload, or ended with notes not started
+  the page asks first. While a Continue asks for its sources again (with a screen, the picker is
+  open) it says "Continuing…"; it is quiet like a start from the menu bar (the window shows only
+  if it fails for another reason than a cancel), and closing the window still hides it. While starting, finishing the upload, or ended with notes not started
   ("Recording stopped", the Live page's Try again), it offers only Show Iris and Quit.
 - **Recording still happens in the Live page**, whose capture code runs in the window. The main
   process only relays (`relay` in `src/tray.cjs`, a pure reducer): Record Audio or Record Screen…
