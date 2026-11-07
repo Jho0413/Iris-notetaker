@@ -20,8 +20,8 @@ Iris.app
 │         app://iris/<file> → frontend/dist/<file>
 │         anything else     → index.html (client-side routes)
 │     • display-media handler: Iris's own picker (entire screen first, Iris's windows left
-│         out), system audio as "loopback"
-│     • menu bar icon (Tray): Record Screen… and Stop, relayed to the Live page
+│         out), system audio as "loopback"; a request for sound alone gets "loopback", no picker
+│     • menu bar icon (Tray): Record Audio, Record Screen… and Stop, relayed to the Live page
 ├── Window (renderer): app://iris/, the web UI unchanged
 └── Contents/Resources/backend/python (standalone Python with Iris), Resources/frontend (built UI)
 ```
@@ -206,32 +206,60 @@ Shared audio is requested with echo cancellation, noise suppression and gain
 control off, since it is a recording of what plays, not a voice in a room; the microphone keeps
 them. `Info.plist` carries `NSMicrophoneUsageDescription` and `NSAudioCaptureUsageDescription`.
 
+### The Mac's sound alone (Record audio)
+
+Record audio asks for the Mac's sound with `getDisplayMedia({video: false, audio})`. The handler
+answers a request for sound alone (`soundOnly` in `src/picker.cjs`) with `{audio: 'loopback'}`:
+no picker, no screen source, and so no Screen Recording permission. macOS asks for **System Audio
+Recording** instead (Privacy & Security › Screen & System Audio Recording › System Audio Recording
+Only), using `NSAudioCaptureUsageDescription`. Measured with Electron 45 on macOS 26, in a test app
+with Screen Recording denied and the sound played by another process:
+
+- **Allowed:** one live "System audio" track with all of the Mac's sound. Chromium turns echo
+  cancellation, noise suppression and gain control on for it by default, hence the constraints
+  above.
+- **Refused at macOS's prompt:** `getDisplayMedia` still resolves, with a track that has already
+  ended and carries only silence; macOS remembers the answer and doesn't ask again. The Live page
+  treats a missing or ended track as refused: it records the microphone alone, shows how to allow
+  it, and the menu bar relay shows the window once (`macSoundRefused` in the page's report).
+- **The prompt doesn't hold the capture up:** the sound flows while it is open. A track that ends
+  later in the recording (refused then) is reported the same way.
+- **Turning the switch off in System Settings** after allowing didn't stop the capture in a new
+  launch; only refusing at the prompt did.
+- **Nothing shows** in the menu bar while it runs (no recording indicator).
+- A request for a picture answered with sound only is refused ("Video was requested, but no video
+  stream was provided"), so Record audio + screen always goes through the picker.
+- An app's own sound (its child processes too) is captured even when refused: macOS only guards
+  other apps' sound.
+
 ## Menu bar
 
 An Iris icon in the macOS menu bar (Electron `Tray`, `src/tray.cjs` for what it shows) starts and
 stops a recording from any app, with the window closed too:
 
-- **Idle:** Record Screen…, Open Iris, Quit Iris. **Recording:** the icon turns red with the
+- **Idle:** Record Audio, Record Screen…, Open Iris, Quit Iris. **Recording:** the icon turns red with the
   elapsed time beside it, and the menu offers Stop and Make Notes. While starting, finishing the
   upload, or stopped with notes not started ("Recording stopped", the Live page's Try again),
   it offers only Show Iris and Quit.
 - **Recording still happens in the Live page**, whose capture code runs in the window. The main
-  process only relays (`relay` in `src/tray.cjs`, a pure reducer): Record Screen… makes the window
-  if it was closed, without showing it, and, once the UI has loaded and subscribed
-  (`iris-app:record-listening`), sends it `start`; the UI opens `/live`, which starts as if its
-  button was pressed. Stop sends `stop`, which runs the Live page's own Stop, so the notes are made
+  process only relays (`relay` in `src/tray.cjs`, a pure reducer): Record Audio or Record Screen…
+  makes the window if it was closed, without showing it, and, once the UI has loaded and
+  subscribed (`iris-app:record-listening`), sends it `start-audio` or `start-screen`; the UI opens
+  `/live`, which starts as if that card was clicked. Stop sends `stop`, which runs the Live page's own Stop, so the notes are made
   as usual. A stop is never queued for a page that loads later; a start waiting for the UI is
   dropped if the window closes or the engine fails to start first.
-- **Only the picker shows** for Record Screen…: the window stays as it was (hidden, or in another
-  Space). Showing it would switch to its Space, and the picker lists only the windows on screen in
+- **Only the picker shows** for Record Screen…, and nothing for Record Audio: the window stays as
+  it was (hidden, or in another Space). Showing it would switch to its Space, and the picker lists only the windows on screen in
   the current Space, so it would offer that Space's windows instead of the ones the user is
   looking at. The window shows only if that start fails for another reason than a cancel in the
   picker (the Live page says why; the display-media handler reports a cancel as
-  `pickerCancelled` before the page hears of it), if the page hasn't started within 3 s of being
+  `pickerCancelled` before the page hears of it), if macOS refused the Mac's sound to an audio
+  recording (the page says how to allow it), if the page hasn't started within 3 s of being
   asked (it reports starting within a render, unless held up by a question it asks, such as
   "Leave without saving?" on the notes editor or Settings), or if the engine fails while the
   start waits, for the engine's dialog.
-- **The page reports its phase** (`iris-app:recording`, `{phase, startedAt}`), checked once by
+- **The page reports its phase** (`iris-app:recording`, `{phase, startedAt, macSoundRefused}`),
+  checked once by
   `parseReport`; a reload, a closed window or a crashed renderer resets the icon to idle. A stop
   that fails (the Live page's "Recording stopped", with Try again) shows the window, which may
   have been hidden.
