@@ -20,8 +20,9 @@ Iris.app
 │         app://iris/<file> → frontend/dist/<file>
 │         anything else     → index.html (client-side routes)
 │     • display-media handler: Iris's own picker (entire screen first, Iris's windows left
-│         out), system audio as "loopback"; a request for sound alone gets "loopback", no picker
-│     • menu bar icon (Tray): Record Audio, Record Screen… and Stop, relayed to the Live page
+│         out) for the picture; a request for sound alone gets "loopback", no picker
+│     • menu bar icon (Tray): Record Audio, Record Screen…, Share Screen…/Stop Sharing and Stop,
+│       relayed to the Live page
 ├── Window (renderer): app://iris/, the web UI unchanged
 └── Contents/Resources/backend/python (standalone Python with Iris), Resources/frontend (built UI)
 ```
@@ -67,6 +68,10 @@ backpressure. Measured with a 516 MB upload through the Upload page: the main pr
 89 MB with `node:http`, 574 MB with Node's `fetch`, and 1.6 GB with `net.fetch`, which reads the
 whole request body ahead of the socket. Server-sent events stream event by event, and closing an
 `EventSource` closes the backend connection, so the backend sees the client go away.
+**An empty request body can't be forwarded:** reading the body of a request sent with an empty
+`Blob` fails in the handler ("Could not get blob data", Electron 45), so the request never reaches
+the backend, and the page retries it as a network error. The Live page's screen changes carry
+everything in the query and are sent with no body.
 
 ## How `app://` pages differ from the browser
 
@@ -190,9 +195,15 @@ open focuses it and is refused.
   is hidden, as Iris's is while recording. Untitled windows and windows with no image are left out.
 - **Choosing:** click selects, the arrow keys move the selection, Return or a double-click
   records it, Esc, Cancel or closing the window cancels, and so does the page that asked closing,
-  reloading or crashing (its request is gone). The chosen source goes to the page with
-  all of the Mac's sound as `loopback`; a cancel refuses the request, which the Live page treats as
-  a cancelled start (no session was made yet). Electron rejects every refused request as
+  reloading or crashing (its request is gone), or a recording that stops while Share screen's
+  picker is open (the picker is a window of its own, so Stop can be pressed meanwhile, and
+  Chromium would hold Continue's request behind it). The chosen source goes to the page as the picture
+  alone (the Live page asks for `audio: false`: the Mac's sound is recorded on its own throughout,
+  below), or with all of the Mac's sound as `loopback` if sound was asked for too; a cancel refuses
+  the request, which the Live page treats as a cancelled start (no session was made yet) or, during
+  a recording, as the screen left off: Share screen says it was cancelled or blocked (the same
+  words as a start's, since a cancel and a block can't be told apart), Continue carries on without
+  a word (Continue was asked for, the screen only offered again). Electron rejects every refused request as
   `AbortError` ("Invalid capture constraints"), never `NotAllowedError`, so in the app
   `describeCaptureError` words that as cancelled or blocked too.
 - **Without the Screen Recording permission** macOS lists nothing, so the picker says how to allow
@@ -208,9 +219,12 @@ Shared audio is requested with echo cancellation, noise suppression and gain
 control off, since it is a recording of what plays, not a voice in a room; the microphone keeps
 them. `Info.plist` carries `NSMicrophoneUsageDescription` and `NSAudioCaptureUsageDescription`.
 
-### The Mac's sound alone (Record audio)
+### The Mac's sound, on its own capture
 
-Record audio asks for the Mac's sound with `getDisplayMedia({video: false, audio})`. The handler
+Every recording asks for the Mac's sound with `getDisplayMedia({video: false, audio})`, and holds
+it for the whole recording, whether or not the screen is shared: turning the screen on or off
+then leaves no gap or doubling in the sound (measured in a test app with Electron 45: a second,
+picture-only capture alongside left the first's sound unchanged). The handler
 answers a request for sound alone (`soundOnly` in `src/picker.cjs`) with `{audio: 'loopback'}`:
 no picker, no screen source, and so no Screen Recording permission. macOS asks for **System Audio
 Recording** instead (Privacy & Security › Screen & System Audio Recording › System Audio Recording
@@ -243,7 +257,7 @@ with Screen Recording denied and the sound played by another process:
   the speech was transcribed.
 - **Nothing shows** in the menu bar while it runs (no recording indicator).
 - A request for a picture answered with sound only is refused ("Video was requested, but no video
-  stream was provided"), so Record audio + screen always goes through the picker.
+  stream was provided"), so a screen always goes through the picker.
 - An app's own sound (its child processes too) is captured even when refused: macOS only guards
   other apps' sound.
 
@@ -253,7 +267,8 @@ An Iris icon in the macOS menu bar (Electron `Tray`, `src/tray.cjs` for what it 
 stops a recording from any app, with the window closed too:
 
 - **Idle:** Record Audio, Record Screen…, Open Iris, Quit Iris. **Recording:** the icon turns red with the
-  elapsed time beside it, and the menu offers Stop. **Stopped** (the Live page's Stop): Continue
+  elapsed time beside it, and the menu offers Share Screen… (only the picker shows) or Stop
+  Sharing, and Stop. **Stopped** (the Live page's Stop): Continue
   Recording, Make Notes, Start Over… and Discard Recording…; the last two show the window, where
   the page asks first. While a Continue asks for its sources again (with a screen, the picker is
   open) it says "Continuing…"; it is quiet like a start from the menu bar (the window shows only
@@ -263,7 +278,9 @@ stops a recording from any app, with the window closed too:
   process only relays (`relay` in `src/tray.cjs`, a pure reducer): Record Audio or Record Screen…
   makes the window if it was closed, without showing it, and, once the UI has loaded and
   subscribed (`iris-app:record-listening`), sends it `start-audio` or `start-screen`; the UI opens
-  `/live`, which starts as if that card was clicked. Stop sends `stop`, and a stopped recording's
+  `/live`, which starts as if that card was clicked. Share Screen… and Stop Sharing send
+  `share-screen` and `stop-sharing` (only as a change from what the page last reported), Stop
+  sends `stop`, and a stopped recording's
   choices `continue`, `make-notes`, `start-over` and `discard`, which run the Live page's own
   buttons. Those are never queued for a page that loads later; a start waiting for the UI is
   dropped if the window closes or the engine fails to start first.
@@ -272,12 +289,15 @@ stops a recording from any app, with the window closed too:
   the current Space, so it would offer that Space's windows instead of the ones the user is
   looking at. The window shows only if that start fails for another reason than a cancel in the
   picker (the Live page says why; the display-media handler reports a cancel as
-  `pickerCancelled` before the page hears of it), if macOS refused the Mac's sound to an audio
+  `pickerCancelled` before the page hears of it), if macOS refused the Mac's sound to a
   recording (the page says how to allow it), if the page hasn't started within 3 s of being
   asked (it reports starting within a render, unless held up by a question it asks, such as
   "Leave without saving?" on the notes editor or Settings), or if the engine fails while the
-  start waits, for the engine's dialog.
-- **The page reports its phase** (`iris-app:recording`, `{phase, startedAt, macSoundRefused}`),
+  start waits, for the engine's dialog. Share Screen… from the menu bar is quiet the same way, but
+  doesn't bring the window up if it fails: a cancel or a refusal is said in the window, which may
+  be hidden, until it is next shown (the picker itself says how to allow Screen Recording).
+- **The page reports its phase** (`iris-app:recording`, `{phase, startedAt, macSoundRefused,
+  screen}`),
   checked once by
   `parseReport`; a reload, a closed window or a crashed renderer resets the icon to idle. A stop
   that fails (the Live page's "Recording stopped", with Try again) shows the window, which may

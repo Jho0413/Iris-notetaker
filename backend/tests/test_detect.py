@@ -351,3 +351,58 @@ async def test_single_frame_stage_writes_and_emits_fallback(ctx, events):
     assert moments[0].frame == ref
     assert (moments[0].start, moments[0].end) == (0, 1)
     assert events == [(EventType.MOMENT_FOUND, detect.moment_event(moments[0]))]
+
+
+# --- Screen off -------------------------------------------------------------------------------
+
+
+def feed_share(det: MomentDetector, img: np.ndarray, start: int, seconds: int, seed: int = 0):
+    """Feed ``img`` at 1 fps from ``start`` (with noise); return the moments closed."""
+    deck = Deck(seed).hold(img, seconds)
+    out = []
+    for i, frame in enumerate(deck.frames):
+        t = float(start + i)
+        out.append(det.feed(t, FrameRef(t=t, path=f"frames/{int(t * 1000):09d}.jpg"), frame))
+    return [m for m in out if m is not None]
+
+
+def test_a_screen_off_ends_the_moment_there_and_the_next_share_starts_afresh():
+    det = MomentDetector()
+    assert feed_share(det, SLIDE_A, 0, 10) == []
+    first = det.screen_off(10.5)
+    assert first is not None and (first.id, first.start, first.end) == ("m001", 0.0, 10.5)
+    # The same slide shared again after the gap is a moment of its own: nothing spans the gap.
+    assert feed_share(det, SLIDE_A, 100, 10, seed=1) == []
+    again = det.screen_off(110.0)
+    assert again is not None and (again.id, again.start, again.end) == ("m002", 100.0, 110.0)
+    # Another source, at another size: compared only with itself.
+    small = cv2.resize(SLIDE_B, (SLIDE_B.shape[1] // 2, SLIDE_B.shape[0] // 2))
+    assert feed_share(det, small, 200, 10, seed=2) == []
+    last = det.finish(210.0)
+    assert last is not None and (last.id, last.start, last.end) == ("m003", 200.0, 210.0)
+
+
+def test_a_share_too_short_to_settle_still_gives_its_frame():
+    det = MomentDetector()
+    feed_share(det, SLIDE_A, 0, 10)
+    assert det.screen_off(10.0) is not None
+    feed_share(det, SLIDE_B, 50, 1)  # one frame: never settles
+    brief = det.screen_off(51.0)
+    assert brief is not None and (brief.id, brief.start, brief.end) == ("m002", 50.0, 51.0)
+    assert det.screen_off(60.0) is None  # nothing shared since: nothing to close
+    assert det.finish(70.0) is None
+
+
+def test_detect_moments_ends_moments_where_the_screen_was_turned_off(tmp_path):
+    (tmp_path / "frames").mkdir()
+    refs = []
+    for t, img in [*((t, SLIDE_A) for t in range(10)), *((t, SLIDE_A) for t in range(40, 50))]:
+        ref = FrameRef(t=float(t), path=f"frames/{t * 1000:09d}.jpg")
+        cv2.imwrite(str(tmp_path / ref.path), img)
+        refs.append(ref)
+    index = FrameIndex(fps=1.0, width=W, height=H, frames=refs, screen_off=[10.0, 50.0])
+    spans = [(m.start, m.end) for m in detect.detect_moments(tmp_path, index)]
+    # The last share ends at its off time, not one frame after its last frame.
+    assert spans == [(0.0, 10.0), (40.0, 50.0)]
+    without = index.model_copy(update={"screen_off": []})
+    assert [(m.start, m.end) for m in detect.detect_moments(tmp_path, without)] == [(0.0, 50.0)]

@@ -31,7 +31,8 @@ make setup && make desktop              # desktop/dist/Iris-<version>-arm64.dmg 
 Open the `.dmg`, drag Iris to Applications and open it. The first launch asks for your OpenAI API
 key (stored encrypted with the macOS Keychain), then shows Iris. **Record live** records your
 microphone with the Mac's sound (**Record audio**, for calls and talks), or any screen or window
-with its sound too (**Record audio + screen**), also from the menu bar icon; macOS asks for
+too (**Record audio + screen**), also from the menu bar icon. The screen can be shared and
+stopped at any time during a recording (**Share screen**); macOS asks for
 microphone, System Audio Recording or Screen Recording access the first time. No terminal, `uv` or
 repo is needed to run it.
 

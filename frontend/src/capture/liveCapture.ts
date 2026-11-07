@@ -1,7 +1,8 @@
-// Browser live capture: the mic, plus a screen share (with its tab or system audio if shared) or,
-// for an audio recording in the desktop app, the Mac's sound. The audio sources are mixed into one
-// track, which goes up as MediaRecorder chunks every few seconds; screen frames as JPEGs at a low
-// fixed rate, timed on the audio's clock. Change detection happens in the backend, not here
+// Browser live capture: the mic and, in the desktop app, the Mac's sound, plus a screen share that
+// can be turned on and off at any time (in a browser, with its tab's sound if shared). The audio
+// sources are mixed into one track, which goes up as MediaRecorder chunks every few seconds; screen
+// frames as JPEGs at a low fixed rate while the screen is on, timed on the audio's clock, and when
+// it was turned on and off. Change detection happens in the backend, not here
 // (docs/architecture/live.md). Uploads are retried until they land (uploadQueue.ts), and
 // ending the session waits for all of them, so a dropped request doesn't lose content.
 
@@ -17,13 +18,13 @@ const DRAIN_TIMEOUT_MS = 30_000
 const UPLOAD_TIMEOUT_MS = 30_000 // a hung request becomes a retry instead of blocking the queue
 const RECORDER_STOP_TIMEOUT_MS = 2000 // a recorder that never reports 'stop' doesn't block ending
 
-/** What a recording captures besides the mic: nothing more (audio), or a screen share. */
+/** How a recording starts: audio alone, or with a screen share (which can be turned off later). */
 export type CaptureMode = 'audio' | 'screen'
 
-export type EndReason = 'screen-share-ended' | 'microphone-ended' | 'recorder-error'
+export type EndReason = 'microphone-ended' | 'recorder-error'
 
 /** Why `start()` failed when capture ended before recording began. */
-const START_FAILED: Record<EndReason, string> = {
+const START_FAILED: Record<EndReason | 'screen-share-ended', string> = {
   'screen-share-ended': 'Screen sharing stopped before recording started. Share again to start.',
   'microphone-ended': 'The microphone was disconnected before recording started. Try again.',
   'recorder-error': 'The browser could not start recording. Try again.',
@@ -31,13 +32,18 @@ const START_FAILED: Record<EndReason, string> = {
 
 export interface LiveCaptureOptions {
   /**
-   * Capture ended on its own: the user stopped sharing, the mic went away, or the recorder
-   * failed. Call `stop()` to finish the session. Without a handler, capture stops itself.
+   * Capture ended on its own: the mic went away, or the recorder failed. Call `stop()` to finish
+   * the session. Without a handler, capture stops itself.
    */
   onEnded?: (reason: EndReason, message: string) => void
   /**
-   * The Mac's sound stopped during an audio recording (macOS refused it after asking): the
-   * recording carries on with the mic.
+   * The screen share ended on its own (the browser's or macOS's Stop Sharing, or the shared
+   * window closed): the screen is off and the recording carries on with the audio.
+   */
+  onScreenEnded?: () => void
+  /**
+   * The Mac's sound stopped during a recording (macOS refused it after asking): the recording
+   * carries on with the mic.
    */
   onMacSoundEnded?: () => void
   /** How long `stop()` waits for pending uploads before giving up (it can be called again). */
@@ -60,7 +66,8 @@ export interface CaptureEnv {
   page: Pick<EventTarget, 'addEventListener' | 'removeEventListener'>
   /**
    * The desktop app answers a request for sound alone with the Mac's sound and no picker
-   * (desktop/main.cjs); a browser can't record it without a share.
+   * (desktop/main.cjs), so it is recorded whether or not the screen is shared, and a screen share
+   * asks for the picture alone. A browser can't record it without a share.
    */
   macSound: boolean
   /** A mixer: the one audio track that is recorded, which sources join and leave. */
@@ -91,11 +98,11 @@ export function browserEnv(): CaptureEnv {
 }
 
 /**
- * macOS refused the Mac's sound to an audio recording in the desktop app, so only the mic is
- * recorded: the Live page says how to allow it. A browser never records it, so nothing is refused.
+ * macOS refused the Mac's sound to a recording in the desktop app, so only the mic is recorded:
+ * the Live page says how to allow it. A browser never records it, so nothing is refused.
  */
-export function macSoundRefused(desktopApp: boolean, mode: CaptureMode, started: Pick<StartedRecording, 'macSound'>): boolean {
-  return desktopApp && mode === 'audio' && !started.macSound
+export function macSoundRefused(desktopApp: boolean, started: Pick<StartedRecording, 'macSound'>): boolean {
+  return desktopApp && !started.macSound
 }
 
 /**
@@ -127,11 +134,11 @@ export function clockStart(clock: RecordingClock): number {
 
 /** What a started recording captures, for the Live page to show. */
 export interface StartedRecording {
-  /** The shared screen, for its preview; null for an audio recording. */
+  /** The shared screen, for its preview; null while the screen is off. */
   screen: MediaStream | null
   /**
-   * The Mac's sound is mixed in: an audio recording in the desktop app that macOS allowed. False
-   * when it was refused, and in a browser, which records the mic alone.
+   * The Mac's sound is mixed in: a recording in the desktop app that macOS allowed. False when it
+   * was refused, and in a browser, which records the mic alone (or with a shared tab's sound).
    */
   macSound: boolean
 }
@@ -149,7 +156,12 @@ export class LiveCapture {
   /** The sources being captured now, each with what takes it out of the mixer. */
   private sources: { stream: MediaStream; unmix?: () => void }[] = []
   private mixer?: AudioMixer
+  /** The shared screen while the screen is on (also one of `sources`). */
+  private display?: MediaStream
   private stopFrames?: () => void
+  /** The screen was on when the recording was stopped (`pause`): `resume` turns it on again. */
+  private screenAtPause = false
+  private sharing?: Promise<MediaStream | null>
   private startedAt = 0
   /** Time spent stopped (`pause`), which the recording's clock leaves out. */
   private pausedMs = 0
@@ -201,9 +213,9 @@ export class LiveCapture {
   }
 
   /**
-   * Ask for what `mode` records, then make the session and start recording: the screen then the
-   * mic, or for audio the mic and, in the desktop app, the Mac's sound (if macOS refuses it, the
-   * recording starts with the mic alone). On failure (permission denied, the picker cancelled, an
+   * Ask for what `mode` records, then make the session and start recording: the screen (for
+   * `screen`), the mic and, in the desktop app, the Mac's sound (if macOS refuses it, the
+   * recording starts without it). On failure (permission denied, the picker cancelled, an
    * unsupported browser, the session not made, sharing stopped or the recorder failing before
    * recording began, or `stop()` called meanwhile) everything acquired is released at once, a
    * session already made is deleted, and a `CaptureError` with a user-facing message is thrown.
@@ -263,7 +275,7 @@ export class LiveCapture {
       )
     }
 
-    const got = await this.acquire(mode)
+    const got = await this.acquire(screen)
     this.id = await this.createSession()
     if (this.cancelled) {
       // Cancelled while it was being made: start()'s cleanup may have run before the id was known.
@@ -286,7 +298,8 @@ export class LiveCapture {
     this.throwIfCancelled()
     // The audio's time 0: WebM timestamps start at the first recorded sample.
     this.startedAt = performance.now()
-    this.captureScreen(got.screen)
+    // On from 0 s: `POST /live` says so (`screen`), so no change is posted.
+    if (got.screen) this.captureScreen(got.screen)
     // Nothing below can fail, so a start that threw never looks like a recording.
     this.env.page.addEventListener('beforeunload', this.onBeforeUnload)
     this.env.page.addEventListener('pagehide', this.onPageHide)
@@ -297,13 +310,15 @@ export class LiveCapture {
   /**
    * Stop capturing, keeping the recording: the recorder pauses (its clock too, so the stopped
    * time isn't in the recording, measured in Electron 45), frames stop, and the microphone, the
-   * Mac's sound and any shared screen are released. `resume` carries on in the same recording;
-   * `stop` makes notes from it; `discard` throws it away.
+   * Mac's sound and any shared screen are released (the screen is turned off). `resume` carries
+   * on in the same recording; `stop` makes notes from it; `discard` throws it away.
    */
   pause(): void {
     if (!this.recording || this.paused || this.stopping || this.resuming) return
     this.paused = true
     this.pausedAt = performance.now()
+    this.screenAtPause = Boolean(this.display)
+    if (this.display) this.postScreen(false) // at the time it stopped
     if (this.recorder?.state === 'recording') {
       // Send what the recorder holds now: if the page goes away while stopped, it is uploaded.
       this.recorder.requestData()
@@ -311,19 +326,21 @@ export class LiveCapture {
     }
     this.stopFrames?.()
     this.stopFrames = undefined
+    this.display = undefined
     this.releaseSources()
   }
 
   /**
-   * Capture again after `pause`: ask for what `mode` records again (with a screen, the picker
-   * opens again) and carry on in the same recording. If that fails (the picker cancelled, the
-   * mic blocked) it throws a `CaptureError` and the recording stays stopped; nothing is lost.
+   * Capture again after `pause`: ask for the mic and the Mac's sound again and, if the screen was
+   * on when it stopped, a screen (the picker opens again; cancelling it carries on with the screen
+   * off), and carry on in the same recording. If that fails (the mic blocked) it throws a
+   * `CaptureError` and the recording stays stopped; nothing is lost.
    */
-  resume(mode: CaptureMode): Promise<StartedRecording> {
+  resume(): Promise<StartedRecording> {
     if (!this.paused || this.stopping) return Promise.reject(new CaptureError('The recording is not stopped.'))
     this.resuming ??= (async () => {
       try {
-        const got = await this.acquire(mode)
+        const got = await this.acquire(this.screenAtPause, { screenOptional: true })
         if (!this.paused || this.stopping) throw new CaptureError('The recording was finished meanwhile.')
         // Ended while the next prompt was open: their 'ended' was ignored while stopped.
         if (got.screen && got.screen.getVideoTracks()[0]?.readyState !== 'live') {
@@ -335,8 +352,11 @@ export class LiveCapture {
         this.pausedMs += performance.now() - this.pausedAt
         this.mixIn()
         if (this.recorder?.state === 'paused') this.recorder.resume()
-        this.captureScreen(got.screen)
         this.paused = false
+        if (got.screen) {
+          this.captureScreen(got.screen)
+          this.postScreen(true) // at the time it was turned off: the stopped time is left out
+        }
         return this.started(got)
       } catch (err) {
         this.releaseSources()
@@ -347,6 +367,59 @@ export class LiveCapture {
       }
     })()
     return this.resuming
+  }
+
+  /**
+   * Turn the screen on during a recording: the picker opens (in a browser, its dialog), and the
+   * share's frames are sent from now on, with the time it was turned on. In a browser the share's
+   * tab sound is mixed in; in the app the picture alone is asked for, since the Mac's sound is
+   * recorded throughout. Throws a `CaptureError` if nothing is shared (the picker cancelled,
+   * sharing blocked); the recording carries on. Resolves to null if the recording was stopped
+   * meanwhile (the app closes its picker then): nothing is shared, and there is nothing to say.
+   */
+  startScreen(): Promise<MediaStream | null> {
+    if (!this.recording || this.paused || this.stopping || this.resuming || this.display) {
+      return Promise.reject(new CaptureError('The screen can be shared only while recording.'))
+    }
+    if (!canShareScreen(this.env.mediaDevices)) {
+      return Promise.reject(new CaptureError("This browser can't share the screen."))
+    }
+    const stillRecording = () => this.recording && !this.paused && !this.stopping
+    this.sharing ??= (async () => {
+      try {
+        let display: MediaStream
+        try {
+          display = await getDisplay(this.env.mediaDevices!, !this.env.macSound)
+        } catch (err) {
+          if (!stillRecording()) return null
+          throw err
+        }
+        if (!stillRecording()) {
+          display.getTracks().forEach((t) => t.stop())
+          return null
+        }
+        if (display.getVideoTracks()[0]?.readyState !== 'live') {
+          display.getTracks().forEach((t) => t.stop())
+          throw new CaptureError('Screen sharing stopped before it started. Share the screen again.')
+        }
+        this.sources.push({ stream: display })
+        this.listenForScreenEnd(display)
+        this.mixIn()
+        this.captureScreen(display)
+        this.postScreen(true)
+        return display
+      } finally {
+        this.sharing = undefined
+      }
+    })()
+    return this.sharing
+  }
+
+  /** Turn the screen off during a recording: the share is released and the audio carries on. */
+  stopScreen(): void {
+    if (!this.display || !this.recording || this.paused || this.stopping) return
+    this.postScreen(false)
+    this.releaseDisplay()
   }
 
   /**
@@ -382,20 +455,27 @@ export class LiveCapture {
   }
 
   /**
-   * The sources `mode` records, acquired and listened to: the screen then the mic, or for audio
-   * the mic and, in the desktop app, the Mac's sound (if macOS refuses it, there is none). Each is
-   * kept for release (`this.sources`), or stopped at once if the start was cancelled meanwhile.
+   * The sources to record, acquired and listened to: the screen (if `screen`), the mic and, in the
+   * desktop app, the Mac's sound (if macOS refuses it, there is none). Each is kept for release
+   * (`this.sources`), or stopped at once if the start was cancelled meanwhile. With
+   * `screenOptional`, a screen that isn't shared (the picker cancelled) leaves the screen off.
    */
   private async acquire(
-    mode: CaptureMode,
+    screen: boolean,
+    { screenOptional = false } = {},
   ): Promise<{ screen: MediaStream | null; mic: MediaStream; sound: MediaStream | null }> {
     const devices = this.env.mediaDevices!
-    const screen = mode === 'screen'
-    const display = screen ? this.acquired(await getDisplay(devices)) : null
+    let display: MediaStream | null = null
+    if (screen) {
+      try {
+        display = this.acquired(await getDisplay(devices, !this.env.macSound))
+      } catch (err) {
+        if (!screenOptional || !(err instanceof CaptureError) || this.cancelled || this.stopping) throw err
+        console.warn('The screen was not shared again; continuing with the screen off', err)
+      }
+    }
     // Listen from the start: sharing stopped during the mic prompt must fail the start too.
-    display?.getVideoTracks()[0]?.addEventListener('ended', () =>
-      this.ended('screen-share-ended', 'Screen sharing stopped, so the recording was finished.'),
-    )
+    if (display) this.listenForScreenEnd(display)
     let mic: MediaStream
     try {
       mic = this.acquired(await devices.getUserMedia({ audio: true }))
@@ -406,7 +486,7 @@ export class LiveCapture {
     mic.getAudioTracks()[0]?.addEventListener('ended', () =>
       this.ended('microphone-ended', 'The microphone was disconnected, so the recording was finished.'),
     )
-    const sound = !screen && this.env.macSound ? await getMacSound(devices) : null
+    const sound = this.env.macSound ? await getMacSound(devices) : null
     if (sound) this.acquired(sound) // stopped at once if cancelled meanwhile
     this.throwIfCancelled() // cancelled while a request that then failed was open
     sound?.getAudioTracks()[0]?.addEventListener('ended', this.onMacSoundEnded)
@@ -421,14 +501,55 @@ export class LiveCapture {
   }
 
   /** Send the shared screen's frames, timed on the recording's clock (stopped time left out). */
-  private captureScreen(display: MediaStream | null) {
-    const track = display?.getVideoTracks()[0]
+  private captureScreen(display: MediaStream) {
+    const track = display.getVideoTracks()[0]
     if (!track) return
+    this.display = display
     this.stopFrames = this.env.captureFrames(track, (jpeg, at) => {
-      if (!this.recording || this.paused) return
-      const t = (at - this.startedAt - this.pausedMs) / 1000
-      this.queue.add('frame', `frame?t=${t.toFixed(3)}`, jpeg)
+      // A frame still being grabbed when its share was turned off is dropped: none come after.
+      if (!this.recording || this.paused || this.display !== display) return
+      this.queue.add('frame', `frame?t=${this.recordedSeconds(at).toFixed(3)}`, jpeg)
     })
+  }
+
+  /** Seconds recorded at `at` (a `performance.now()` time): the session's clock. */
+  private recordedSeconds(at: number): number {
+    return (at - this.startedAt - this.pausedMs) / 1000
+  }
+
+  /** Tell the backend the screen was turned on or off now, so the notes place what was shown. */
+  private postScreen(on: boolean) {
+    const t = this.recordedSeconds(this.paused ? this.pausedAt : performance.now())
+    // No body: the desktop app's request forwarding can't read an empty one ("Could not get
+    // blob data", Electron 45), and the change is all in the query.
+    this.queue.add('screen', `screen?t=${Math.max(0, t).toFixed(3)}&on=${on}`)
+  }
+
+  /**
+   * The share ending on its own: before recording starts it fails the start; while recording
+   * the screen turns off and the recording carries on; while stopped, nothing (it was let go).
+   */
+  private listenForScreenEnd(display: MediaStream) {
+    display.getVideoTracks()[0]?.addEventListener('ended', () => {
+      if (this.opening && !this.recording) return this.cancel(START_FAILED['screen-share-ended'])
+      if (this.display !== display || this.paused || this.stopping) return
+      this.postScreen(false)
+      this.releaseDisplay()
+      this.options.onScreenEnded?.()
+    })
+  }
+
+  /** Stop the shared screen and its frames, and take its sound out of the mixer. */
+  private releaseDisplay() {
+    const display = this.display
+    this.stopFrames?.()
+    this.stopFrames = undefined
+    this.display = undefined
+    for (const source of this.sources.filter((s) => s.stream === display)) {
+      source.unmix?.()
+      source.stream.getTracks().forEach((t) => t.stop())
+    }
+    this.sources = this.sources.filter((s) => s.stream !== display)
   }
 
   /** What the Live page shows: the screen, and whether the Mac's sound is mixed in. */
@@ -520,6 +641,7 @@ export class LiveCapture {
   private release() {
     this.stopFrames?.()
     this.stopFrames = undefined
+    this.display = undefined
     if (this.recorder && this.recorder.state !== 'inactive') {
       this.recorder.stop()
     }
@@ -608,6 +730,11 @@ export function sendBeaconOrKeepalive(
   }
 }
 
+/** Whether a screen can be shared during a recording here (Share screen is offered). */
+export function canShareScreen(devices: Pick<MediaDevices, 'getDisplayMedia'> | undefined): boolean {
+  return typeof devices?.getDisplayMedia === 'function'
+}
+
 function hasLiveAudio(stream: MediaStream): boolean {
   return stream.getAudioTracks().some((t) => t.readyState === 'live')
 }
@@ -627,18 +754,25 @@ async function getMacSound(devices: Pick<MediaDevices, 'getDisplayMedia'>): Prom
   }
 }
 
-async function getDisplay(devices: Pick<MediaDevices, 'getDisplayMedia'>): Promise<MediaStream> {
-  try {
-    return await devices.getDisplayMedia({ video: true, audio: SHARED_AUDIO })
-  } catch (err) {
-    // Browsers that can't share audio may reject the request (before showing a picker).
-    const name = err instanceof Error || err instanceof DOMException ? err.name : ''
-    if (name !== 'TypeError' && name !== 'NotSupportedError') {
-      throw new CaptureError(describeCaptureError(err, 'screen'), { cause: err })
+/**
+ * A screen, window or tab to share, with its sound if `withSound` (a browser: a tab's sound is the
+ * only sound it can record besides the mic). The desktop app asks for the picture alone: the Mac's
+ * sound is recorded on its own throughout, so a share's sound would be heard twice.
+ */
+async function getDisplay(devices: Pick<MediaDevices, 'getDisplayMedia'>, withSound: boolean): Promise<MediaStream> {
+  if (withSound) {
+    try {
+      return await devices.getDisplayMedia({ video: true, audio: SHARED_AUDIO })
+    } catch (err) {
+      // Browsers that can't share audio may reject the request (before showing a picker).
+      const name = err instanceof Error || err instanceof DOMException ? err.name : ''
+      if (name !== 'TypeError' && name !== 'NotSupportedError') {
+        throw new CaptureError(describeCaptureError(err, 'screen'), { cause: err })
+      }
     }
   }
   try {
-    return await devices.getDisplayMedia({ video: true })
+    return await devices.getDisplayMedia({ video: true, audio: false })
   } catch (err) {
     throw new CaptureError(describeCaptureError(err, 'screen'), { cause: err })
   }

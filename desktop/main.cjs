@@ -501,7 +501,8 @@ ipcMain.handle('iris-picker:open-settings', (event) => {
 // The menu bar icon starts and stops a recording, but recording happens in the Live page (its
 // capture code runs in the window), so the icon only relays: "Record Audio" or "Record Screen…"
 // asks the page to start (making the window, hidden, if it was closed), and only the picker
-// shows (none for audio); Stop asks the page to stop, which makes notes as its own Stop does.
+// shows (none for audio); Share Screen… and Stop Sharing turn the page's screen on and off (only
+// the picker shows); Stop asks the page to stop, which makes notes as its own Stop does.
 let tray = null
 let startAnswerTimer = null
 let trayTicker = null
@@ -532,6 +533,8 @@ function recordFromMenuBar(mode) {
 const TRAY_ACTIONS = {
   recordAudio: () => recordFromMenuBar('audio'),
   recordScreen: () => recordFromMenuBar('screen'),
+  shareScreen: () => menuBarEvent({ type: 'screen', on: true }),
+  stopSharing: () => menuBarEvent({ type: 'screen', on: false }),
   stop: () => menuBarEvent({ type: 'stop' }),
   continue: () => menuBarEvent({ type: 'choice', choice: 'continue' }),
   makeNotes: () => menuBarEvent({ type: 'choice', choice: 'makeNotes' }),
@@ -565,9 +568,10 @@ function showTray() {
 /** Apply a relay event (src/tray.cjs) and carry out what it asks for. */
 function menuBarEvent(event) {
   const before = menuBar.recording
-  const { state, send, show, malformed } = trayRules.relay(menuBar, event)
+  const { state, send, show, malformed, closePicker: pickerAbandoned } = trayRules.relay(menuBar, event)
   menuBar = state
   if (malformed) log('[tray] ignored a malformed recording report')
+  if (pickerAbandoned) closePicker()
   if (show) showMainWindow()
   if (send && mainWindow) {
     log(`[tray] ${send} recording`)
@@ -729,9 +733,11 @@ function secureSession(ses) {
   })
   ses.setPermissionCheckHandler((_wc, permission, origin) => policy.permissionCheckAllowed(permission, origin))
 
-  // The UI's getDisplayMedia call: Iris's picker asks what to record (see "picker" above), with
-  // all of the Mac's sound as 'loopback'. A refusal reaches the page as a cancelled start. A
-  // request for sound alone ("Record audio") gets the Mac's sound with no picker.
+  // The UI's getDisplayMedia calls. A request for sound alone gets the Mac's sound with no picker:
+  // the Live page records it throughout, whether or not the screen is shared. A request for a
+  // picture (the screen turned on) gets Iris's picker (see "picker" above), and the picture alone
+  // unless sound was asked for too (then all of the Mac's sound as 'loopback'). A refusal reaches
+  // the page as a cancelled share.
   ses.setDisplayMediaRequestHandler(async (request, callback) => {
     const from = request.frame?.url ?? request.securityOrigin
     const answer = (streams) => {

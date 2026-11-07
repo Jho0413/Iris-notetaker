@@ -270,10 +270,33 @@ export interface paths {
          * Post Frame
          * @description Body: one JPEG screen frame. ``t`` is seconds since recording started (the audio's clock).
          *
-         *     Posting the same frame again is a no-op; a different body for a stored ``t`` is a 409, and so
-         *     is any frame for an audio-only recording.
+         *     Posting the same frame again is a no-op; a different body for a stored ``t`` is a 409.
          */
         post: operations["post_frame_api_live__session_id__frame_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/live/{session_id}/screen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Post Screen
+         * @description The shared screen was turned on (``on=true``) or off ``t`` seconds after recording
+         *     started (the audio's clock). Frames are posted only while it is on. What was shown before an
+         *     off is not on screen after it, so the notes place it only while it was shared.
+         *
+         *     Posting the same change again is a no-op.
+         */
+        post: operations["post_screen_api_live__session_id__screen_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -473,7 +496,7 @@ export interface components {
             title: string;
             /**
              * Screen
-             * @description Whether the browser shares a screen and posts frames. False: audio only.
+             * @description Whether the screen is shared from the start (as if it were turned on at 0 s). False: audio only until the screen is turned on (POST /live/{id}/screen).
              * @default true
              */
             screen: boolean;
@@ -1361,6 +1384,38 @@ export interface operations {
         parameters: {
             query: {
                 t: number;
+            };
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_screen_api_live__session_id__screen_post: {
+        parameters: {
+            query: {
+                t: number;
+                on: boolean;
             };
             header?: never;
             path: {

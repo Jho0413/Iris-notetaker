@@ -45,6 +45,10 @@ How it works (``MomentDetector``, incremental so live sessions can feed it frame
      build whose region is whatever newly came into view, with earlier build regions shifted to
      match. Static parts (toolbars) are ignored when matching. Content scrolled off screen counts
      as lost, so a long scroll still starts a new moment.
+  9. A live recording's screen can be turned off and on again (``FrameIndex.screen_off``). At an
+     off time the open moment ends (``screen_off``), so what was shown is not taken to be on
+     screen while nothing is shared, and the detector starts afresh: the next share may show
+     anything at any size, and is compared only with itself.
 """
 
 import asyncio
@@ -144,17 +148,22 @@ class MomentDetector:
 
     def __init__(self, params: DetectParams | None = None):
         self.p = params or DetectParams()
+        self._count = 0  # moments emitted, numbering their ids across shares
+        self._new_share()
+
+    def _new_share(self) -> None:
+        """Forget everything seen: the frames that follow are a new share."""
         self._current: _State | None = None  # the open moment
         self._next: _State | None = None  # a new moment that has not lasted min_moment_s yet
         self._pending: _Pending | None = None
         self._fallback: tuple[FrameRef, float] | None = None
-        self._first_t: float | None = None
+        self._first_t: float | None = None  # this share's first frame
+        self._share_start_count = self._count  # moments emitted before this share
         self._work_size: tuple[int, int] | None = None  # (w, h) of work images
         self._frame_size: tuple[int, int] = (0, 0)  # (w, h) of the latest input frame
         self._prev_small: np.ndarray | None = None
         self._activity: np.ndarray | None = None
         self._mask: np.ndarray | None = None  # True where pixels are ignored
-        self._count = 0
 
     # --- public API ----------------------------------------------------------------------------
 
@@ -168,7 +177,7 @@ class MomentDetector:
 
         if (
             self._current is None
-            and self._count == 0
+            and self._count == self._share_start_count
             and (self._fallback is None or sharpness > self._fallback[1])
         ):
             self._fallback = (frame_ref, sharpness)
@@ -202,7 +211,11 @@ class MomentDetector:
         pending = self._pending
         self._next = self._pending = None  # an unproven candidate is too short to stand alone
         if current is None:
-            if self._count == 0 and fallback is not None and pending is not None:
+            if (
+                self._count == self._share_start_count
+                and fallback is not None
+                and pending is not None
+            ):
                 ref, _ = fallback
                 assert self._first_t is not None
                 self._count += 1
@@ -214,6 +227,13 @@ class MomentDetector:
                 )
             return None
         return self._emit(current, max(end_t, current.last_t))
+
+    def screen_off(self, t: float) -> Moment | None:
+        """The screen was turned off at ``t`` (after every frame fed so far): close what is open
+        there, as ``finish`` does, and start afresh for the next share."""
+        moment = self.finish(t)
+        self._new_share()
+        return moment
 
     # --- frame processing ----------------------------------------------------------------------
 
@@ -469,6 +489,7 @@ def detect_moments(
     """Run the detector over a session's frames (blocking; call in a thread)."""
     detector = MomentDetector(params)
     moments: list[Moment] = []
+    offs = list(index.screen_off)
 
     def keep(m: Moment | None) -> None:
         if m is not None:
@@ -477,11 +498,16 @@ def detect_moments(
                 on_moment(m)
 
     for ref in index.frames:
+        # A frame at an off time is the next share's (as ingest splits them).
+        while offs and offs[0] <= ref.t:
+            keep(detector.screen_off(offs.pop(0)))
         image = cv2.imread(str(root / ref.path), cv2.IMREAD_COLOR)
         if image is None:
             continue  # unreadable frame: skip rather than fail the session
         keep(detector.feed(ref.t, ref, image))
-    if index.frames:
+    if offs:
+        keep(detector.screen_off(offs[0]))  # later offs have nothing open to close
+    elif index.frames:
         step = 1.0 / index.fps if index.fps > 0 else 0.0
         keep(detector.finish(index.frames[-1].t + step))
     return moments

@@ -4,9 +4,20 @@
 // page's top frame in the main window (policy.fromIrisWindow).
 const { contextBridge, ipcRenderer } = require('electron')
 
-/** What the menu bar sends the page: start a recording, Stop, or what to do once stopped. A
- * sandboxed preload can't require app files, so the list is here (tray.cjs's relay sends them). */
-const RECORD_COMMANDS = ['start-audio', 'start-screen', 'stop', 'continue', 'make-notes', 'start-over', 'discard']
+/** What the menu bar sends the page: start a recording, turn the screen on or off, Stop, or what
+ * to do once stopped. A sandboxed preload can't require app files, so the list is here (tray.cjs's
+ * relay sends them). */
+const RECORD_COMMANDS = [
+  'start-audio',
+  'start-screen',
+  'share-screen',
+  'stop-sharing',
+  'stop',
+  'continue',
+  'make-notes',
+  'start-over',
+  'discard',
+]
 
 contextBridge.exposeInMainWorld('irisApp', {
   /** Open the key window to add or replace the key; the engine restarts with a new one.
@@ -18,13 +29,15 @@ contextBridge.exposeInMainWorld('irisApp', {
   /** Save the page, as printed, as a PDF named after `title`, where the user chooses.
    * Resolves {done: true} once saved, {done: false} if cancelled. */
   savePdf: (title) => ipcRenderer.invoke('iris-app:save-pdf', String(title)),
-  /** The Live page's phase, when recording started (ms since the epoch), and whether macOS
-   * refused the Mac's sound to an audio recording, for the menu bar icon (desktop/src/tray.cjs). */
-  recordingChanged: (phase, startedAt, macSoundRefused) =>
+  /** The Live page's phase, when recording started (ms since the epoch), whether macOS refused
+   * the Mac's sound to the recording, and whether the screen is shared now, for the menu bar icon
+   * (desktop/src/tray.cjs). */
+  recordingChanged: (phase, startedAt, macSoundRefused, screen) =>
     ipcRenderer.send('iris-app:recording', {
       phase: String(phase),
       startedAt: Number(startedAt),
       macSoundRefused: Boolean(macSoundRefused),
+      screen: Boolean(screen),
     }),
   /** Call `listener` with the menu bar's command (RECORD_COMMANDS) when it asks. Returns the
    * unsubscribe. */

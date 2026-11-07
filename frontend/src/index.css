@@ -780,7 +780,7 @@ body.is-dragging, body.is-dragging * { cursor: grabbing !important; user-select:
 @media (max-width: 35em) { /* 560px */
   .topbar { padding: 0 12px; }
   .wordmark { margin-right: 4px; }
-  .topbar .btn-label { display: none; }
+  .topbar .btn-label, .recbar .btn-label { display: none; }
   .theme-switch { margin-left: 0; }
   .main { padding: 24px 16px 48px; }
   .settings-row:not(.settings-row-inline) { flex-direction: column; align-items: stretch; gap: 10px; }

@@ -200,7 +200,7 @@ async def test_input_wakes_only_its_lane_and_finish_flushes_every_lane(tmp_path:
     processor.start()  # idempotent
     processor.notify_audio()
     await settle()
-    processor.notify_frame()
+    processor.notify_screen()
     await settle()
     assert lanes[Lane.AUDIO].wakes == 1
     assert lanes[Lane.SCREEN].wakes == 1
@@ -216,7 +216,7 @@ async def test_a_failing_lane_does_not_stop_the_others(tmp_path: Path):
     factory, lanes = fake_lanes(failing={Lane.SCREEN})
     processor = LiveProcessor(ctx(tmp_path), factory)
     processor.start()
-    processor.notify_frame()
+    processor.notify_screen()
     await settle()
     processor.notify_audio()
     await settle()
@@ -232,7 +232,7 @@ async def test_missing_lanes_are_done_but_never_complete(tmp_path: Path):
     factory, _ = fake_lanes(only={Lane.SELECT})
     processor = LiveProcessor(ctx(tmp_path), factory)
     processor.start()
-    processor.notify_frame()  # no screen lane: ignored
+    processor.notify_screen()  # no screen lane: ignored
     assert processor.timeline.transcribed_through(1e9)  # nothing waits on an absent lane
     timeline = await asyncio.wait_for(processor.finish(), 1)
     assert Lane.SELECT in timeline.finished

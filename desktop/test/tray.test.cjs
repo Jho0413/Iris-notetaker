@@ -8,18 +8,22 @@ const labels = (view) => view.items.filter((i) => i.label).map((i) => i.label)
 
 test('the Live page’s phases map onto the tray’s', () => {
   assert.deepEqual(parseReport({ phase: 'idle' }), IDLE)
-  assert.deepEqual(parseReport({ phase: 'requesting' }), { phase: 'starting', startedAt: 0, macSoundRefused: false })
-  assert.deepEqual(parseReport({ phase: 'recording', startedAt: T0, macSoundRefused: false }), {
+  assert.deepEqual(parseReport({ phase: 'requesting' }), { phase: 'starting', startedAt: 0, macSoundRefused: false, screen: false })
+  assert.deepEqual(parseReport({ phase: 'recording', startedAt: T0, macSoundRefused: false, screen: false }), {
     phase: 'recording',
     startedAt: T0,
     macSoundRefused: false,
+    screen: false,
   })
-  assert.equal(parseReport({ phase: 'recording', startedAt: T0, macSoundRefused: true }).macSoundRefused, true)
-  assert.deepEqual(parseReport({ phase: 'stopping', startedAt: T0 }), { phase: 'stopping', startedAt: 0, macSoundRefused: false })
-  assert.deepEqual(parseReport({ phase: 'finishing', startedAt: T0 }), { phase: 'stopping', startedAt: 0, macSoundRefused: false })
+  assert.equal(parseReport({ phase: 'recording', startedAt: T0, macSoundRefused: false, screen: true }).screen, true)
+  // Shared only while recording: a stopped recording has let it go.
+  assert.equal(parseReport({ phase: 'stopped', startedAt: 0, macSoundRefused: false, screen: true }).screen, false)
+  assert.equal(parseReport({ phase: 'recording', startedAt: T0, macSoundRefused: true, screen: false }).macSoundRefused, true)
+  assert.deepEqual(parseReport({ phase: 'stopping', startedAt: T0 }), { phase: 'stopping', startedAt: 0, macSoundRefused: false, screen: false })
+  assert.deepEqual(parseReport({ phase: 'finishing', startedAt: T0 }), { phase: 'stopping', startedAt: 0, macSoundRefused: false, screen: false })
   // The Live page left while still uploading: no start time, still finishing.
-  assert.deepEqual(parseReport({ phase: 'stopping', startedAt: 0 }), { phase: 'stopping', startedAt: 0, macSoundRefused: false })
-  assert.deepEqual(parseReport({ phase: 'unfinished', startedAt: T0 }), { phase: 'unfinished', startedAt: 0, macSoundRefused: false })
+  assert.deepEqual(parseReport({ phase: 'stopping', startedAt: 0 }), { phase: 'stopping', startedAt: 0, macSoundRefused: false, screen: false })
+  assert.deepEqual(parseReport({ phase: 'unfinished', startedAt: T0 }), { phase: 'unfinished', startedAt: 0, macSoundRefused: false, screen: false })
 })
 
 test('a malformed report is refused, not guessed at', () => {
@@ -38,7 +42,9 @@ test('a malformed report is refused, not guessed at', () => {
     { phase: 'recording', startedAt: Infinity },
     { phase: 'recording', startedAt: '1800000000000', macSoundRefused: false },
     { phase: 'recording', startedAt: T0 }, // whether the Mac's sound was refused
-    { phase: 'recording', startedAt: T0, macSoundRefused: 'no' },
+    { phase: 'recording', startedAt: T0, macSoundRefused: 'no', screen: false },
+    { phase: 'recording', startedAt: T0, macSoundRefused: false }, // whether the screen is shared
+    { phase: 'recording', startedAt: T0, macSoundRefused: false, screen: 'yes' },
   ]) {
     assert.equal(parseReport(bad), null, JSON.stringify(bad))
   }
@@ -51,11 +57,15 @@ test('idle: Record Audio and Record Screen…, and nothing that says it is recor
   assert.equal(view.title, '')
 })
 
-test('recording: the red icon, the elapsed time beside it, and Stop', () => {
-  const view = trayView({ phase: 'recording', startedAt: T0 }, T0 + 65_400)
+test('recording: the red icon, the elapsed time beside it, Share Screen… and Stop', () => {
+  const view = trayView({ phase: 'recording', startedAt: T0, screen: false }, T0 + 65_400)
   assert.equal(view.recording, true)
   assert.equal(view.title, '1:05')
-  assert.deepEqual(actions(view), ['stop', 'show', 'quit'])
+  assert.deepEqual(actions(view), ['shareScreen', 'stop', 'show', 'quit'])
+  assert.ok(labels(view).includes('Share Screen…'))
+  const sharing = trayView({ phase: 'recording', startedAt: T0, screen: true }, T0)
+  assert.deepEqual(actions(sharing), ['stopSharing', 'stop', 'show', 'quit'])
+  assert.ok(labels(sharing).includes('Stop Sharing'))
   assert.ok(!actions(view).some((a) => a.startsWith('record')), 'no second recording while one runs')
 })
 
@@ -73,7 +83,8 @@ test('a full start and stop from the menu bar', () => {
   const reports = [
     [{ phase: 'idle', startedAt: 0 }, ['recordAudio', 'recordScreen', 'show', 'quit']],
     [{ phase: 'requesting', startedAt: 0 }, ['show', 'quit']],
-    [{ phase: 'recording', startedAt: T0, macSoundRefused: false }, ['stop', 'show', 'quit']],
+    [{ phase: 'recording', startedAt: T0, macSoundRefused: false, screen: true }, ['stopSharing', 'stop', 'show', 'quit']],
+    [{ phase: 'recording', startedAt: T0, macSoundRefused: false, screen: false }, ['shareScreen', 'stop', 'show', 'quit']],
     [{ phase: 'stopping', startedAt: T0 }, ['show', 'quit']],
     [{ phase: 'idle', startedAt: 0 }, ['recordAudio', 'recordScreen', 'show', 'quit']], // the page left for the session
   ]
@@ -107,9 +118,9 @@ function run(events, state = RELAY_START) {
   }
   return { state, effects }
 }
-const report = (phase, startedAt = T0, macSoundRefused = false) => ({
+const report = (phase, startedAt = T0, macSoundRefused = false, screen = false) => ({
   type: 'report',
-  report: { phase, startedAt, macSoundRefused },
+  report: { phase, startedAt, macSoundRefused, screen },
 })
 const RECORD = { type: 'record', mode: 'screen' }
 const RECORD_AUDIO = { type: 'record', mode: 'audio' }
@@ -283,12 +294,12 @@ test("macOS refusing the Mac's sound shows the window once: the page says how to
 })
 
 test('stopped: not red, and the four choices for the recording', () => {
-  assert.deepEqual(parseReport({ phase: 'stopped', startedAt: 0 }), { phase: 'stopped', startedAt: 0, macSoundRefused: false })
+  assert.deepEqual(parseReport({ phase: 'stopped', startedAt: 0 }), { phase: 'stopped', startedAt: 0, macSoundRefused: false, screen: false })
   const view = trayView({ phase: 'stopped', startedAt: 0 }, T0)
   assert.equal(view.recording, false)
   assert.deepEqual(actions(view), ['continue', 'makeNotes', 'startOver', 'discard', 'show', 'quit'])
   assert.equal(hideOnClose({ phase: 'stopped', startedAt: 0 }), true, 'closing the window would end the recording')
-  assert.deepEqual(labels(trayView({ phase: 'recording', startedAt: T0 }, T0)).slice(0, 2), ['Recording', 'Stop'])
+  assert.deepEqual(labels(trayView({ phase: 'recording', startedAt: T0 }, T0)).slice(0, 3), ['Recording', 'Share Screen…', 'Stop'])
 })
 
 test("a stopped recording's choices reach the page; the ones that delete it show the window", () => {
@@ -315,7 +326,10 @@ test('a Continue from the menu bar is quiet: the window shows only if it fails, 
 })
 
 test("the Mac's sound refused brings the window up once per recording, not after each Continue", () => {
-  const refused = (phase, startedAt = T0) => ({ type: 'report', report: { phase, startedAt, macSoundRefused: true } })
+  const refused = (phase, startedAt = T0) => ({
+    type: 'report',
+    report: { phase, startedAt, macSoundRefused: true, screen: false },
+  })
   const { effects } = run([
     LISTENING,
     report('requesting'),
@@ -336,10 +350,38 @@ test('closing the window while a Continue asks hides it: the recording is still 
 })
 
 test('only a page holding a recording makes quitting ask; a start asking for permissions holds none', () => {
-  const held = (phase) => holdsRecording(parseReport({ phase, startedAt: T0, macSoundRefused: false }))
+  const held = (phase) => holdsRecording(parseReport({ phase, startedAt: T0, macSoundRefused: false, screen: false }))
   assert.equal(held('idle'), false)
   assert.equal(held('requesting'), false, 'asking for the screen or the mic: nothing is recorded yet')
   for (const phase of ['recording', 'stopped', 'continuing', 'stopping', 'finishing', 'unfinished']) {
     assert.equal(held(phase), true, phase)
   }
+})
+
+test('Share Screen… and Stop Sharing reach a recording page, only as a change, never queued', () => {
+  const SHARE = { type: 'screen', on: true }
+  const UNSHARE = { type: 'screen', on: false }
+  // Only to a page that is recording and listening.
+  assert.deepEqual(run([SHARE]).effects, [])
+  assert.deepEqual(run([LISTENING, report('stopped', 0), SHARE]).effects, [])
+  assert.deepEqual(run([LISTENING, report('recording'), SHARE]).effects, ['share-screen'])
+  assert.deepEqual(run([LISTENING, report('recording', T0, false, true), UNSHARE]).effects, ['stop-sharing'])
+  // A menu older than the page's state: already shared, or already off.
+  assert.deepEqual(run([LISTENING, report('recording', T0, false, true), SHARE]).effects, [])
+  assert.deepEqual(run([LISTENING, report('recording'), UNSHARE]).effects, [])
+  // Quiet: neither shows the window (only the picker shows).
+  assert.ok(!run([LISTENING, report('recording'), SHARE]).effects.includes('show'))
+})
+
+test("leaving recording closes a Share Screen picker still open, so it can't hold up the next request", () => {
+  const closes = (events) => events.reduce((acc, e) => {
+    const out = relay(acc.state, e)
+    return { state: out.state, closed: acc.closed || Boolean(out.closePicker) }
+  }, { state: RELAY_START, closed: false }).closed
+  assert.equal(closes([LISTENING, report('recording'), report('stopped', 0)]), true)
+  assert.equal(closes([LISTENING, report('recording'), report('stopping', 0)]), true)
+  // Starting, continuing and recording keep it: those pickers are what the page is waiting for.
+  assert.equal(closes([LISTENING, report('requesting', 0), report('recording')]), false)
+  assert.equal(closes([LISTENING, report('stopped', 0), report('continuing', 0), report('recording')]), false)
+  assert.equal(closes([LISTENING, report('recording'), report('recording', T0, false, true)]), false)
 })

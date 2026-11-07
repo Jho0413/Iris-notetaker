@@ -152,6 +152,14 @@ test('request bodies are streamed through', async () => {
   assert.deepEqual(await fixed.json(), { method: 'POST', url: '/api/live/x/frame?t=1', bytes: 1000 })
 })
 
+test('a POST with no body is sent as one, with no chunked encoding (the Live page’s screen changes)', async () => {
+  seen.length = 0
+  const res = await get('app://iris/api/live/x/screen?t=1&on=true', { method: 'POST' })
+  assert.deepEqual(await res.json(), { method: 'POST', url: '/api/live/x/screen?t=1&on=true', bytes: 0 })
+  assert.equal(seen[0].headers['transfer-encoding'], undefined)
+  assert.equal(seen[0].headers['content-length'], '0')
+})
+
 test('server-sent events arrive as they are sent, and closing the stream closes the backend request', async () => {
   seen.length = 0
   const res = await get('app://iris/api/events')
