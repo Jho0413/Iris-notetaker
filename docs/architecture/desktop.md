@@ -215,21 +215,24 @@ Recording** instead (Privacy & Security › Screen & System Audio Recording › 
 Only), using `NSAudioCaptureUsageDescription`. Measured with Electron 45 on macOS 26, in a test app
 with Screen Recording denied and the sound played by another process:
 
+- **The first time, `getDisplayMedia` waits for macOS's prompt to be answered** (it resolved
+  about 5 s later, when the prompt was answered), so the Live page knows the answer before it
+  starts recording. Measured with the microphone opened first, as the Live page does.
 - **Allowed:** one live "System audio" track with all of the Mac's sound. Chromium turns echo
   cancellation, noise suppression and gain control on for it by default, hence the constraints
   above.
-- **Refused, in a later launch:** `getDisplayMedia` still resolves, with a track that has already
-  ended; macOS remembers the answer and doesn't ask again. The Live page treats a missing or ended
-  track as refused: it records the microphone alone, shows how to allow it (then quit and reopen
-  Iris), and the menu bar relay shows the window once (`macSoundRefused` in the page's report). A
-  track that ends during a recording is reported the same way.
-- **Refused at the prompt, in the same launch:** macOS asks during the first Record audio, without
-  holding the capture up. Refusing then (measured in the packaged app) leaves the track live but
-  silent, for that recording and later ones until Iris is reopened, so Iris can't tell and says
-  nothing: the recording has the microphone only. Pure silence can't tell it either: an allowed
-  Mac with nothing playing also gives exact zeros, and Electron reports no status for this
-  permission (`getMediaAccessStatus` covers the microphone, camera and screen). Reopening Iris
-  shows the banner.
+- **Refused:** `getDisplayMedia` still resolves, with a track that has already ended and
+  delivers no frames; macOS remembers the answer and doesn't ask again, and later starts get an
+  ended track at once. The Live page treats a missing or ended track as refused: it records the
+  microphone alone, shows how to allow it (then quit and reopen Iris), and the menu bar relay
+  shows the window once (`macSoundRefused` in the page's report). A track that ends during a
+  recording is reported the same way.
+- **Only seen in testing:** after `tccutil reset AudioCapture <bundle id>` while the app runs and
+  has already captured with permission, macOS asks again without holding the capture up, and
+  refusing then leaves the track live but silent for the rest of that launch (frames still
+  delivered, `muted` false), which can't be told from a Mac with nothing playing. To test a
+  refusal, reset the permission while the app is quit. (Switching it off in System Settings while
+  Iris runs is untested.)
 - **Turning the switch off in System Settings** after allowing didn't stop the capture in a new
   launch; only refusing at the prompt did.
 - **Echo without headphones:** the microphone also hears the call from the speakers. Measured
