@@ -653,7 +653,7 @@ async function askToRestart(message, detail) {
 
 /** Sessions recording or making notes right now. */
 async function busySessions() {
-  const capturing = menuBar.recording.phase !== 'idle' // what the Live page reported
+  const capturing = trayRules.holdsRecording(menuBar.recording) // what the Live page reported
   return busyNow(await backend.getJson('/api/sessions'), { capturing })
 }
 

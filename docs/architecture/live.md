@@ -55,14 +55,19 @@ Shared-audio modes:
   Shared audio is recorded without echo cancellation, noise suppression or gain control (it is
   what plays, not a voice in a room); the microphone keeps them.
 
+**The session is made only once what is recorded has been granted** (`POST /live` comes after
+the screen, the mic and the Mac's sound are answered), so asking for permissions never leaves a
+session behind, even if Iris is quit or crashes meanwhile, and nothing counts as recording until
+then.
+
 What happens when capture is interrupted:
 
-- **Permission denied or picker cancelled:** Iris shows what to allow and discards the empty session.
+- **Permission denied or picker cancelled:** Iris shows what to allow; no session was made.
   Anything already granted (such as the screen share when the mic is then denied) is stopped. The
   Mac's sound is the exception: refused, the audio recording starts with the microphone alone.
 - **Sharing stopped, or you leave the Live page or close the tab, before recording starts** (for
-  example while the mic prompt is still open): the start fails, everything granted is stopped and
-  the empty session is discarded.
+  example while the mic prompt is still open): the start fails and everything granted is stopped.
+  A session made in the moment before recording began is deleted.
 - **"Stop sharing" in the browser's own bar, or the mic is disconnected:** the recording finishes and
   is processed.
 - **Backend unreachable:** uploads are retried. Stop waits up to 30 seconds, then shows an error.

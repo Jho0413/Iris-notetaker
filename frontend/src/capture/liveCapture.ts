@@ -137,7 +137,9 @@ export interface StartedRecording {
 }
 
 export class LiveCapture {
-  readonly sessionId: string
+  /** Made once every permission is granted (`start`): until then, nothing is being recorded. */
+  private id?: string
+  private readonly createSession: () => Promise<string>
   private readonly options: LiveCaptureOptions
   private readonly env: CaptureEnv
   private readonly queue: UploadQueue
@@ -164,12 +166,21 @@ export class LiveCapture {
   private cancelOpening?: (err: CaptureError) => void
   private stopping?: Promise<void>
 
-  constructor(sessionId: string, options: LiveCaptureOptions = {}, env: CaptureEnv = browserEnv()) {
-    this.sessionId = sessionId
+  /**
+   * `createSession` makes the session to record into (`POST /live`) and resolves to its id, or
+   * throws a `CaptureError` saying why it can't. `start` calls it only once what it records has
+   * been granted, so asking for permissions never leaves a session behind.
+   */
+  constructor(
+    createSession: () => Promise<string>,
+    options: LiveCaptureOptions = {},
+    env: CaptureEnv = browserEnv(),
+  ) {
+    this.createSession = createSession
     this.options = options
     this.env = env
     this.queue = new UploadQueue(async (path, body) => {
-      const res = await env.fetch(`/api/live/${sessionId}/${path}`, {
+      const res = await env.fetch(`/api/live/${this.id}/${path}`, {
         method: 'POST',
         body,
         signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
@@ -178,18 +189,23 @@ export class LiveCapture {
     }, options.uploads)
   }
 
+  /** The session being recorded into, once `start` has made it. */
+  get sessionId(): string | undefined {
+    return this.id
+  }
+
   /** Uploads not yet acknowledged by the backend. */
   get pendingUploads(): number {
     return this.queue.pending
   }
 
   /**
-   * Ask for what `mode` records, then start recording: the screen then the mic, or for audio the
-   * mic and, in the desktop app, the Mac's sound (if macOS refuses it, the recording starts with
-   * the mic alone). On failure (permission denied, the picker cancelled, an unsupported browser,
-   * sharing stopped or the recorder failing before recording began, or `stop()` called
-   * meanwhile) everything acquired is released at once, the empty session is deleted, and a
-   * `CaptureError` with a user-facing message is thrown. A failure while a permission prompt is
+   * Ask for what `mode` records, then make the session and start recording: the screen then the
+   * mic, or for audio the mic and, in the desktop app, the Mac's sound (if macOS refuses it, the
+   * recording starts with the mic alone). On failure (permission denied, the picker cancelled, an
+   * unsupported browser, the session not made, sharing stopped or the recorder failing before
+   * recording began, or `stop()` called meanwhile) everything acquired is released at once, a
+   * session already made is deleted, and a `CaptureError` with a user-facing message is thrown. A failure while a permission prompt is
    * still open doesn't wait for the prompt: a stream granted afterwards is stopped as soon as it
    * arrives.
    */
@@ -247,6 +263,8 @@ export class LiveCapture {
     }
 
     const got = await this.acquire(mode)
+    this.id = await this.createSession()
+    this.throwIfCancelled() // cancelled while the session was made: start()'s cleanup deletes it
     const mixer = this.env.mixAudio()
     this.mixer = mixer
     this.mixIn()
@@ -339,7 +357,7 @@ export class LiveCapture {
       return
     }
     const res = await this.env
-      .fetch(`/api/sessions/${this.sessionId}`, { method: 'DELETE' })
+      .fetch(`/api/sessions/${this.id}`, { method: 'DELETE' })
       .catch((err: unknown) => {
         throw new CaptureError("Iris isn't responding, so the recording wasn't deleted. Try again.", { cause: err })
       })
@@ -480,13 +498,13 @@ export class LiveCapture {
     if (rejectedAudio.length) console.warn('Iris rejected audio chunks; they become silence', rejectedAudio)
     const request = { audioChunks: this.seq, allowGaps: rejectedAudio.length > 0 }
     try {
-      await endLiveSession(this.sessionId, request, this.env.fetch)
+      await endLiveSession(this.id!, request, this.env.fetch)
     } catch (err) {
       if (!(err instanceof MissingAudioError)) throw err
       // Every upload was acknowledged, so there is nothing left to resend: finish with silence
       // where the backend is missing audio rather than leave the session stuck recording.
       console.warn('Iris is missing audio chunks; they become silence', err.missing)
-      await endLiveSession(this.sessionId, { ...request, allowGaps: true }, this.env.fetch)
+      await endLiveSession(this.id!, { ...request, allowGaps: true }, this.env.fetch)
     }
     this.finished = true
     this.env.page.removeEventListener('beforeunload', this.onBeforeUnload)
@@ -515,14 +533,16 @@ export class LiveCapture {
   }
 
   /**
-   * The page is going away during a prompt. Fail the start, whose cleanup discards the session
-   * right away (microtasks run before the page unloads). A page restored from the back/forward
-   * cache then can't record into the deleted session.
+   * The page is going away during a prompt. Fail the start, whose cleanup discards a session made
+   * meanwhile right away (microtasks run before the page unloads). A page restored from the
+   * back/forward cache then can't record into the deleted session.
    */
   private onPageHideWhileStarting = () => this.cancel('Recording was cancelled before it started.')
 
+  /** Delete a session made by a start that then failed; before one is made there is none. */
   private discardSession() {
-    const url = `/api/sessions/${this.sessionId}`
+    if (!this.id) return
+    const url = `/api/sessions/${this.id}`
     void this.env.fetch(url, { method: 'DELETE', keepalive: true }).catch(() => {})
   }
 
@@ -537,7 +557,7 @@ export class LiveCapture {
   private onPageHide = () => {
     if (this.finished) return
     const body = new Blob([JSON.stringify({ allow_gaps: true })], { type: 'application/json' })
-    this.env.sendBeacon(`/api/live/${this.sessionId}/end`, body)
+    this.env.sendBeacon(`/api/live/${this.id}/end`, body)
   }
 }
 

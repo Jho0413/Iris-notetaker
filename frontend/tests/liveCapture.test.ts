@@ -82,6 +82,7 @@ interface Call {
 
 function setup(overrides: Record<string, unknown> = {}) {
   FakeRecorder.created = []
+  sessionsMade = 0
   const calls: Call[] = []
   const beacons: { url: string; body: Blob }[] = []
   const display = new FakeTrack('video')
@@ -158,9 +159,16 @@ function fakeMixer(): FakeMixer {
 
 const fast = { drainTimeoutMs: 200, uploads: { baseDelayMs: 1, maxDelayMs: 5 } }
 
+/** Sessions made by the captures below (`POST /live` stands in as a counter). */
+let sessionsMade = 0
+
 function capture(env: object, options = {}) {
   // The fake env stands in for the browser APIs; its shapes are only what LiveCapture uses.
-  return new LiveCapture('s1', { ...fast, ...options }, env as never)
+  const createSession = async () => {
+    sessionsMade++
+    return 's1'
+  }
+  return new LiveCapture(createSession, { ...fast, ...options }, env as never)
 }
 
 test('records, then stop uploads the last chunk and ends with the chunk count', async () => {
@@ -261,7 +269,7 @@ test('leaving the page while recording ends the session with what arrived', asyn
   assert.equal(t.calls.filter((c) => c.method === 'DELETE').length, 0) // what was recorded is kept
 })
 
-test('screen sharing denied: the mic is not requested and the empty session is deleted', async () => {
+test('screen sharing denied: the mic is not requested and no session is made', async () => {
   let micAsked = false
   const t = setup({
     mediaDevices: {
@@ -279,10 +287,11 @@ test('screen sharing denied: the mic is not requested and the empty session is d
   )
   assert.equal(micAsked, false)
   await new Promise((r) => setTimeout(r, 0))
-  assert.deepEqual(t.calls.map((c) => `${c.method} ${c.url}`), ['DELETE /api/sessions/s1'])
+  assert.deepEqual(t.calls.map((c) => `${c.method} ${c.url}`), [])
+  assert.equal(sessionsMade, 0, 'asking for permissions makes no session')
 })
 
-test('mic denied: the screen share is released and the session deleted', async () => {
+test('mic denied: the screen share is released and no session is made', async () => {
   const display = new FakeTrack('video')
   const t = setup({
     mediaDevices: {
@@ -296,7 +305,8 @@ test('mic denied: the screen share is released and the session deleted', async (
   assert.equal(display.stopped, true)
   assert.equal(FakeRecorder.created.length, 0)
   await new Promise((r) => setTimeout(r, 0))
-  assert.deepEqual(t.calls.map((c) => `${c.method} ${c.url}`), ['DELETE /api/sessions/s1'])
+  assert.deepEqual(t.calls.map((c) => `${c.method} ${c.url}`), [])
+  assert.equal(sessionsMade, 0, 'asking for permissions makes no session')
 })
 
 test('stop while the mic prompt is open cancels the start instead of recording', async () => {
@@ -318,7 +328,8 @@ test('stop while the mic prompt is open cancels the start instead of recording',
   assert.equal(FakeRecorder.created.length, 0)
   assert.ok(t.display.stopped && mic.stopped)
   assert.equal(t.posted('/end').length, 0)
-  assert.equal(t.calls.filter((c) => c.method === 'DELETE').length, 1)
+  assert.equal(t.calls.filter((c) => c.method === 'DELETE').length, 0)
+  assert.equal(sessionsMade, 0, 'asking for permissions makes no session')
 })
 
 test('no WebM support: a clear error before asking for anything', async () => {
@@ -383,7 +394,8 @@ test('mic denied with tab audio shared: every screen track is stopped', async ()
   await assert.rejects(capture(t.env).start('screen'), /No microphone was found/)
   assert.ok(video.stopped && tabAudio.stopped)
   await tick()
-  assert.deepEqual(t.calls.map((c) => `${c.method} ${c.url}`), ['DELETE /api/sessions/s1'])
+  assert.deepEqual(t.calls.map((c) => `${c.method} ${c.url}`), [])
+  assert.equal(sessionsMade, 0, 'asking for permissions makes no session')
 })
 
 test('stop while the mic prompt stays open releases the screen share without waiting', async () => {
@@ -400,7 +412,8 @@ test('stop while the mic prompt stays open releases the screen share without wai
   await assert.rejects(within(starting), /cancelled/)
   assert.equal(t.display.stopped, true)
   assert.equal(FakeRecorder.created.length, 0)
-  assert.deepEqual(t.calls.map((c) => `${c.method} ${c.url}`), ['DELETE /api/sessions/s1'])
+  assert.deepEqual(t.calls.map((c) => `${c.method} ${c.url}`), [])
+  assert.equal(sessionsMade, 0, 'asking for permissions makes no session')
 })
 
 test('screen sharing stopped during the mic prompt fails the start and releases the mic too', async () => {
@@ -419,7 +432,8 @@ test('screen sharing stopped during the mic prompt fails the start and releases 
   await tick()
   assert.equal(t.mic.stopped, true)
   assert.equal(FakeRecorder.created.length, 0)
-  assert.deepEqual(t.calls.map((c) => `${c.method} ${c.url}`), ['DELETE /api/sessions/s1'])
+  assert.deepEqual(t.calls.map((c) => `${c.method} ${c.url}`), [])
+  assert.equal(sessionsMade, 0, 'asking for permissions makes no session')
 })
 
 test('the recorder failing before it starts releases the screen and mic', async () => {
@@ -506,10 +520,11 @@ test('stop while the screen picker is open: a screen granted later is stopped, t
   await tick()
   assert.equal(t.display.stopped, true)
   assert.equal(micAsked, false)
-  assert.deepEqual(t.calls.map((c) => `${c.method} ${c.url}`), ['DELETE /api/sessions/s1'])
+  assert.deepEqual(t.calls.map((c) => `${c.method} ${c.url}`), [])
+  assert.equal(sessionsMade, 0, 'asking for permissions makes no session')
 })
 
-test('closing the tab during a prompt discards the empty session', async () => {
+test('closing the tab during a prompt makes no session', async () => {
   const t = setup({
     mediaDevices: {
       getDisplayMedia: async () => stream(t.display),
@@ -521,8 +536,9 @@ test('closing the tab during a prompt discards the empty session', async () => {
   t.env.page.dispatchEvent(new Event('pagehide'))
   await assert.rejects(within(starting), /cancelled/) // a page restored from cache can't record
   assert.equal(t.display.stopped, true)
-  assert.deepEqual(t.calls.map((c) => `${c.method} ${c.url}`), ['DELETE /api/sessions/s1'])
+  assert.deepEqual(t.calls.map((c) => `${c.method} ${c.url}`), [])
   assert.equal(t.beacons.length, 0) // nothing to end: it never recorded
+  assert.equal(sessionsMade, 0, 'asking for permissions makes no session')
 })
 
 test('frame capture failing to start leaves nothing half-started', async () => {
@@ -692,7 +708,7 @@ test("the Mac's sound ending mid-recording is reported once; the recording goes 
   assert.equal(t.posted('/audio').length, 2)
 })
 
-test("the mic denied for audio: the Mac's sound is never asked for and the session is discarded", async () => {
+test("the mic denied for audio: the Mac's sound is never asked for and no session is made", async () => {
   const t = audioSetup()
   t.env.mediaDevices.getUserMedia = async () => {
     throw new DOMException('Permission denied', 'NotAllowedError')
@@ -700,7 +716,8 @@ test("the mic denied for audio: the Mac's sound is never asked for and the sessi
   await assert.rejects(capture(t.env).start('audio'), /Microphone access was blocked/)
   assert.deepEqual(t.asked, [])
   await tick()
-  assert.deepEqual(t.calls.map((c) => `${c.method} ${c.url}`), ['DELETE /api/sessions/s1'])
+  assert.deepEqual(t.calls.map((c) => `${c.method} ${c.url}`), [])
+  assert.equal(sessionsMade, 0, 'asking for permissions makes no session')
 })
 
 test("stop while the Mac's sound is being asked for cancels the start and releases the mic", async () => {
@@ -983,6 +1000,48 @@ test("the recording's clock leaves stopped time out, and the menu bar's start ma
   clock = { ...clock, since: 50_000 } // Continue
   assert.equal(recordedMs(clock, 53_000), 15_000)
   assert.equal(53_000 - clockStart(clock), 15_000, "the menu bar's elapsed time")
+})
+
+// --- The session is made only once what is recorded has been granted -----------------------
+
+test('the session is made only after the screen and the mic are granted', async () => {
+  const order: string[] = []
+  const t = setup()
+  t.env.mediaDevices.getDisplayMedia = async () => (order.push('screen'), stream(t.display))
+  t.env.mediaDevices.getUserMedia = async () => (order.push('mic'), stream(t.mic))
+  const live = new LiveCapture(async () => (order.push('session'), 's1'), fast, t.env as never)
+  await live.start('screen')
+  assert.deepEqual(order, ['screen', 'mic', 'session'])
+  assert.equal(live.sessionId, 's1')
+  await live.stop()
+})
+
+test("a session that can't be made fails the start and releases what was granted", async () => {
+  const t = setup()
+  const failing = async (): Promise<string> => {
+    throw new CaptureError("Iris isn't responding.")
+  }
+  const live = new LiveCapture(failing, fast, t.env as never)
+  await assert.rejects(live.start('screen'), /Iris isn't responding/)
+  assert.ok(t.display.stopped && t.mic.stopped)
+  assert.equal(FakeRecorder.created.length, 0)
+  await tick()
+  assert.deepEqual(t.calls, [], 'no session, so nothing to delete')
+})
+
+test('cancelled while the session is being made: the session is deleted', async () => {
+  const t = setup()
+  let made: (id: string) => void = () => {}
+  const live = new LiveCapture(() => new Promise((resolve) => (made = resolve)), fast, t.env as never)
+  const starting = live.start('audio')
+  await tick()
+  const stopping = live.stop()
+  made('s1')
+  await assert.rejects(starting, /cancelled/)
+  await stopping
+  await tick()
+  assert.deepEqual(t.calls.map((c) => `${c.method} ${c.url}`), ['DELETE /api/sessions/s1'])
+  assert.ok(t.mic.stopped)
 })
 
 test('a refused screen share is not retried without audio', async () => {

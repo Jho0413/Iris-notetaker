@@ -116,6 +116,15 @@ function hideOnClose(state) {
 /** Asking for sources (a start, or a stopped recording's Continue), so a picker may be open. */
 const asking = (phase) => phase === 'starting' || phase === 'continuing'
 
+/**
+ * Whether the Live page holds a recording: capturing, stopped, continuing, or still uploading
+ * one. A start that is only asking for permissions holds none (its session is made once they are
+ * granted), so quitting then cuts nothing short.
+ */
+function holdsRecording(state) {
+  return state.phase !== 'idle' && state.phase !== 'starting'
+}
+
 /** A stopped recording's choices from the menu bar: the command each sends the page, and whether
  * the window shows (the page confirms the ones that delete the recording). */
 const STOPPED_CHOICES = {
@@ -219,4 +228,14 @@ function relay(state, event) {
   }
 }
 
-module.exports = { IDLE, RELAY_START, START_ANSWER_MS, parseReport, trayView, clock, hideOnClose, relay }
+module.exports = {
+  IDLE,
+  RELAY_START,
+  START_ANSWER_MS,
+  parseReport,
+  trayView,
+  clock,
+  hideOnClose,
+  holdsRecording,
+  relay,
+}

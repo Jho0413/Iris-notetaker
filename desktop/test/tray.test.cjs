@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict')
 const { test } = require('node:test')
-const { IDLE, RELAY_START, parseReport, trayView, clock, hideOnClose, relay } = require('../src/tray.cjs')
+const { IDLE, RELAY_START, parseReport, trayView, clock, hideOnClose, holdsRecording, relay } = require('../src/tray.cjs')
 
 const T0 = 1_800_000_000_000
 const actions = (view) => view.items.filter((i) => i.id).map((i) => i.id)
@@ -333,4 +333,13 @@ test('closing the window while a Continue asks hides it: the recording is still 
   assert.equal(hideOnClose(continuing), true)
   assert.deepEqual(actions(trayView(continuing, T0)), ['show', 'quit'])
   assert.match(labels(trayView(continuing, T0)).join(' '), /Continuing/)
+})
+
+test('only a page holding a recording makes quitting ask; a start asking for permissions holds none', () => {
+  const held = (phase) => holdsRecording(parseReport({ phase, startedAt: T0, macSoundRefused: false }))
+  assert.equal(held('idle'), false)
+  assert.equal(held('requesting'), false, 'asking for the screen or the mic: nothing is recorded yet')
+  for (const phase of ['recording', 'stopped', 'continuing', 'stopping', 'finishing', 'unfinished']) {
+    assert.equal(held(phase), true, phase)
+  }
 })

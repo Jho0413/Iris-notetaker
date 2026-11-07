@@ -78,7 +78,6 @@ export function LivePage() {
   const [discarded, setDiscarded] = useState(false)
   const capture = useRef<LiveCapture | null>(null)
   const stopping = useRef(false)
-  const unmounted = useRef(false)
   const [mode, setMode] = useState<CaptureMode>('screen')
   const [display, setDisplay] = useState<MediaStream | null>(null)
   const [macSound, setMacSound] = useState(false)
@@ -118,37 +117,25 @@ export function LivePage() {
   // start, stopping cancels it: everything granted is released and the empty session discarded.
   // Until that stop settles the app's menu bar says the upload is finishing, so quitting still asks
   // (capture/menuBar.ts: chunks not yet uploaded are only in this window's memory).
-  useEffect(() => {
-    unmounted.current = false
-    return () => {
-      unmounted.current = true
-      menuBar.left(capture.current?.stop())
-    }
-  }, [])
+  useEffect(() => () => menuBar.left(capture.current?.stop()), [])
 
   async function start(mode: CaptureMode) {
     setError(null)
     setDiscarded(false)
     setMode(mode)
     setPhase('requesting')
-    const { data, error: apiError } = await api
-      .POST('/api/live', { body: { title: title.trim() || 'Live session', screen: mode === 'screen' } })
-      .catch(() => ({ data: undefined, error: true }))
-    if (apiError || !data) {
-      setPhase('idle')
-      setError(UNREACHABLE)
-      return
-    }
-    if (unmounted.current) {
-      // Left the page while the session was being created: discard it, don't ask for the screen.
-      void api
-        .DELETE('/api/sessions/{session_id}', { params: { path: { session_id: data.id } } })
-        .catch(() => {})
-      return
+    // Made only once what is recorded has been granted (LiveCapture.start): asking for
+    // permissions leaves no session behind, whatever happens meanwhile.
+    const createSession = async () => {
+      const { data } = await api
+        .POST('/api/live', { body: { title: title.trim() || 'Live session', screen: mode === 'screen' } })
+        .catch(() => ({ data: undefined }))
+      if (!data) throw new CaptureError(UNREACHABLE)
+      return data.id
     }
     // Sharing stopped from the browser's own controls, the mic went away or the recorder failed:
     // finish. Held before start() so leaving the page during a prompt cancels the start.
-    const live = new LiveCapture(data.id, {
+    const live = new LiveCapture(createSession, {
       onEnded: () => void stopRef.current(),
       onMacSoundEnded: () => setMacSound(false),
     })
@@ -157,13 +144,13 @@ export function LivePage() {
       const started = await live.start(mode)
       setDisplay(started.screen)
       setMacSound(started.macSound)
-      setSessionId(data.id)
+      setSessionId(live.sessionId ?? null)
       const t = Date.now()
       setClock({ recordedMs: 0, since: t })
       setNow(t)
       setPhase('recording')
     } catch (err) {
-      // Nothing was captured, and the capture module has already discarded the empty session.
+      // Nothing was captured, and the capture module has deleted any session it had made.
       capture.current = null
       setPhase('idle')
       setError(captureError(err))
@@ -185,7 +172,7 @@ export function LivePage() {
     try {
       await live.stop()
       capture.current = null
-      return live.sessionId
+      return live.sessionId ?? null
     } catch (err) {
       // Kept, so finishing again retries the uploads still queued as well as the end request.
       setPhase('unfinished')

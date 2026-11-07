@@ -98,10 +98,12 @@ whole request body ahead of the socket. Server-sent events stream event by event
   them.
 - **The app dies:** the backend watches `IRIS_PARENT_PID` (`backend/src/iris/parent.py`) and shuts
   itself down once that process is gone. Measured: 0.3 s after the app was killed with SIGKILL.
-- **Quit:** if a session is being recorded (the Live page is capturing) or processing, Iris asks
-  first (what was captured is kept, and next time the session page offers Finish for a recording,
-  Try again for notes being made). A session left "recording" by an earlier quit or crash doesn't
-  count: nothing is capturing it (`busyNow` in `src/busy.cjs`). Then it stops the backend and
+- **Quit:** if a session is being recorded (the Live page holds a recording: capturing,
+  stopped, continuing or uploading, `holdsRecording` in `src/tray.cjs`) or processing, Iris asks
+  first (what was captured is kept, and next time the session page offers Finish for a
+  recording, Try again for notes being made). A start still asking for permissions holds none (its
+  session isn't made yet), so quitting then doesn't ask. A session left "recording" by an earlier
+  quit or crash doesn't count: nothing is capturing it (`busyNow` in `src/busy.cjs`). Then it stops the backend and
   exits. Closing the window doesn't quit: Iris keeps running, and
   making notes, in the Dock and the menu bar. While a recording runs, closing the window only
   hides it (see "Menu bar").
@@ -190,7 +192,7 @@ open focuses it and is refused.
   records it, Esc, Cancel or closing the window cancels, and so does the page that asked closing,
   reloading or crashing (its request is gone). The chosen source goes to the page with
   all of the Mac's sound as `loopback`; a cancel refuses the request, which the Live page treats as
-  a cancelled start (the empty session is discarded). Electron rejects every refused request as
+  a cancelled start (no session was made yet). Electron rejects every refused request as
   `AbortError` ("Invalid capture constraints"), never `NotAllowedError`, so in the app
   `describeCaptureError` words that as cancelled or blocked too.
 - **Without the Screen Recording permission** macOS lists nothing, so the picker says how to allow
