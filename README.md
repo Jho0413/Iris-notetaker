@@ -7,7 +7,7 @@ Iris turns a session where someone shows things while talking (a meeting, a lect
 Markdown notes that include what was on screen. The slide, the whiteboard sketch or the diagram
 being discussed is rebuilt as a clean visual and placed next to what was said about it.
 
-Upload a recording or record live from the browser or the macOS app. Iris transcribes the audio, finds what changed
+Upload a recording or record live from the browser or the macOS app, with a screen or audio only. Iris transcribes the audio, finds what changed
 on screen, reads it (math, text, tables, code, figures), redraws each figure and checks it against
 the original, and writes step-by-step notes in a style suited to the session. Everything runs
 locally; model calls go to OpenAI.
@@ -29,9 +29,11 @@ make setup && make desktop              # desktop/dist/Iris-<version>-arm64.dmg 
 ```
 
 Open the `.dmg`, drag Iris to Applications and open it. The first launch asks for your OpenAI API
-key (stored encrypted with the macOS Keychain), then shows Iris. **Record live** records any
-screen or window with its sound; macOS asks for Screen Recording and microphone access the first
-time. No terminal, `uv` or repo is needed to run it.
+key (stored encrypted with the macOS Keychain), then shows Iris. **Record live** records your
+microphone with the Mac's sound (**Record audio**, for calls and talks), or any screen or window
+with its sound too (**Record audio + screen**), also from the menu bar icon; macOS asks for
+microphone, System Audio Recording or Screen Recording access the first time. No terminal, `uv` or
+repo is needed to run it.
 
 More commands, the `iris` CLI and troubleshooting: [`docs/development.md`](docs/development.md).
 
@@ -64,7 +66,7 @@ backend/src/iris/
   models.py       shared types: API models and every stage's output
 frontend/src/
   api/            typed client (generated from OpenAPI) + progress events
-  capture/        browser mic + screen-share capture
+  capture/        browser capture: the mic, plus a screen share or the Mac's sound
   components/     notes view and editor (Markdown, KaTeX, figures), menus and progress
   notes/          the notes format (boxes, steps, figures by id) and the editor's nodes,
                   block actions and drag landing spots

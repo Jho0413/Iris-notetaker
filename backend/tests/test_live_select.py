@@ -256,6 +256,25 @@ async def test_selected_to_never_passes_closed_to(ctx: StageContext, vision, ren
     await driver.stop()
 
 
+async def test_with_every_moment_read_selected_to_follows_closed_to(
+    ctx: StageContext, vision, renderer
+):
+    # With no screen shared, the screen lane moves closed_to on its own (no moment can open).
+    driver = Driver(ctx).start()
+    await driver.timeline.advance_closed_to(30)
+    await driver.selected(30)
+    assert vision.calls == []
+    # A closed moment still waiting for its speech holds selected_to back until it is read.
+    await driver.close(3)  # [30, 40)
+    await driver.timeline.advance_closed_to(60)
+    await settle()
+    assert driver.timeline.selected_to == 30
+    await driver.transcribe(3, to=60)
+    await driver.selected(60)
+    assert vision.calls == [["m004"]]
+    await driver.stop()
+
+
 async def test_selection_matches_the_select_stage_when_batches_coincide(
     ctx: StageContext, vision: FakeVision, renderer: FakeRenderer
 ):

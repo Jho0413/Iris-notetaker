@@ -18,13 +18,14 @@ import pytest
 from fastapi.testclient import TestClient
 
 from iris.config import Settings
-from iris.live.replay import encode_webm
+from iris.live.replay import encode_webm, has_video
 from iris.llm.errors import UserFacingError
 from iris.llm.usage import append_record
 from iris.models import (
     LIVE_WITHOUT_AUDIO,
     UNREADABLE_LIVE_AUDIO,
     FrameIndex,
+    LiveCapture,
     SourceKind,
     UsageRecord,
 )
@@ -40,11 +41,13 @@ from iris.sources.browser_live import (
     find_cluster,
     fit,
     missing_audio_chunks,
+    read_capture,
     store_audio_chunk,
     store_frame,
 )
-from iris.store.layout import SessionPaths, read_model
+from iris.store.layout import SessionPaths, read_model, session_paths
 from tests.test_api import wait_for_status
+from tests.test_ingest import make_media
 
 RATE = 48_000
 SECONDS = 6
@@ -318,6 +321,21 @@ def test_live_input_is_validated(client: TestClient):
     assert client.post("/api/live/nope/end").status_code == 404
 
 
+def test_an_audio_only_recording_is_recorded_as_such_and_refuses_frames(
+    client: TestClient, settings: Settings, webm: bytes
+):
+    sid = client.post("/api/live", json={"title": "call", "screen": False}).json()["id"]
+    paths = session_paths(settings.sessions_dir, sid)
+    assert read_capture(paths) == LiveCapture(screen=False)
+    assert post_audio(client, sid, 0, split(webm)[0]) == 204
+    assert post_frame(client, sid, 1.0, jpeg(COLOURS[0])) == 409
+    assert not paths.live_frames_dir.exists() or not any(paths.live_frames_dir.iterdir())
+    # A screen recording is the default.
+    shared = start(client)
+    assert read_capture(session_paths(settings.sessions_dir, shared)) == LiveCapture(screen=True)
+    assert post_frame(client, shared, 1.0, jpeg(COLOURS[0])) == 204
+
+
 def test_repeated_chunk_with_other_content_conflicts(client: TestClient, webm: bytes):
     sid = start(client)
     chunks = split(webm)
@@ -457,3 +475,9 @@ def test_live_session_produces_notes_like_an_upload(
     wait_until_idle(client, sid)
     assert client.get(f"/api/sessions/{sid}").json()["status"] == "done"
     assert read_model(root / "frames.json", FrameIndex) == index
+
+
+def test_replay_records_a_file_without_video_as_audio_only(tmp_path: Path):
+    """``iris replay-live`` starts the session as the Live page would for that file."""
+    assert has_video(make_media(tmp_path / "talk.mp4", video=True, seconds=1))
+    assert not has_video(make_media(tmp_path / "call.wav", video=False, seconds=1))

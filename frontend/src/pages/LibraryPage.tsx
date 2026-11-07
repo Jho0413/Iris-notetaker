@@ -159,7 +159,7 @@ export function LibraryPage() {
             <Link to="/live" className="choice">
               <Icon name="record" />
               <strong>Record live</strong>
-              <span>Share a screen or tab with your microphone, and stop when you're done.</span>
+              <span>Your microphone, with a screen or without, and stop when you're done.</span>
             </Link>
           </div>
         </div>

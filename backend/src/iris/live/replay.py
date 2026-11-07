@@ -8,6 +8,8 @@
 - **Screen frames** are sampled about once a second (at each second, the latest video frame shown
   by then, as the browser's frame ticker captures it), scaled to at most ``FRAME_MAX_WIDTH`` wide
   like the browser does, and posted as JPEG with ``t`` (seconds since start, the audio's clock).
+- A file with **no video** is replayed as an audio-only recording (``screen: false``), as the
+  Live page's "Record audio" starts one.
 - Everything is **paced in real time** (``speed`` > 1 plays faster: the session clock stays the
   file's), then ``POST /end`` is sent with the chunk count.
 
@@ -198,6 +200,11 @@ def file_frames(
             due += interval_s
 
 
+def has_video(path: Path) -> bool:
+    with av.open(str(path)) as container:
+        return bool(container.streams.video)
+
+
 # --- Replay -----------------------------------------------------------------------------------
 
 
@@ -268,7 +275,8 @@ async def replay(
     chunks = chunk_webm(webm)
     api = base_url.rstrip("/") + "/api"
     async with httpx.AsyncClient(timeout=60) as client:
-        r = await client.post(f"{api}/live", json={"title": title or file.stem})
+        screen = await asyncio.to_thread(has_video, file)
+        r = await client.post(f"{api}/live", json={"title": title or file.stem, "screen": screen})
         r.raise_for_status()
         sid = r.json()["id"]
         log(f"session {sid}: replaying {file.name} ({webm.duration_s:.1f} s) at {speed:g}x")

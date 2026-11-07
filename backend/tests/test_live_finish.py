@@ -353,6 +353,43 @@ def test_a_live_session_is_finished_at_stop_with_only_the_open_work_left(
     assert not any(p for _, _, p in stage_events(client, sid, n))
 
 
+def test_an_audio_only_session_writes_its_notes_while_recording(app_client: TestClient, recording):
+    """With no screen, the horizon follows the transcript: sections are written while recording
+    (not all at stop), and stop still promotes everything."""
+    client = app_client
+    sid = client.post("/api/live", json={"title": "call", "screen": False}).json()["id"]
+    timeline: LiveTimeline = client.app.state.runner.live.get(sid).timeline  # type: ignore[attr-defined]
+    root = client.app.state.settings.sessions_dir / sid  # type: ignore[attr-defined]
+    for seq, (_, data) in enumerate(recording):
+        assert post_audio(client, sid, seq, data) == 204
+    assert post_frame(client, sid, 1.0, screen_at(1.0)) == 409  # audio only: no frames
+    wait_until_caught_up(client, sid, {"transcript_chunk", "notes_updated"})
+
+    assert timeline.horizon == timeline.transcribed_to > SECONDS / 2
+    assert timeline.closed_to == timeline.selected_to == timeline.transcribed_to
+    frozen = len(list((root / "notes_sections").glob("*.json")))
+    assert frozen >= 1
+    before = calls(client, sid)
+    assert set(by_stage(before)) == {"transcribe", "write"}
+    live = events(client, sid)
+
+    r = client.post(f"/api/live/{sid}/end", json={"audio_chunks": len(recording)})
+    assert r.status_code == 200
+    session = wait_for_done(client, sid)
+    assert session["status"] == "done", session.get("error")
+    assert timeline.complete and timeline.moments == []
+    stages = stage_events(client, sid, len(live))
+    promoted = [s for kind, s, p in stages if p and kind == "stage_finished"]
+    assert promoted == ["transcribe", "detect", "align", "select"]
+    notes = client.get(f"/api/sessions/{sid}/notes").json()
+    assert notes["visuals"] == [] and "::figure" not in notes["markdown"]
+    # After stop: the last window, the sections still open, and synthesis. Nothing is redone.
+    parts = read_model(root / "notes_draft.json", NotesDraft).parts
+    assert parts is not None and parts > frozen
+    counts = by_stage(calls(client, sid)[len(before) :])
+    assert counts == {"transcribe": 1, "write": parts - frozen, "synthesize": 1}
+
+
 def test_an_audio_failure_runs_the_full_plan(app_client: TestClient, recording, monkeypatch):
     client = app_client
 

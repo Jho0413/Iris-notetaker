@@ -41,7 +41,7 @@ mac:
   hardenedRuntime: false
   gatekeeperAssess: false
   extendInfo:
-    NSMicrophoneUsageDescription: Iris records your voice, with what is on screen, to write your notes.
+    NSMicrophoneUsageDescription: Iris records your voice, and what is on screen if you share it, to write your notes.
     NSAudioCaptureUsageDescription: Iris records the sound your Mac plays, such as a call or a video, to write your notes.
 dmg:
   sign: false

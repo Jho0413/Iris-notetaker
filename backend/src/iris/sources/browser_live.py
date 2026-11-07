@@ -1,6 +1,8 @@
 """Browser live source: audio chunks and screen frames posted by the UI while recording.
 
 Capture (while recording, through ``api/routes/live.py``):
+  - What is captured: ``live/capture.json`` (``LiveCapture``), written when the recording starts.
+    An audio-only recording posts no frames.
   - Audio: MediaRecorder timeslice chunks, stored as ``live/audio/<seq:06d>.webm``. The chunks are
     consecutive byte ranges of one WebM stream (only chunk 0 has the header), so concatenated in
     ``seq`` order they form a valid stream whose timestamps start at 0 when recording started.
@@ -38,10 +40,16 @@ import cv2
 import numpy as np
 
 from iris.llm.errors import UserFacingError
-from iris.models import LIVE_WITHOUT_AUDIO, UNREADABLE_LIVE_AUDIO, FrameIndex, FrameRef
+from iris.models import (
+    LIVE_WITHOUT_AUDIO,
+    UNREADABLE_LIVE_AUDIO,
+    FrameIndex,
+    FrameRef,
+    LiveCapture,
+)
 from iris.pipeline.context import StageContext
 from iris.sources.upload import JPEG_QUALITY, output_size
-from iris.store.layout import SessionPaths, write_model
+from iris.store.layout import SessionPaths, read_model, write_model
 
 log = logging.getLogger(__name__)
 
@@ -78,6 +86,25 @@ def frame_name(t: float) -> str:
 
 def audio_chunk_path(paths: SessionPaths, seq: int) -> Path:
     return paths.live_audio_dir / f"{seq:06d}.webm"
+
+
+def store_capture(paths: SessionPaths, capture: LiveCapture) -> None:
+    paths.live_dir.mkdir(parents=True, exist_ok=True)
+    write_model(paths.live_capture, capture)
+
+
+def read_capture(paths: SessionPaths) -> LiveCapture:
+    """What the recording captures. A recording started before ``capture.json`` existed shared its
+    screen; so does one whose file is unreadable, which only means its notes wait for stop."""
+    try:
+        return read_model(paths.live_capture, LiveCapture)
+    except FileNotFoundError:
+        return LiveCapture()
+    except ValueError:
+        log.warning(
+            "%s is unreadable; treating the recording as sharing a screen", paths.live_capture
+        )
+        return LiveCapture()
 
 
 def store_audio_chunk(paths: SessionPaths, seq: int, data: bytes) -> bool:

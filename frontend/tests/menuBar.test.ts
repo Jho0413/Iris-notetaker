@@ -45,3 +45,14 @@ test('a page left with nothing to upload reports idle at once', () => {
   t.reporter.left(undefined)
   assert.deepEqual(t.sent, ['idle', 'idle'])
 })
+
+test("the Mac's sound refused is told with the recording, and cleared when the page goes", () => {
+  const sent: unknown[][] = []
+  const reporter = menuBarReporter((...report) => sent.push(report))
+  reporter.phase('recording', 1_800_000_000_000, true)
+  reporter.left(undefined)
+  assert.deepEqual(sent, [
+    ['recording', 1_800_000_000_000, true],
+    ['idle', 0, false],
+  ])
+})

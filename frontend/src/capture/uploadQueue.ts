@@ -41,6 +41,7 @@ export class UploadQueue {
   private active = 0
   private retrying = 0
   private listeners = new Set<() => void>()
+  private closed = false
   private readonly send: Send
   private readonly concurrency: number
   private readonly baseDelayMs: number
@@ -66,6 +67,7 @@ export class UploadQueue {
   }
 
   add(kind: UploadKind, path: string, body: Blob): void {
+    if (this.closed) return
     this.waiting.push({ kind, path, body, attempts: 0 })
     if (kind === 'frame') this.dropOldFrames()
     this.pump()
@@ -90,6 +92,12 @@ export class UploadQueue {
       }, timeoutMs)
       this.listeners.add(done)
     })
+  }
+
+  /** Send nothing more: what is waiting or waiting to retry is dropped (the session is gone). */
+  close(): void {
+    this.closed = true
+    this.waiting = []
   }
 
   private pump(): void {
@@ -117,6 +125,7 @@ export class UploadQueue {
       const delay = Math.min(this.maxDelayMs, this.baseDelayMs * 2 ** (item.attempts - 1))
       setTimeout(() => {
         this.retrying--
+        if (this.closed) return
         this.waiting.push(item)
         if (item.kind === 'frame') this.dropOldFrames()
         this.pump()

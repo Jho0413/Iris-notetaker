@@ -499,9 +499,9 @@ ipcMain.handle('iris-picker:open-settings', (event) => {
 // ---- menu bar --------------------------------------------------------------------------------
 
 // The menu bar icon starts and stops a recording, but recording happens in the Live page (its
-// capture code runs in the window), so the icon only relays: "Record Screen…" asks the page to
-// start (making the window, hidden, if it was closed), and only the picker shows; Stop asks the
-// page to stop, which makes notes as its own Stop does.
+// capture code runs in the window), so the icon only relays: "Record Audio" or "Record Screen…"
+// asks the page to start (making the window, hidden, if it was closed), and only the picker
+// shows (none for audio); Stop asks the page to stop, which makes notes as its own Stop does.
 let tray = null
 let startAnswerTimer = null
 let trayTicker = null
@@ -519,15 +519,24 @@ function createTray() {
   showTray()
 }
 
+/** Start recording from the menu bar, `mode` 'audio' or 'screen'. */
+function recordFromMenuBar(mode) {
+  // Only the picker shows (none for audio): bringing the window up would switch to its Space,
+  // and the picker would list that Space's windows instead of the ones the user is looking at.
+  // The window is made if it was closed (the recording runs in its Live page); the start waits
+  // for its UI.
+  showMainWindow({ show: false })
+  menuBarEvent({ type: 'record', mode })
+}
+
 const TRAY_ACTIONS = {
-  record: () => {
-    // Only the picker shows: bringing the window up would switch to its Space, and the picker
-    // would list that Space's windows instead of the ones the user is looking at. The window is
-    // made if it was closed (the recording runs in its Live page); the start waits for its UI.
-    showMainWindow({ show: false })
-    menuBarEvent({ type: 'record' })
-  },
+  recordAudio: () => recordFromMenuBar('audio'),
+  recordScreen: () => recordFromMenuBar('screen'),
   stop: () => menuBarEvent({ type: 'stop' }),
+  continue: () => menuBarEvent({ type: 'choice', choice: 'continue' }),
+  makeNotes: () => menuBarEvent({ type: 'choice', choice: 'makeNotes' }),
+  startOver: () => menuBarEvent({ type: 'choice', choice: 'startOver' }),
+  discard: () => menuBarEvent({ type: 'choice', choice: 'discard' }),
   show: () => showMainWindow(),
   quit: () => app.quit(),
 }
@@ -564,7 +573,7 @@ function menuBarEvent(event) {
     log(`[tray] ${send} recording`)
     mainWindow.webContents.send('iris-app:record', send)
     // A page that doesn't start (held up by a question it asks) gets its window shown.
-    if (send === 'start') {
+    if (send === 'start-audio' || send === 'start-screen') {
       clearTimeout(startAnswerTimer)
       startAnswerTimer = setTimeout(() => menuBarEvent({ type: 'startUnanswered' }), trayRules.START_ANSWER_MS)
     }
@@ -644,7 +653,7 @@ async function askToRestart(message, detail) {
 
 /** Sessions recording or making notes right now. */
 async function busySessions() {
-  const capturing = menuBar.recording.phase !== 'idle' // what the Live page reported
+  const capturing = trayRules.holdsRecording(menuBar.recording) // what the Live page reported
   return busyNow(await backend.getJson('/api/sessions'), { capturing })
 }
 
@@ -721,7 +730,8 @@ function secureSession(ses) {
   ses.setPermissionCheckHandler((_wc, permission, origin) => policy.permissionCheckAllowed(permission, origin))
 
   // The UI's getDisplayMedia call: Iris's picker asks what to record (see "picker" above), with
-  // all of the Mac's sound as 'loopback'. A refusal reaches the page as a cancelled start.
+  // all of the Mac's sound as 'loopback'. A refusal reaches the page as a cancelled start. A
+  // request for sound alone ("Record audio") gets the Mac's sound with no picker.
   ses.setDisplayMediaRequestHandler(async (request, callback) => {
     const from = request.frame?.url ?? request.securityOrigin
     const answer = (streams) => {
@@ -734,6 +744,10 @@ function secureSession(ses) {
     if (!policy.isIrisUrl(from)) {
       log(`[capture] refused a capture request from ${from}`)
       return answer(null)
+    }
+    if (pickerRules.soundOnly(request)) {
+      log("[capture] recording the Mac's sound")
+      return answer({ audio: 'loopback' })
     }
     // One picker at a time. Chromium holds a second request from the same page until the first
     // is answered (measured, Electron 45); any other request meanwhile focuses the open picker.

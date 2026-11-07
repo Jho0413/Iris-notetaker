@@ -61,6 +61,15 @@ async def test_watermarks_never_move_back():
     assert (tl.transcribed_to, tl.closed_to) == (30, 40)
 
 
+async def test_selected_to_follows_closed_to_but_never_passes_it():
+    tl = LiveTimeline()
+    await tl.advance_closed_to(25)
+    await tl.advance_selected_to(40)
+    assert tl.selected_to == 25
+    await tl.advance_selected_to(10)
+    assert tl.selected_to == 25
+
+
 async def test_out_of_order_results_are_rejected():
     tl = LiveTimeline()
     await tl.publish_transcript([seg(10, 12)], transcribed_to=12)
