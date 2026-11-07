@@ -30,6 +30,20 @@ test('failed uploads are retried until they land; rejected ones are reported, no
   assert.equal(queue.pending, 0)
 })
 
+test('a closed queue sends nothing more: neither what waits, nor retries, nor new items', async () => {
+  const sent: string[] = []
+  const queue = new UploadQueue(async (path) => {
+    sent.push(path)
+    return 503 // the first attempt fails, so it would be retried
+  }, { ...fast, concurrency: 1 })
+  queue.add('audio', 'audio?seq=0', blob)
+  queue.add('audio', 'audio?seq=1', blob) // waits behind the first, which is in flight
+  queue.close()
+  queue.add('audio', 'audio?seq=2', blob)
+  await new Promise((r) => setTimeout(r, 30))
+  assert.deepEqual(sent, ['audio?seq=0'])
+})
+
 test('drain gives up after its timeout but keeps items, so a later drain still uploads them', async () => {
   let up = false
   const sent: string[] = []

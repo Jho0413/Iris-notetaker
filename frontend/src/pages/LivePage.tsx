@@ -12,13 +12,17 @@ import { act } from '../session/request'
 import { formatClock, liveProgress } from '../session/state'
 import { useSessionStream } from '../session/useSessionStream'
 import { useTitle } from '../session/useTitle'
-import { irisApp } from '../settings/appBridge'
+import { irisApp, type RecordCommand } from '../settings/appBridge'
 
 /**
- * `unfinished`: capture has stopped, but telling the backend to make notes failed;
- * `finishing`: retrying that request.
+ * `stopped`: capture is paused (Stop): make notes, continue, start over or discard.
+ * `stopping`: finishing the upload to make notes. `unfinished`: capture has ended, but telling the
+ * backend to make notes failed; `finishing`: retrying that request.
  */
-type Phase = 'idle' | 'requesting' | 'recording' | 'stopping' | 'unfinished' | 'finishing'
+type Phase = 'idle' | 'requesting' | 'recording' | 'stopped' | 'stopping' | 'unfinished' | 'finishing'
+
+/** A choice on the stopped page that deletes what was recorded, so it is confirmed first. */
+type Destructive = 'discard' | 'start-over'
 
 /**
  * Plain words for a capture failure. Messages from the capture module are ours and shown as they
@@ -48,8 +52,13 @@ export function LivePage() {
   const [phase, setPhase] = useState<Phase>('idle')
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [startedAt, setStartedAt] = useState(0)
+  // The recording's clock leaves stopped time out: what was recorded before, plus the time since
+  // capture last (re)started (`since`, 0 while stopped).
+  const [clock, setClock] = useState({ recordedMs: 0, since: 0 })
   const [now, setNow] = useState(0)
+  const [busy, setBusy] = useState<'continue' | 'discard' | null>(null)
+  const [confirming, setConfirming] = useState<Destructive | null>(null)
+  const [discarded, setDiscarded] = useState(false)
   const capture = useRef<LiveCapture | null>(null)
   const stopping = useRef(false)
   const unmounted = useRef(false)
@@ -59,25 +68,29 @@ export function LivePage() {
   const desktopApp = inDesktopApp()
   const soundRefused = phase === 'recording' && macSoundRefused(desktopApp, mode, { macSound })
   const recording = phase === 'recording'
-  const elapsed = recording || phase === 'stopping' ? (now - startedAt) / 1000 : 0
+  const stopped = phase === 'stopped'
+  // Started and not yet handed over (or thrown away): leaving the page would end it.
+  const open = recording || stopped
+  const elapsed = (clock.recordedMs + (clock.since ? now - clock.since : 0)) / 1000
 
-  useTitle(recording ? `● Recording ${formatClock(elapsed)}` : 'Record live')
+  useTitle(recording ? `● Recording ${formatClock(elapsed)}` : stopped ? `Stopped ${formatClock(elapsed)}` : 'Record live')
 
   // What live processing has done so far, as one quiet line (not announced: it changes often).
-  const stream = useSessionStream(recording || phase === 'stopping' ? sessionId ?? undefined : undefined)
+  const stream = useSessionStream(open || phase === 'stopping' ? sessionId ?? undefined : undefined)
   const progress = liveProgress(stream.run)
 
   // Leaving ends the recording: the browser asks before closing the tab, the app before navigating.
-  const blocker = useBlocker(recording)
+  const blocker = useBlocker(open)
   useEffect(() => {
-    if (!recording) return
+    if (!open) return
     const onBeforeUnload = (e: BeforeUnloadEvent) => e.preventDefault()
     window.addEventListener('beforeunload', onBeforeUnload)
+    return () => window.removeEventListener('beforeunload', onBeforeUnload)
+  }, [open])
+  useEffect(() => {
+    if (!recording) return
     const timer = window.setInterval(() => setNow(Date.now()), 1000)
-    return () => {
-      window.removeEventListener('beforeunload', onBeforeUnload)
-      window.clearInterval(timer)
-    }
+    return () => window.clearInterval(timer)
   }, [recording])
 
   // If the page goes away mid-recording anyway, end the session so it gets processed. During a
@@ -94,6 +107,7 @@ export function LivePage() {
 
   async function start(mode: CaptureMode) {
     setError(null)
+    setDiscarded(false)
     setMode(mode)
     setPhase('requesting')
     const { data, error: apiError } = await api
@@ -124,7 +138,7 @@ export function LivePage() {
       setMacSound(started.macSound)
       setSessionId(data.id)
       const t = Date.now()
-      setStartedAt(t)
+      setClock({ recordedMs: 0, since: t })
       setNow(t)
       setPhase('recording')
     } catch (err) {
@@ -184,12 +198,74 @@ export function LivePage() {
     setError(result.status === 0 ? UNREACHABLE : "Iris couldn't finish the session. Try again in a moment.")
   }
 
+  /** Stop: capture pauses and every device is let go; the stopped page offers what next. */
+  function pause() {
+    const live = capture.current
+    if (!live || phase !== 'recording') return
+    live.pause()
+    const t = Date.now()
+    setClock((c) => ({ recordedMs: c.recordedMs + (c.since ? t - c.since : 0), since: 0 }))
+    setNow(t)
+    setError(null)
+    setPhase('stopped')
+  }
+
+  /** Capture again in the same recording (with a screen, the picker opens again). */
+  async function continueRecording() {
+    const live = capture.current
+    if (!live || phase !== 'stopped' || busy) return
+    setBusy('continue')
+    setError(null)
+    try {
+      const again = await live.resume(mode)
+      setDisplay(again.screen)
+      setMacSound(again.macSound)
+      const t = Date.now()
+      setClock((c) => ({ ...c, since: t }))
+      setNow(t)
+      setPhase('recording')
+    } catch (err) {
+      setError(captureError(err)) // still stopped: nothing recorded is lost
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  /**
+   * Throw the recording away (its session is deleted); `again` starts a new one with the same
+   * title and mode. A failed delete leaves the page stopped with the error, to try again.
+   */
+  async function discard(again: boolean) {
+    const live = capture.current
+    setConfirming(null)
+    if (!live || busy) return
+    setBusy('discard')
+    setError(null)
+    try {
+      await live.discard()
+    } catch (err) {
+      setError(captureError(err))
+      return
+    } finally {
+      setBusy(null)
+    }
+    capture.current = null
+    setSessionId(null)
+    setDisplay(null)
+    setClock({ recordedMs: 0, since: 0 })
+    setPhase('idle')
+    if (again) void start(mode)
+    else setDiscarded(true)
+  }
+
   async function stopAndOpen() {
     // The id comes from the capture: `sessionId` state can lag if capture ends right after starting.
     const id = await stop()
     if (id) navigate(`/sessions/${id}`)
   }
   const stopRef = useRef(stopAndOpen)
+  // The menu bar's commands for this page (capture/menuBar.ts), always the latest render's.
+  const commandRef = useRef<(command: RecordCommand) => void>(() => {})
   /** Start, unless a recording is already under way (or stopped and not yet finished). */
   function startIfIdle(mode: CaptureMode) {
     if (phase === 'idle') void start(mode)
@@ -198,20 +274,23 @@ export function LivePage() {
   useEffect(() => {
     stopRef.current = stopAndOpen
     startRef.current = startIfIdle
+    commandRef.current = (command) => {
+      if (command === 'stop') pause()
+      else if (command === 'continue') void continueRecording()
+      else if (command === 'make-notes' && stopped) void stopAndOpen()
+      else if ((command === 'start-over' || command === 'discard') && stopped) setConfirming(command)
+    }
   })
 
   // The desktop app's menu bar icon (capture/menuBar.ts). It shows what this page is doing, and
   // its Record and Stop go through the same start() and stop as the buttons here.
+  // While recording, the app is told when the clock would have started without the stopped time,
+  // so its clock shows the same elapsed time as the page's.
+  const reportedStart = recording ? clock.since - clock.recordedMs : 0
   useEffect(() => {
-    menuBar.phase(phase, startedAt, soundRefused)
-  }, [phase, startedAt, soundRefused])
-  useEffect(
-    () =>
-      irisApp()?.onRecordCommand((command) => {
-        if (command === 'stop') void stopRef.current()
-      }),
-    [],
-  )
+    menuBar.phase(phase, reportedStart, soundRefused)
+  }, [phase, reportedStart, soundRefused])
+  useEffect(() => irisApp()?.onRecordCommand((command) => commandRef.current(command)), [])
   const startRequest = (location.state as LiveLocationState | null)?.startRequest
   const handledStart = useRef<number | undefined>(undefined)
   useEffect(() => {
@@ -319,6 +398,14 @@ export function LivePage() {
               </div>
             </div>
           )}
+          {discarded && !error && (
+            <div className="banner banner-info" role="status">
+              <Icon name="trash" />
+              <div className="banner-body">
+                <p>The recording was discarded. Nothing was kept.</p>
+              </div>
+            </div>
+          )}
           <p className="setup-note">
             Everything is saved on this computer as it's captured, so closing {desktopApp ? 'Iris' : 'the tab'} keeps
             what was recorded.
@@ -331,22 +418,23 @@ export function LivePage() {
   return (
     <>
       <div className="recbar" role="region" aria-label="Recording controls">
-        <span className="rec-label">
+        <span className={stopped ? 'rec-label rec-label-stopped' : 'rec-label'}>
           <span className="rec-dot" aria-hidden="true" />
-          {phase === 'stopping' ? 'Finishing' : 'Recording'}
+          {phase === 'stopping' ? 'Finishing' : stopped ? 'Stopped' : 'Recording'}
           <span className="num" aria-hidden="true">{formatClock(elapsed)}</span>
         </span>
         <span className="capture-status">
-          {display && (
+          {display && !stopped && (
             <span>
               <Icon name="screen" /> Screen shared
             </span>
           )}
           <span>
-            <Icon name="mic" /> Microphone on
+            <Icon name="mic" /> Microphone {stopped ? 'off' : 'on'}
           </span>
           {mode === 'audio' &&
             desktopApp &&
+            !stopped &&
             (macSound ? (
               <span>
                 <Icon name="system" /> Mac's sound on
@@ -358,16 +446,46 @@ export function LivePage() {
             ))}
         </span>
         <span className="spacer" />
-        <button type="button" className="btn btn-stop" onClick={() => void stopAndOpen()} disabled={phase === 'stopping'}>
-          <Icon name="stop" />
-          {phase === 'stopping' ? 'Finishing the upload…' : 'Stop and make notes'}
-        </button>
+        {recording && (
+          <button type="button" className="btn btn-stop" onClick={pause}>
+            <Icon name="stop" /> Stop
+          </button>
+        )}
+        {phase === 'stopping' && (
+          <button type="button" className="btn btn-stop" disabled>
+            Finishing the upload…
+          </button>
+        )}
       </div>
 
       <div className="recorder">
-        <div className="clock num" role="timer" aria-label={`Recording for ${formatClock(elapsed)}`}>
+        <div
+          className={stopped ? 'clock clock-stopped num' : 'clock num'}
+          role="timer"
+          aria-label={`${stopped ? 'Stopped at' : 'Recording for'} ${formatClock(elapsed)}`}
+        >
           {formatClock(elapsed)}
         </div>
+        {stopped && (
+          <section className="stop-choices" aria-labelledby="stop-choices-title">
+            <h2 id="stop-choices-title">Recording stopped at {formatClock(elapsed)}</h2>
+            <p>Nothing more is recorded. What would you like to do with it?</p>
+            <button type="button" className="btn btn-primary btn-lg" onClick={() => void stopAndOpen()} disabled={!!busy}>
+              <Icon name="check" /> Make notes
+            </button>
+            <button type="button" className="btn btn-lg" onClick={() => void continueRecording()} disabled={!!busy}>
+              <Icon name="record" /> {busy === 'continue' ? (mode === 'screen' ? 'Choose what to record…' : 'Continuing…') : 'Continue recording'}
+            </button>
+            <div className="stop-choices-pair">
+              <button type="button" className="btn" onClick={() => setConfirming('start-over')} disabled={!!busy}>
+                <Icon name="retry" /> Start over
+              </button>
+              <button type="button" className="btn btn-danger-quiet" onClick={() => setConfirming('discard')} disabled={!!busy}>
+                <Icon name="trash" /> {busy === 'discard' ? 'Discarding…' : 'Discard'}
+              </button>
+            </div>
+          </section>
+        )}
         {error && (
           <div className="banner banner-error" role="alert">
             <Icon name="alert" />
@@ -389,10 +507,10 @@ export function LivePage() {
             </div>
           </div>
         )}
-        {mode === 'audio' && !desktopApp && (
+        {mode === 'audio' && !desktopApp && !stopped && (
           <p className="after">In a browser, Iris records your microphone only.</p>
         )}
-        {display && (
+        {display && !stopped && (
           <video
             // The recording view mounts after capture starts, so attach the stream on mount.
             ref={(el) => {
@@ -406,20 +524,35 @@ export function LivePage() {
           />
         )}
         <p className="live-progress num">{progress || 'Iris processes the session as you record.'}</p>
-        <p className="after">
-          {display
-            ? 'When you stop (or stop sharing from the browser), Iris uploads the rest and finishes the notes.'
-            : 'When you stop, Iris uploads the rest and finishes the notes.'}{' '}
-          You can close this window afterwards and find the session in the library.
-        </p>
+        {!stopped && (
+          <p className="after">
+            When you stop, you choose: make notes, continue, start over or discard.
+            {display && ' Stopping the share from the browser makes the notes.'}
+          </p>
+        )}
       </div>
+
+      <ConfirmDialog
+        open={confirming !== null}
+        title={confirming === 'start-over' ? 'Start over?' : 'Discard this recording?'}
+        body={
+          confirming === 'start-over'
+            ? `The ${formatClock(elapsed)} recorded so far is deleted, and a new recording starts with the same title.`
+            : `The ${formatClock(elapsed)} recorded so far is deleted from this computer. No notes are made. This can't be undone.`
+        }
+        confirm={confirming === 'start-over' ? 'Delete and start over' : 'Discard'}
+        cancel="Keep it"
+        danger
+        onConfirm={() => void discard(confirming === 'start-over')}
+        onCancel={() => setConfirming(null)}
+      />
 
       <ConfirmDialog
         open={blocker.state === 'blocked'}
         title="Stop recording and leave?"
         body="Leaving this page ends the recording. Iris will make notes from what was captured so far."
         confirm="Stop and leave"
-        cancel="Keep recording"
+        cancel={stopped ? 'Stay' : 'Keep recording'}
         danger
         busy={phase === 'stopping'}
         onConfirm={() => {

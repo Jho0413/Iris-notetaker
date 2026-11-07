@@ -533,6 +533,10 @@ const TRAY_ACTIONS = {
   recordAudio: () => recordFromMenuBar('audio'),
   recordScreen: () => recordFromMenuBar('screen'),
   stop: () => menuBarEvent({ type: 'stop' }),
+  continue: () => menuBarEvent({ type: 'choice', choice: 'continue' }),
+  makeNotes: () => menuBarEvent({ type: 'choice', choice: 'makeNotes' }),
+  startOver: () => menuBarEvent({ type: 'choice', choice: 'startOver' }),
+  discard: () => menuBarEvent({ type: 'choice', choice: 'discard' }),
   show: () => showMainWindow(),
   quit: () => app.quit(),
 }
@@ -569,7 +573,7 @@ function menuBarEvent(event) {
     log(`[tray] ${send} recording`)
     mainWindow.webContents.send('iris-app:record', send)
     // A page that doesn't start (held up by a question it asks) gets its window shown.
-    if (send !== 'stop') {
+    if (send === 'start-audio' || send === 'start-screen') {
       clearTimeout(startAnswerTimer)
       startAnswerTimer = setTimeout(() => menuBarEvent({ type: 'startUnanswered' }), trayRules.START_ANSWER_MS)
     }

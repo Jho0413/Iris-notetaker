@@ -16,8 +16,24 @@ The Live page starts one of two recordings, each with one click:
 Audio is uploaded in 5-second chunks and the screen at about one frame per second, on the same
 clock. The audio sources are always mixed into the one track that is recorded, even when the
 microphone is the only one, so the recording stays one stream however many sources it has.
-Failed uploads are retried, and **Stop** waits until everything has arrived before the session is
-finished. The captured chunks stay in the session folder (`live/`), so a failed run can be retried
+Failed uploads are retried, and making notes waits until everything has arrived before the
+session is finished.
+
+**Stop** stops capturing at once, and the page asks what to do with the recording:
+
+- **Make notes:** upload the rest and finish the session.
+- **Continue recording:** capture again in the same recording. While stopped, the microphone, the
+  Mac's sound and any shared screen are released (macOS's indicators go off), so continuing asks
+  for them again: with a screen, the picker opens again (cancelling it leaves it stopped). The
+  recorder is paused, not ended, so the audio stays one WebM stream, and its timestamps leave the
+  stopped time out (measured in Electron 45); frames are timed the same way. The session's clock
+  is the recorded time, so the engine needs nothing for it.
+- **Start over:** delete this recording and start a new one with the same title and mode.
+- **Discard:** delete the recording (`DELETE /sessions/{id}`, which stops its live processing);
+  nothing more is uploaded, and the page goes back to its start.
+
+Start over and Discard ask first, since they delete what was recorded. While stopped the session
+stays `recording`, so leaving the page or closing the tab ends it as it would while recording. The captured chunks stay in the session folder (`live/`), so a failed run can be retried
 with `uv run iris run <session_id>`.
 
 | Browser (desktop) | Microphone | Shared audio | Status |

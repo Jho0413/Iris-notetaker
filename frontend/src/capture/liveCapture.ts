@@ -63,10 +63,18 @@ export interface CaptureEnv {
    * (desktop/main.cjs); a browser can't record it without a share.
    */
   macSound: boolean
-  /** Mix audio streams (each with an audio track) into one. */
-  mixAudio: (streams: MediaStream[]) => { stream: MediaStream; close(): void }
+  /** A mixer: the one audio track that is recorded, which sources join and leave. */
+  mixAudio: () => AudioMixer
   /** Grab frames from `track` about once a second; returns a function that stops. */
   captureFrames: (track: MediaStreamTrack, onFrame: (jpeg: Blob, at: number) => void) => () => void
+}
+
+export interface AudioMixer {
+  /** The mixed track, recorded for the whole recording. */
+  stream: MediaStream
+  /** Mix in `source` (it has an audio track); returns a function that takes it out again. */
+  add(source: MediaStream): () => void
+  close(): void
 }
 
 export function browserEnv(): CaptureEnv {
@@ -109,12 +117,19 @@ export class LiveCapture {
   private recorder?: MediaRecorder
   /** Settles on the recorder's 'stop' event, which follows its last chunk. */
   private recorderStopped?: Promise<unknown>
-  private streams: MediaStream[] = []
-  private mixer?: { close(): void }
+  /** The sources being captured now, each with what takes it out of the mixer. */
+  private sources: { stream: MediaStream; unmix?: () => void }[] = []
+  private mixer?: AudioMixer
   private stopFrames?: () => void
   private startedAt = 0
+  /** Time spent stopped (`pause`), which the recording's clock leaves out. */
+  private pausedMs = 0
+  private pausedAt = 0
   private seq = 0
+  /** Started and not yet finished or discarded, whether capturing or stopped. */
   private recording = false
+  private paused = false
+  private resuming?: Promise<StartedRecording>
   private finished = false
   private startFailed = false
   private opening?: Promise<StartedRecording>
@@ -189,8 +204,9 @@ export class LiveCapture {
   }
 
   private async open(mode: CaptureMode): Promise<StartedRecording> {
-    const { mediaDevices: devices, MediaRecorder: Recorder } = this.env
+    const { MediaRecorder: Recorder } = this.env
     const screen = mode === 'screen'
+    const devices = this.env.mediaDevices
     if (!devices?.getUserMedia || !Recorder || (screen && !devices.getDisplayMedia)) {
       throw new CaptureError(
         `This browser can't record ${screen ? 'the screen' : 'audio'}. Use a recent desktop Chrome, Edge or Firefox.`,
@@ -203,6 +219,114 @@ export class LiveCapture {
       )
     }
 
+    const got = await this.acquire(mode)
+    const mixer = this.env.mixAudio()
+    this.mixer = mixer
+    this.mixIn()
+    const recorder = new Recorder(mixer.stream, { mimeType })
+    this.recorder = recorder
+    this.recorderStopped = new Promise((resolve) => recorder.addEventListener('stop', resolve, { once: true }))
+    recorder.ondataavailable = (e) => {
+      if (e.data.size) this.queue.add('audio', `audio?seq=${this.seq++}`, e.data)
+    }
+    recorder.onerror = () => this.ended('recorder-error', 'Recording stopped: the browser failed.')
+    const started = new Promise((resolve) => recorder.addEventListener('start', resolve, { once: true }))
+    recorder.start(AUDIO_CHUNK_MS)
+    await started
+    this.throwIfCancelled()
+    // The audio's time 0: WebM timestamps start at the first recorded sample.
+    this.startedAt = performance.now()
+    this.captureScreen(got.screen)
+    // Nothing below can fail, so a start that threw never looks like a recording.
+    this.env.page.addEventListener('beforeunload', this.onBeforeUnload)
+    this.env.page.addEventListener('pagehide', this.onPageHide)
+    this.recording = true
+    return this.started(got)
+  }
+
+  /**
+   * Stop capturing, keeping the recording: the recorder pauses (its clock too, so the stopped
+   * time isn't in the recording, measured in Electron 45), frames stop, and the microphone, the
+   * Mac's sound and any shared screen are released. `resume` carries on in the same recording;
+   * `stop` makes notes from it; `discard` throws it away.
+   */
+  pause(): void {
+    if (!this.recording || this.paused || this.stopping || this.resuming) return
+    this.paused = true
+    this.pausedAt = performance.now()
+    if (this.recorder?.state === 'recording') this.recorder.pause()
+    this.stopFrames?.()
+    this.stopFrames = undefined
+    this.releaseSources()
+  }
+
+  /**
+   * Capture again after `pause`: ask for what `mode` records again (with a screen, the picker
+   * opens again) and carry on in the same recording. If that fails (the picker cancelled, the
+   * mic blocked) it throws a `CaptureError` and the recording stays stopped; nothing is lost.
+   */
+  resume(mode: CaptureMode): Promise<StartedRecording> {
+    if (!this.paused || this.stopping) return Promise.reject(new CaptureError('The recording is not stopped.'))
+    this.resuming ??= (async () => {
+      try {
+        const got = await this.acquire(mode)
+        if (!this.paused || this.stopping) throw new CaptureError('The recording was finished meanwhile.')
+        this.pausedMs += performance.now() - this.pausedAt
+        this.mixIn()
+        if (this.recorder?.state === 'paused') this.recorder.resume()
+        this.captureScreen(got.screen)
+        this.paused = false
+        return this.started(got)
+      } catch (err) {
+        this.releaseSources()
+        if (err instanceof CaptureError) throw err
+        throw new CaptureError("Recording couldn't continue. Try again.", { cause: err })
+      } finally {
+        this.resuming = undefined
+      }
+    })()
+    return this.resuming
+  }
+
+  /**
+   * Throw the recording away: stop everything, send nothing more, and delete the session. Throws
+   * if the delete request fails (the recording is already stopped and released then), so calling
+   * it again retries the delete.
+   */
+  async discard(): Promise<void> {
+    if (this.opening) {
+      // start() fails now, releasing what it has and discarding the session itself.
+      this.cancel('Recording was cancelled before it started.')
+      await this.opening.catch(() => {})
+      return
+    }
+    this.recording = false
+    this.paused = false
+    this.finished = true
+    this.queue.close()
+    if (this.recorder) this.recorder.ondataavailable = null
+    this.release()
+    this.env.page.removeEventListener('beforeunload', this.onBeforeUnload)
+    this.env.page.removeEventListener('pagehide', this.onPageHide)
+    const res = await this.env
+      .fetch(`/api/sessions/${this.sessionId}`, { method: 'DELETE' })
+      .catch((err: unknown) => {
+        throw new CaptureError("Iris isn't responding, so the recording wasn't deleted. Try again.", { cause: err })
+      })
+    // 404: already gone (a delete that arrived, or the session was removed elsewhere).
+    if (!res.ok && res.status !== 404) {
+      throw new CaptureError("Iris couldn't delete the recording. Try again.")
+    }
+  }
+
+  /**
+   * The sources `mode` records, acquired and listened to: the screen then the mic, or for audio
+   * the mic and, in the desktop app, the Mac's sound (if macOS refuses it, there is none). Each is
+   * kept for release (`this.sources`), or stopped at once if the start was cancelled meanwhile.
+   */
+  private async acquire(mode: CaptureMode): Promise<{ screen: MediaStream | null; sound: MediaStream | null }> {
+    const devices = this.env.mediaDevices!
+    const screen = mode === 'screen'
     const display = screen ? this.acquired(await getDisplay(devices)) : null
     // Listen from the start: sharing stopped during the mic prompt must fail the start too.
     display?.getVideoTracks()[0]?.addEventListener('ended', () =>
@@ -221,49 +345,47 @@ export class LiveCapture {
     const sound = !screen && this.env.macSound ? await getMacSound(devices) : null
     if (sound) this.acquired(sound) // stopped at once if cancelled meanwhile
     this.throwIfCancelled() // cancelled while a request that then failed was open
-    const macSound = sound ? hasLiveAudio(sound) : false
     sound?.getAudioTracks()[0]?.addEventListener('ended', this.onMacSoundEnded)
+    return { screen: display, sound }
+  }
 
-    const sources = [display, mic, sound].filter((s): s is MediaStream => !!s && hasLiveAudio(s))
-    const recorder = new Recorder(this.mix(sources), { mimeType })
-    this.recorder = recorder
-    this.recorderStopped = new Promise((resolve) => recorder.addEventListener('stop', resolve, { once: true }))
-    recorder.ondataavailable = (e) => {
-      if (e.data.size) this.queue.add('audio', `audio?seq=${this.seq++}`, e.data)
+  /** Mix every source with live audio that isn't mixed in yet into the recorded track. */
+  private mixIn() {
+    for (const source of this.sources) {
+      if (!source.unmix && hasLiveAudio(source.stream)) source.unmix = this.mixer!.add(source.stream)
     }
-    recorder.onerror = () => this.ended('recorder-error', 'Recording stopped: the browser failed.')
-    const started = new Promise((resolve) => recorder.addEventListener('start', resolve, { once: true }))
-    recorder.start(AUDIO_CHUNK_MS)
-    await started
-    this.throwIfCancelled()
-    // The audio's time 0: WebM timestamps start at the first recorded sample.
-    this.startedAt = performance.now()
+  }
+
+  /** Send the shared screen's frames, timed on the recording's clock (stopped time left out). */
+  private captureScreen(display: MediaStream | null) {
     const track = display?.getVideoTracks()[0]
-    if (track) {
-      this.stopFrames = this.env.captureFrames(track, (jpeg, at) => {
-        if (!this.recording) return
-        this.queue.add('frame', `frame?t=${((at - this.startedAt) / 1000).toFixed(3)}`, jpeg)
-      })
-    }
-    // Nothing below can fail, so a start that threw never looks like a recording.
-    this.env.page.addEventListener('beforeunload', this.onBeforeUnload)
-    this.env.page.addEventListener('pagehide', this.onPageHide)
-    this.recording = true
+    if (!track) return
+    this.stopFrames = this.env.captureFrames(track, (jpeg, at) => {
+      if (!this.recording || this.paused) return
+      const t = (at - this.startedAt - this.pausedMs) / 1000
+      this.queue.add('frame', `frame?t=${t.toFixed(3)}`, jpeg)
+    })
+  }
+
+  /** What the Live page shows: the screen, and whether the Mac's sound is mixed in. */
+  private started(got: { screen: MediaStream | null; sound: MediaStream | null }): StartedRecording {
     // The Mac's sound ending while the recorder started (macOS answered its prompt meanwhile).
-    return { screen: display, macSound: macSound && hasLiveAudio(sound!) }
+    return { screen: got.screen, macSound: got.sound ? hasLiveAudio(got.sound) : false }
   }
 
   private throwIfCancelled() {
     if (this.cancelled) throw new CaptureError('Recording was cancelled before it started.')
   }
 
-  /** Keep `stream` for release, or stop it at once if the start was cancelled meanwhile. */
+  /** Keep `stream` for release, or stop it at once if the start was cancelled meanwhile, or the
+   * recording finished while `resume` was asking for it. */
   private acquired(stream: MediaStream): MediaStream {
-    if (this.cancelled) {
+    if (this.cancelled || (this.resuming && (this.stopping || !this.recording))) {
       stream.getTracks().forEach((t) => t.stop())
       this.throwIfCancelled()
+      throw new CaptureError('The recording was finished meanwhile.')
     }
-    this.streams.push(stream)
+    this.sources.push({ stream })
     return stream
   }
 
@@ -273,25 +395,15 @@ export class LiveCapture {
     this.cancelOpening?.(new CaptureError(message))
   }
 
-  /**
-   * The audio sources mixed into the one track that is recorded, even when there is only the
-   * mic: the recording stays one stream (one MediaRecorder, its chunks one WebM file) as sources
-   * join and leave.
-   */
-  private mix(sources: MediaStream[]): MediaStream {
-    const mixed = this.env.mixAudio(sources)
-    this.mixer = mixed
-    return mixed.stream
-  }
-
   /** The Mac's sound stopped mid-recording: the mixer goes on with the mic. */
   private onMacSoundEnded = () => {
-    if (this.recording && !this.stopping) this.options.onMacSoundEnded?.()
+    if (this.recording && !this.paused && !this.stopping) this.options.onMacSoundEnded?.()
   }
 
   private ended(reason: EndReason, message: string) {
     if (this.opening && !this.recording) return this.cancel(START_FAILED[reason])
-    if (!this.recording || this.stopping) return
+    // While stopped, or continuing (its sources are not recorded yet), nothing is lost.
+    if (!this.recording || this.paused || this.stopping) return
     if (this.options.onEnded) this.options.onEnded(reason, message)
     else void this.stop().catch(() => {})
   }
@@ -306,6 +418,7 @@ export class LiveCapture {
     if (this.startFailed) return
     if (this.recording) {
       this.recording = false
+      this.paused = false
       this.stopFrames?.()
       const recorder = this.recorder
       if (recorder) {
@@ -346,10 +459,18 @@ export class LiveCapture {
     if (this.recorder && this.recorder.state !== 'inactive') {
       this.recorder.stop()
     }
-    this.streams.forEach((s) => s.getTracks().forEach((t) => t.stop()))
-    this.streams = []
+    this.releaseSources()
     this.mixer?.close()
     this.mixer = undefined
+  }
+
+  /** Stop the sources being captured and take them out of the mixer; the recorder carries on. */
+  private releaseSources() {
+    for (const { stream, unmix } of this.sources) {
+      unmix?.()
+      stream.getTracks().forEach((t) => t.stop())
+    }
+    this.sources = []
   }
 
   /**
@@ -458,12 +579,19 @@ async function getDisplay(devices: Pick<MediaDevices, 'getDisplayMedia'>): Promi
 
 // --- Browser implementations of CaptureEnv ---------------------------------------------------
 
-function mixAudio(streams: MediaStream[]): { stream: MediaStream; close(): void } {
+function mixAudio(): AudioMixer {
   const ctx = new AudioContext()
   void ctx.resume()
   const dest = ctx.createMediaStreamDestination()
-  for (const s of streams) ctx.createMediaStreamSource(s).connect(dest)
-  return { stream: dest.stream, close: () => void ctx.close().catch(() => {}) }
+  return {
+    stream: dest.stream,
+    add(source) {
+      const node = ctx.createMediaStreamSource(source)
+      node.connect(dest)
+      return () => node.disconnect()
+    },
+    close: () => void ctx.close().catch(() => {}),
+  }
 }
 
 function captureFrames(track: MediaStreamTrack, onFrame: (jpeg: Blob, at: number) => void): () => void {

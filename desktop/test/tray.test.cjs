@@ -281,3 +281,26 @@ test("macOS refusing the Mac's sound shows the window once: the page says how to
     'show',
   ])
 })
+
+test('stopped: not red, and the four choices for the recording', () => {
+  assert.deepEqual(parseReport({ phase: 'stopped', startedAt: 0 }), { phase: 'stopped', startedAt: 0, macSoundRefused: false })
+  const view = trayView({ phase: 'stopped', startedAt: 0 }, T0)
+  assert.equal(view.recording, false)
+  assert.deepEqual(actions(view), ['continue', 'makeNotes', 'startOver', 'discard', 'show', 'quit'])
+  assert.equal(hideOnClose({ phase: 'stopped', startedAt: 0 }), true, 'closing the window would end the recording')
+  assert.deepEqual(labels(trayView({ phase: 'recording', startedAt: T0 }, T0)).slice(0, 2), ['Recording', 'Stop'])
+})
+
+test("a stopped recording's choices reach the page; the ones that delete it show the window", () => {
+  const stopped = run([LISTENING, report('recording'), STOP, report('stopped', 0)])
+  assert.deepEqual(stopped.effects, ['stop'])
+  const choose = (choice) => run([{ type: 'choice', choice }], stopped.state).effects
+  assert.deepEqual(choose('continue'), ['continue'])
+  assert.deepEqual(choose('makeNotes'), ['make-notes'])
+  assert.deepEqual(choose('startOver'), ['start-over', 'show'])
+  assert.deepEqual(choose('discard'), ['discard', 'show'])
+  assert.deepEqual(choose('toString'), [], 'only known choices')
+  // Only while stopped, and never queued for a page that isn't listening.
+  assert.deepEqual(run([LISTENING, report('recording'), { type: 'choice', choice: 'discard' }]).effects, [])
+  assert.deepEqual(run([{ type: 'pageGone' }, { type: 'choice', choice: 'continue' }], stopped.state).effects, [])
+})

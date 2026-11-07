@@ -4,6 +4,10 @@
 // page's top frame in the main window (policy.fromIrisWindow).
 const { contextBridge, ipcRenderer } = require('electron')
 
+/** What the menu bar sends the page: start a recording, Stop, or what to do once stopped. A
+ * sandboxed preload can't require app files, so the list is here (tray.cjs's relay sends them). */
+const RECORD_COMMANDS = ['start-audio', 'start-screen', 'stop', 'continue', 'make-notes', 'start-over', 'discard']
+
 contextBridge.exposeInMainWorld('irisApp', {
   /** Open the key window to add or replace the key; the engine restarts with a new one.
    * Resolves {done: true} once it is saved and the engine is back, {done: false} if cancelled. */
@@ -22,11 +26,11 @@ contextBridge.exposeInMainWorld('irisApp', {
       startedAt: Number(startedAt),
       macSoundRefused: Boolean(macSoundRefused),
     }),
-  /** Call `listener` with "start-audio", "start-screen" or "stop" when the menu bar asks.
-   * Returns the unsubscribe. */
+  /** Call `listener` with the menu bar's command (RECORD_COMMANDS) when it asks. Returns the
+   * unsubscribe. */
   onRecordCommand: (listener) => {
     const relay = (_event, command) => {
-      if (command === 'start-audio' || command === 'start-screen' || command === 'stop') listener(command)
+      if (RECORD_COMMANDS.includes(command)) listener(command)
     }
     ipcRenderer.on('iris-app:record', relay)
     ipcRenderer.send('iris-app:record-listening')

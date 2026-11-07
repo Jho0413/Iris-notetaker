@@ -13,12 +13,20 @@ export interface IrisApp {
    * whether macOS refused the Mac's sound to an audio recording, for the menu bar icon (which
    * then shows the window, whose page says how to allow it). */
   recordingChanged(phase: string, startedAt: number, macSoundRefused: boolean): void
-  /** Calls `listener` when "Record Audio", "Record Screen…" or Stop is chosen in the menu bar;
-   * returns the unsubscribe. */
+  /** Calls `listener` with what is chosen in the menu bar: a recording to start, Stop, or, once
+   * stopped, what to do with the recording; returns the unsubscribe. */
   onRecordCommand(listener: (command: RecordCommand) => void): () => void
 }
 
-export type RecordCommand = 'start-audio' | 'start-screen' | 'stop'
+/** The menu bar's commands (desktop/src/tray.cjs). The Live page handles all but the starts. */
+export type RecordCommand =
+  | 'start-audio'
+  | 'start-screen'
+  | 'stop'
+  | 'continue'
+  | 'make-notes'
+  | 'start-over'
+  | 'discard'
 
 declare global {
   interface Window {

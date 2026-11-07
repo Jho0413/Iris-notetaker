@@ -36,7 +36,8 @@ export function ConfirmDialog(props: {
     >
       <h2 id="confirm-title">{props.title}</h2>
       <p>{props.body}</p>
-      <div className="dialog-actions">
+      {/* A destructive choice sits apart from the way out, so one isn't clicked for the other. */}
+      <div className={props.danger ? 'dialog-actions dialog-actions-apart' : 'dialog-actions'}>
         <button type="button" className="btn" onClick={props.onCancel} disabled={props.busy} autoFocus>
           {props.cancel ?? 'Cancel'}
         </button>

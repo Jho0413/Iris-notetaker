@@ -17,7 +17,7 @@ export function useRecordFromMenuBar() {
   useEffect(
     () =>
       irisApp()?.onRecordCommand((command) => {
-        if (command === 'stop') return // Stop is the Live page's own
+        if (command !== 'start-audio' && command !== 'start-screen') return // the Live page's own
         const mode = command === 'start-audio' ? 'audio' : 'screen'
         const state: LiveLocationState = { startRequest: { id: Date.now(), mode } }
         navigate('/live', { state })

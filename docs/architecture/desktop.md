@@ -251,15 +251,17 @@ An Iris icon in the macOS menu bar (Electron `Tray`, `src/tray.cjs` for what it 
 stops a recording from any app, with the window closed too:
 
 - **Idle:** Record Audio, Record Screen…, Open Iris, Quit Iris. **Recording:** the icon turns red with the
-  elapsed time beside it, and the menu offers Stop and Make Notes. While starting, finishing the
-  upload, or stopped with notes not started ("Recording stopped", the Live page's Try again),
-  it offers only Show Iris and Quit.
+  elapsed time beside it, and the menu offers Stop. **Stopped** (the Live page's Stop): Continue
+  Recording, Make Notes, Start Over… and Discard Recording…; the last two show the window, where
+  the page asks first. While starting, finishing the upload, or ended with notes not started
+  ("Recording stopped", the Live page's Try again), it offers only Show Iris and Quit.
 - **Recording still happens in the Live page**, whose capture code runs in the window. The main
   process only relays (`relay` in `src/tray.cjs`, a pure reducer): Record Audio or Record Screen…
   makes the window if it was closed, without showing it, and, once the UI has loaded and
   subscribed (`iris-app:record-listening`), sends it `start-audio` or `start-screen`; the UI opens
-  `/live`, which starts as if that card was clicked. Stop sends `stop`, which runs the Live page's own Stop, so the notes are made
-  as usual. A stop is never queued for a page that loads later; a start waiting for the UI is
+  `/live`, which starts as if that card was clicked. Stop sends `stop`, and a stopped recording's
+  choices `continue`, `make-notes`, `start-over` and `discard`, which run the Live page's own
+  buttons. Those are never queued for a page that loads later; a start waiting for the UI is
   dropped if the window closes or the engine fails to start first.
 - **Only the picker shows** for Record Screen…, and nothing for Record Audio: the window stays as
   it was (hidden, or in another Space). Showing it would switch to its Space, and the picker lists only the windows on screen in
@@ -278,7 +280,7 @@ stops a recording from any app, with the window closed too:
   have been hidden.
 - **`getDisplayMedia` needs no user gesture here:** Electron passes a request without one to its
   display-media handler, which opens the picker. Measured with Electron 45.
-- **Closing the window while recording hides it** instead (`hideOnClose`), since closing would end
+- **Closing the window while recording (or stopped) hides it** instead (`hideOnClose`), since closing would end
   the recording; the menu bar or the Dock shows it again. A fullscreen window leaves fullscreen
   first, so no empty Space is left behind. The picker never offers Iris's own windows, so hiding
   the window never ends the recording (macOS stops capturing a window once it is hidden).

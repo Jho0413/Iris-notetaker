@@ -7,6 +7,7 @@ const TRAY_PHASE = {
   idle: 'idle',
   requesting: 'starting',
   recording: 'recording',
+  stopped: 'stopped',
   stopping: 'stopping',
   finishing: 'stopping',
   unfinished: 'unfinished',
@@ -49,7 +50,8 @@ const status = (label) => ({ label, enabled: false })
 /**
  * What the icon shows in `state` at `now`: `recording` (the red icon), `title` (the text beside
  * it: the elapsed time while recording) and the menu `items`. An item with an `id` is an action
- * main.cjs runs: 'recordAudio', 'recordScreen', 'stop', 'show' or 'quit'.
+ * main.cjs runs: 'recordAudio', 'recordScreen', 'stop', a stopped recording's 'continue',
+ * 'makeNotes', 'startOver' or 'discard', 'show' or 'quit'.
  */
 function trayView(state, now) {
   switch (state.phase) {
@@ -57,7 +59,23 @@ function trayView(state, now) {
       return {
         recording: true,
         title: clock(now - state.startedAt),
-        items: [status('Recording'), { id: 'stop', label: 'Stop and Make Notes' }, SHOW, SEPARATOR, QUIT],
+        items: [status('Recording'), { id: 'stop', label: 'Stop' }, SHOW, SEPARATOR, QUIT],
+      }
+    case 'stopped':
+      // Start Over and Discard delete the recording: the window shows to confirm them.
+      return {
+        recording: false,
+        title: '',
+        items: [
+          status('Stopped'),
+          { id: 'continue', label: 'Continue Recording' },
+          { id: 'makeNotes', label: 'Make Notes' },
+          { id: 'startOver', label: 'Start Over…' },
+          { id: 'discard', label: 'Discard Recording…' },
+          SHOW,
+          SEPARATOR,
+          QUIT,
+        ],
       }
     case 'stopping':
       return { recording: true, title: '', items: [status('Finishing the upload…'), SHOW, SEPARATOR, QUIT] }
@@ -86,7 +104,16 @@ function trayView(state, now) {
  * recording, and the menu bar can still stop it and show the window again.
  */
 function hideOnClose(state) {
-  return state.phase === 'recording' || state.phase === 'stopping'
+  return state.phase === 'recording' || state.phase === 'stopped' || state.phase === 'stopping'
+}
+
+/** A stopped recording's choices from the menu bar: the command each sends the page, and whether
+ * the window shows (the page confirms the ones that delete the recording). */
+const STOPPED_CHOICES = {
+  continue: { send: 'continue', show: false },
+  makeNotes: { send: 'make-notes', show: false },
+  startOver: { send: 'start-over', show: true },
+  discard: { send: 'discard', show: true },
 }
 
 /**
@@ -108,11 +135,12 @@ const START_ANSWER_MS = 3000
 
 /**
  * The relay's next state for `event`, and what main.cjs does about it: `send` a command to the UI
- * ('start-audio', 'start-screen' or 'stop'), `show` the window, or log a `malformed` report.
- * Events:
+ * ('start-audio', 'start-screen', 'stop', or a STOPPED_CHOICES command), `show` the window, or log
+ * a `malformed` report. Events:
  *   record        "Record Audio" or "Record Screen…", `event.mode` 'audio' or 'screen' (main.cjs
  *                 makes the window if it was closed, but doesn't show it)
- *   stop          "Stop and Make Notes"
+ *   stop          "Stop": the page stops capturing and offers what next
+ *   choice        a stopped recording's choice, `event.choice` a STOPPED_CHOICES key
  *   listening     the UI subscribed (after each load of the UI)
  *   report        the Live page's phase, `event.report` as sent over the bridge
  *   pageGone      the page was replaced (a reload, the UI after the starting screen) or crashed
@@ -134,6 +162,11 @@ function relay(state, event) {
     case 'stop':
       // Never queued: a page that loads later has nothing to stop.
       return state.listening && state.recording.phase === 'recording' ? { state, send: 'stop' } : { state }
+    case 'choice': {
+      const choice = Object.hasOwn(STOPPED_CHOICES, event.choice) ? STOPPED_CHOICES[event.choice] : null
+      if (!choice || !state.listening || state.recording.phase !== 'stopped') return { state }
+      return { state, send: choice.send, ...(choice.show && { show: true }) }
+    }
     case 'listening':
       if (state.startPending) {
         return { state: { ...state, listening: true, startPending: null }, send: state.startPending }
