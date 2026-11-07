@@ -233,9 +233,9 @@ with Screen Recording denied and the sound played by another process:
 - **Turning the switch off in System Settings** after allowing didn't stop the capture in a new
   launch; only refusing at the prompt did.
 - **Echo without headphones:** the microphone also hears the call from the speakers. Measured
-  with speech from another app through the MacBook's speakers: the microphone's copy, 30 ms
+  with speech from another app through the Mac's speakers: the microphone's copy, 30 ms
   late, was at most about 1/20 of the Mac's sound in the mix (-26 dB): no audible doubling, and
-  the transcript was unaffected.
+  the speech was transcribed.
 - **Nothing shows** in the menu bar while it runs (no recording indicator).
 - A request for a picture answered with sound only is refused ("Video was requested, but no video
   stream was provided"), so Record audio + screen always goes through the picker.
