@@ -40,6 +40,16 @@ function serve(secrets) {
       res.writeHead(200, { 'content-type': 'application/json' })
       return res.end('[{"id":"a","status":"processing"}]')
     }
+    if (req.url === '/api/not-json') {
+      res.writeHead(200, { 'content-type': 'text/plain' })
+      return res.end('not json')
+    }
+    const stop = req.method === 'POST' && req.url.match(/^\/api\/live\/([^/]+)\/stop$/)
+    if (stop) {
+      console.log(`stopped ${stop[1]}`)
+      res.writeHead(stop[1] === 'a' ? 409 : 200, { 'content-type': 'application/json' })
+      return res.end('{}')
+    }
     res.writeHead(404)
     res.end()
   })
