@@ -76,7 +76,7 @@ doesn't arise there.
 ## How `app://` pages differ from the browser
 
 - **`navigator.sendBeacon` throws** ("Beacons are only supported over HTTP(S)"). The live page
-  ends a session on `pagehide` with a beacon, so it falls back to a `keepalive` fetch, which works
+  stops a session on `pagehide` with a beacon, so it falls back to a `keepalive` fetch, which works
   on `app://` (`sendBeaconOrKeepalive` in `frontend/src/capture/liveCapture.ts`). Its JSON `Blob`
   body reaches the backend through the forwarding intact, both when the page navigates away and
   when its window closes (checked with a test app on Electron 45 and `src/forward.cjs`).
@@ -107,13 +107,35 @@ doesn't arise there.
   itself down once that process is gone. Measured: 0.3 s after the app was killed with SIGKILL.
 - **Quit:** if a session is being recorded (the Live page holds a recording: capturing,
   stopped, continuing or uploading, `holdsRecording` in `src/tray.cjs`) or processing, Iris asks
-  first (what was captured is kept, and next time the session page offers Finish for a
-  recording, Try again for notes being made). A start still asking for permissions holds none (its
-  session isn't made yet), so quitting then doesn't ask. A session left "recording" by an earlier
-  quit or crash doesn't count: nothing is capturing it (`busyNow` in `src/busy.cjs`). Then it stops the backend and
-  exits. Closing the window doesn't quit: Iris keeps running, and
-  making notes, in the Dock and the menu bar. While a recording runs, closing the window only
-  hides it (see "Menu bar").
+  first, saying what happens to each (`quitDetail` in `src/busy.cjs`): a recording is stopped and
+  kept, and the library offers Make notes; notes being made are cut off, and Try again resumes
+  them. A start still asking for permissions holds none (its session isn't made yet), so quitting
+  then doesn't ask. Any other "recording" session doesn't count: nothing is capturing it
+  (`busyNow`). Then it stops the recordings, then the backend, and exits. Closing the window
+  doesn't quit: Iris keeps running, and making notes, in the Dock and the menu bar. While a
+  recording runs, closing the window only hides it (see "Menu bar").
+- **Recordings are stopped by the app** (`stopRecordings` in `src/busy.cjs`): every session
+  still `recording` gets `POST /live/{id}/stop` (no notes; the library offers Make notes or
+  Delete), and the app waits for the answers (10 s at most for the session list, 3 s for each
+  stop). The app owns its engine and the only page recording into it, so none can still be
+  recording:
+  - at quit, after the window has closed and before the engine stops: the page's own stop
+    request, sent as it closes, races the engine's shutdown and can be lost, which would leave
+    the session `recording` until the next launch;
+  - at launch, on the first engine start only, before the UI loads, for those a crash or a forced
+    quit left behind (Restart Engine and a key change leave the Live page recording, so they
+    don't);
+  - when the window's page crashes, which sends nothing as it goes.
+
+  The list is read first, so a recording started after that is never stopped. A list that can't
+  be read stops nothing and is logged in `main.log`; such a session is stopped the next time the
+  app stops recordings (at quit or the next launch). Quitting while Make notes is still uploading
+  (the Live page's "stopping" state) is still a race: if the page's end request reaches the
+  engine before it stops (before or after the app's stop: end accepts a stopped session), the
+  notes start and are cut off by the quit (Try again); if it is lost, the session is stopped
+  (Make notes). In development the
+  engine's data is the repo's `backend/data/`, shared with `make dev`, so the dev app also stops a
+  browser's recording there (at its launch, its quit or a crash of its window).
 
 ## Security
 
