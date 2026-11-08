@@ -57,7 +57,8 @@ from write keeps it; write rewrites it.
 
 Each moment records its *builds* (content added over time, such as lines of handwritten working) and
 follows canvas scrolling, so a worked example or a sketch drawn on a scrolling page stays one
-moment. Details are in the `detect.py` docstring.
+moment. A live recording's screen shares (`FrameIndex.share_starts`) are compared only within
+themselves, and a moment ends where its share does. Details are in the `detect.py` docstring.
 
 ## Select (read the screen)
 

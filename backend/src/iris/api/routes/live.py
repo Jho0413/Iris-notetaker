@@ -1,8 +1,8 @@
-"""Live capture input. The browser posts audio chunks, screen frames and when the screen was
-turned on or off while recording.
+"""Live capture input. The browser posts audio chunks and screen frames while recording.
 
 Chunks may arrive out of order or more than once (the browser retries failed uploads); they are
-keyed by ``seq`` and ``t``, so neither loses nor duplicates content (``sources/browser_live.py``).
+keyed by ``seq``, and frames by ``t`` and ``share``, so neither loses nor duplicates content
+(``sources/browser_live.py``).
 Each handler reads the whole body first, then checks the session is still recording and stores
 the file with no ``await`` in between, so nothing is stored after ``end`` has started ingest.
 """
@@ -20,13 +20,13 @@ from iris.sources.browser_live import (
     JPEG_MAGIC,
     MAX_AUDIO_SEQ,
     MAX_FRAME_T,
+    MAX_SHARE,
     MAX_UPLOAD_BYTES,
     WEBM_MAGIC,
     ChunkConflict,
     missing_audio_chunks,
     store_audio_chunk,
     store_frame,
-    store_screen_change,
 )
 from iris.store.db import SessionStore
 from iris.store.layout import session_paths
@@ -39,11 +39,6 @@ MAX_LISTED_MISSING = 100
 
 class LiveStart(BaseModel):
     title: str = "Live session"
-    screen: bool = Field(
-        default=True,
-        description="Whether the screen is shared from the start (as if it were turned on at "
-        "0 s). False: audio only until the screen is turned on (POST /live/{id}/screen).",
-    )
 
 
 class LiveEnd(BaseModel):
@@ -89,10 +84,7 @@ async def start_live(
     body: LiveStart, store: StoreDep, settings: SettingsDep, runner: RunnerDep
 ) -> Session:
     session = store.create(body.title, SourceKind.BROWSER_LIVE)
-    paths = session_paths(settings.sessions_dir, session.id).ensure()
-    # Before the processor starts, so its screen lane never takes the start for screen off.
-    if body.screen:
-        store_screen_change(paths, 0.0, on=True)
+    session_paths(settings.sessions_dir, session.id).ensure()
     store.update(session.id, status=SessionStatus.RECORDING)
     runner.live.ensure(session.id)
     return store.get(session.id)  # type: ignore[return-value]
@@ -132,40 +124,25 @@ async def post_frame(
     runner: RunnerDep,
     request: Request,
     t: Annotated[float, Query(ge=0, le=MAX_FRAME_T, allow_inf_nan=False)],
+    share: Annotated[int, Query(ge=1, le=MAX_SHARE)],
 ) -> None:
     """Body: one JPEG screen frame. ``t`` is seconds since recording started (the audio's clock).
+    ``share`` numbers the screen share it belongs to: 1 for the first, one more for each share
+    after it (Share screen, or Continue after Stop). A share ends one sampling step
+    (``1 / frame_fps``) after its last frame, or where the next share's frames start if sooner,
+    so what was shown is placed only while it was shared.
 
-    Posting the same frame again is a no-op; a different body for a stored ``t`` is a 409.
+    Posting the same frame again is a no-op; a different body for a stored ``t`` and ``share``
+    is a 409.
     """
     data = await _read_body(request)
     if not data.startswith(JPEG_MAGIC):
         raise HTTPException(415, "frame must be a JPEG")
     _require_recording(store, session.id)
     try:
-        store_frame(paths, t, data)
+        store_frame(paths, t, share, data)
     except ChunkConflict as e:
         raise HTTPException(409, str(e)) from e
-    if processor := runner.live.ensure(session.id):
-        processor.notify_screen()
-
-
-@router.post("/{session_id}/screen", status_code=204)
-async def post_screen(
-    session: SessionDep,
-    paths: PathsDep,
-    store: StoreDep,
-    runner: RunnerDep,
-    t: Annotated[float, Query(ge=0, le=MAX_FRAME_T, allow_inf_nan=False)],
-    on: Annotated[bool, Query()],
-) -> None:
-    """The shared screen was turned on (``on=true``) or off ``t`` seconds after recording
-    started (the audio's clock). Frames are posted only while it is on. What was shown before an
-    off is not on screen after it, so the notes place it only while it was shared.
-
-    Posting the same change again is a no-op.
-    """
-    _require_recording(store, session.id)
-    store_screen_change(paths, t, on)
     if processor := runner.live.ensure(session.id):
         processor.notify_screen()
 

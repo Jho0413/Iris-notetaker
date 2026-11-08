@@ -148,14 +148,14 @@ test('request bodies are streamed through', async () => {
   const res = await get('app://iris/api/sessions', { method: 'POST', body, duplex: 'half' })
   assert.deepEqual(await res.json(), { method: 'POST', url: '/api/sessions', bytes: size })
   assert.equal(seen[0].headers['transfer-encoding'], 'chunked')
-  const fixed = await get('app://iris/api/live/x/frame?t=1', { method: 'POST', body: new Uint8Array(1000) })
-  assert.deepEqual(await fixed.json(), { method: 'POST', url: '/api/live/x/frame?t=1', bytes: 1000 })
+  const fixed = await get('app://iris/api/live/x/frame?t=1&share=1', { method: 'POST', body: new Uint8Array(1000) })
+  assert.deepEqual(await fixed.json(), { method: 'POST', url: '/api/live/x/frame?t=1&share=1', bytes: 1000 })
 })
 
-test('a POST with no body is sent as one, with no chunked encoding (the Live page’s screen changes)', async () => {
+test('a POST with no body is sent as one, with no chunked encoding (running a session again)', async () => {
   seen.length = 0
-  const res = await get('app://iris/api/live/x/screen?t=1&on=true', { method: 'POST' })
-  assert.deepEqual(await res.json(), { method: 'POST', url: '/api/live/x/screen?t=1&on=true', bytes: 0 })
+  const res = await get('app://iris/api/sessions/x/run', { method: 'POST' })
+  assert.deepEqual(await res.json(), { method: 'POST', url: '/api/sessions/x/run', bytes: 0 })
   assert.equal(seen[0].headers['transfer-encoding'], undefined)
   assert.equal(seen[0].headers['content-length'], '0')
 })

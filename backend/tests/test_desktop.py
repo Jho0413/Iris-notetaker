@@ -99,7 +99,9 @@ def test_right_token_is_accepted(tmp_path):
         assert live.status_code == 201
         sid = live.json()["id"]
         frame = c.post(
-            f"/api/live/{sid}/frame", params={"t": 0}, content=b"\xff\xd8\xff" + b"0" * 64
+            f"/api/live/{sid}/frame",
+            params={"t": 0, "share": 1},
+            content=b"\xff\xd8\xff" + b"0" * 64,
         )
         assert frame.status_code == 204
         assert c.delete(f"/api/sessions/{sid}").status_code == 204

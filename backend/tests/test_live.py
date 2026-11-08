@@ -18,7 +18,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from iris.config import Settings
-from iris.live.replay import encode_webm, has_video
+from iris.live.replay import encode_webm, file_frames
 from iris.llm.errors import UserFacingError
 from iris.llm.usage import append_record
 from iris.models import (
@@ -32,20 +32,19 @@ from iris.pipeline.context import StageContext
 from iris.sources.browser_live import (
     CLUSTER_ID,
     BrowserLiveSource,
+    CapturedFrame,
     ChunkConflict,
     audio_chunks,
+    captured_frames,
     contiguous_runs,
     finalize_audio,
     finalize_frames,
     find_cluster,
     fit,
     missing_audio_chunks,
-    screen_changes,
-    screen_offs,
     split_shares,
     store_audio_chunk,
     store_frame,
-    store_screen_change,
 )
 from iris.store.layout import SessionPaths, read_model, session_paths
 from tests.test_api import wait_for_status
@@ -119,10 +118,10 @@ def test_conflicting_repeat_is_rejected_not_overwritten(paths: SessionPaths):
     with pytest.raises(ChunkConflict):
         store_audio_chunk(paths, 0, b"other")
     assert (paths.live_audio_dir / "000000.webm").read_bytes() == b"first"
-    store_frame(paths, 1.5, b"x")
-    assert not store_frame(paths, 1.5, b"x")
+    store_frame(paths, 1.5, 1, b"x")
+    assert not store_frame(paths, 1.5, 1, b"x")
     with pytest.raises(ChunkConflict):
-        store_frame(paths, 1.5, b"y")
+        store_frame(paths, 1.5, 1, b"y")
 
 
 # --- Audio ------------------------------------------------------------------------------------
@@ -247,7 +246,7 @@ def test_frames_sampled_on_the_grid_by_timestamp(paths: SessionPaths):
     # Uneven browser timing: two frames in second 1, none in second 3, out of posting order.
     captured = {0.0: 0, 1.02: 1, 1.6: 1, 2.05: 2, 4.3: 4, 5.0: 5}
     for t in reversed(list(captured)):
-        store_frame(paths, t, jpeg(COLOURS[captured[t]]))
+        store_frame(paths, t, 1, jpeg(COLOURS[captured[t]]))
     index = finalize_frames(paths, fps=1.0, max_width=1280)
     assert [f.t for f in index.frames] == [0.0, 1.02, 2.05, 4.3, 5.0]
     assert [f.path for f in index.frames][:2] == ["frames/000000000.jpg", "frames/000001020.jpg"]
@@ -259,9 +258,9 @@ def test_frames_sampled_on_the_grid_by_timestamp(paths: SessionPaths):
 
 
 def test_frames_downscaled_and_letterboxed_to_one_size(paths: SessionPaths):
-    store_frame(paths, 0.0, jpeg(COLOURS[0], (640, 480)))
-    store_frame(paths, 1.0, jpeg(COLOURS[1], (640, 240)))  # the shared window got wider
-    store_frame(paths, 2.0, b"\xff\xd8\xff truncated")  # unreadable: skipped
+    store_frame(paths, 0.0, 1, jpeg(COLOURS[0], (640, 480)))
+    store_frame(paths, 1.0, 1, jpeg(COLOURS[1], (640, 240)))  # the shared window got wider
+    store_frame(paths, 2.0, 1, b"\xff\xd8\xff truncated")  # unreadable: skipped
     index = finalize_frames(paths, fps=1.0, max_width=320)
     assert (index.width, index.height) == (320, 240)
     assert [f.t for f in index.frames] == [0.0, 1.0]
@@ -272,31 +271,75 @@ def test_frames_downscaled_and_letterboxed_to_one_size(paths: SessionPaths):
 
 def test_each_share_is_sized_from_its_own_first_frame(paths: SessionPaths):
     """A small window shared first doesn't shrink the entire screen shared after it."""
-    store_screen_change(paths, 0.0, on=True)
-    store_frame(paths, 0.0, jpeg(COLOURS[0], (160, 120)))  # a small window
-    store_frame(paths, 1.0, jpeg(COLOURS[1], (320, 120)))  # the window got wider: letterboxed
-    store_screen_change(paths, 2.5, on=False)
-    store_screen_change(paths, 9.0, on=True)
-    store_frame(paths, 9.2, b"\xff\xd8\xff truncated")  # unreadable: the next frame sizes it
-    store_frame(paths, 10.0, jpeg(COLOURS[2], (1280, 800)))  # the entire screen
-    store_frame(paths, 11.0, jpeg(COLOURS[3], (640, 400)))
+    store_frame(paths, 0.0, 1, jpeg(COLOURS[0], (160, 120)))  # a small window
+    store_frame(paths, 1.0, 1, jpeg(COLOURS[1], (320, 120)))  # the window got wider: letterboxed
+    store_frame(paths, 9.2, 2, b"\xff\xd8\xff truncated")  # unreadable: the next frame sizes it
+    store_frame(paths, 10.0, 2, jpeg(COLOURS[2], (1280, 800)))  # the entire screen
+    store_frame(paths, 11.0, 2, jpeg(COLOURS[3], (640, 400)))
     index = finalize_frames(paths, fps=1.0, max_width=640)
-    assert index.screen_off == [2.5]
+    assert index.share_starts == [10.0]  # the second share's first readable frame
     assert (index.width, index.height) == (160, 120)  # the first share's
     sizes = [cv2.imread(str(paths.root / f.path)).shape[:2] for f in index.frames]
     assert [f.t for f in index.frames] == [0.0, 1.0, 10.0, 11.0]
     assert sizes == [(120, 160), (120, 160), (400, 640), (400, 640)]
 
 
+def test_shares_come_from_the_frames_share_numbers(paths: SessionPaths):
+    # Share 2 is unreadable throughout: left out. Share 4 starts in share 3's last grid cell, so
+    # its first frame isn't sampled (as for any two frames in one cell) and it starts a frame on.
+    for t, share, data in [
+        (0.0, 1, jpeg(COLOURS[0])),
+        (1.0, 1, jpeg(COLOURS[0])),
+        (5.0, 2, b"\xff\xd8\xff truncated"),
+        (8.0, 3, jpeg(COLOURS[1])),
+        (9.0, 3, jpeg(COLOURS[1])),
+        (9.5, 4, jpeg(COLOURS[2])),
+        (10.0, 4, jpeg(COLOURS[2])),
+    ]:
+        store_frame(paths, t, share, data)
+    index = finalize_frames(paths, fps=1.0, max_width=320)
+    assert [f.t for f in index.frames] == [0.0, 1.0, 8.0, 9.0, 10.0]
+    assert index.share_starts == [8.0, 10.0]
+
+
+def test_frames_split_into_shares_where_the_share_number_changes():
+    def frames(*items: tuple[float, int]) -> list[CapturedFrame]:
+        return [CapturedFrame(t, share, Path(f"{t}.jpg")) for t, share in items]
+
+    captured = frames((0.0, 1), (1.0, 1), (5.0, 2), (6.0, 3), (7.0, 3))
+    assert [[f.t for f in share] for share in split_shares(captured)] == [
+        [0.0, 1.0],
+        [5.0],
+        [6.0, 7.0],
+    ]
+    assert split_shares(frames((0.0, 1), (1.0, 1))) == [frames((0.0, 1), (1.0, 1))]
+    assert split_shares([]) == []
+
+
+def test_frames_of_two_shares_at_the_same_time_are_both_kept(paths: SessionPaths):
+    """Stop then Continue at the same recorded time: the two shares' frames don't collide."""
+    assert store_frame(paths, 10.0, 1, b"a")
+    assert store_frame(paths, 10.0, 2, b"b")
+    assert [(f.t, f.share) for f in captured_frames(paths)] == [(10.0, 1), (10.0, 2)]
+
+
+def test_frames_captured_before_share_numbers_are_one_share(paths: SessionPaths):
+    (paths.live_frames_dir).mkdir(parents=True, exist_ok=True)
+    (paths.live_frames_dir / "000001500.jpg").write_bytes(jpeg(COLOURS[0]))
+    store_frame(paths, 2.5, 1, jpeg(COLOURS[0]))
+    assert [(f.t, f.share) for f in captured_frames(paths)] == [(1.5, 1), (2.5, 1)]
+    assert finalize_frames(paths, fps=1.0, max_width=320).share_starts == []
+
+
 def test_finalize_frames_is_repeatable_and_removes_stale_frames(paths: SessionPaths):
     stale = paths.frames_dir / "999999999.jpg"
     stale.write_bytes(b"old")
-    store_frame(paths, 0.5, jpeg(COLOURS[0]))
+    store_frame(paths, 0.5, 1, jpeg(COLOURS[0]))
     first = finalize_frames(paths, fps=1.0, max_width=1280)
     assert not stale.exists()
     assert finalize_frames(paths, fps=1.0, max_width=1280) == first
     assert len(list(paths.frames_dir.glob("*.jpg"))) == 1
-    assert (paths.live_frames_dir / "000000500.jpg").exists()  # captured data is kept
+    assert (paths.live_frames_dir / "000000500-0001.jpg").exists()  # captured data is kept
 
 
 def test_no_frames_gives_an_empty_index(paths: SessionPaths):
@@ -323,8 +366,8 @@ def post_audio(client: TestClient, sid: str, seq: int, data: bytes) -> int:
     return client.post(f"/api/live/{sid}/audio?seq={seq}", content=data).status_code
 
 
-def post_frame(client: TestClient, sid: str, t: float, data: bytes) -> int:
-    return client.post(f"/api/live/{sid}/frame?t={t}", content=data).status_code
+def post_frame(client: TestClient, sid: str, t: float, data: bytes, share: int = 1) -> int:
+    return client.post(f"/api/live/{sid}/frame?t={t}&share={share}", content=data).status_code
 
 
 def test_live_input_is_validated(client: TestClient):
@@ -341,50 +384,15 @@ def test_live_input_is_validated(client: TestClient):
     assert client.post("/api/live/nope/end").status_code == 404
 
 
-def post_screen(client: TestClient, sid: str, t: float | str, on: bool | str) -> int:
-    on = str(on).lower() if isinstance(on, bool) else on
-    return client.post(f"/api/live/{sid}/screen?t={t}&on={on}").status_code
-
-
-def test_a_screen_recording_starts_with_the_screen_on(client: TestClient, settings: Settings):
-    shared = start(client)  # a screen recording is the default
-    assert screen_changes(session_paths(settings.sessions_dir, shared)) == [(0.0, True)]
-    sid = client.post("/api/live", json={"title": "call", "screen": False}).json()["id"]
-    assert screen_changes(session_paths(settings.sessions_dir, sid)) == []
-
-
-def test_the_screen_is_turned_on_and_off_during_a_recording(client: TestClient, settings: Settings):
-    sid = client.post("/api/live", json={"title": "call", "screen": False}).json()["id"]
-    paths = session_paths(settings.sessions_dir, sid)
-    assert post_screen(client, sid, 12.5, True) == 204
-    assert post_frame(client, sid, 13.0, jpeg(COLOURS[0])) == 204  # frames come while it is on
-    assert post_screen(client, sid, 40.25, False) == 204
-    assert post_screen(client, sid, 40.25, False) == 204  # a retry: no-op
-    # Stop, then Continue with the screen: off and on at the same time, off first.
-    assert post_screen(client, sid, 60.0, True) == 204
-    assert post_screen(client, sid, 60.0, False) == 204
-    assert screen_changes(paths) == [(12.5, True), (40.25, False), (60.0, False), (60.0, True)]
-    assert screen_offs(paths) == [40.25, 60.0]
-
-
-def test_screen_changes_are_validated(client: TestClient):
+def test_frames_need_their_share(client: TestClient, settings: Settings):
     sid = start(client)
-    for t in ("nan", "inf", "-1", "86401"):
-        assert post_screen(client, sid, t, True) == 422
-    assert post_screen(client, sid, 1.0, "maybe") == 422
-    assert client.post(f"/api/live/{sid}/screen?t=1").status_code == 422  # on is required
-    assert post_screen(client, "nope", 1.0, True) == 404
-    assert client.post(f"/api/live/{sid}/end", json={"allow_gaps": True}).status_code == 200
-    assert post_screen(client, sid, 2.0, False) == 409  # no longer recording
-
-
-def test_frames_split_into_shares_where_the_screen_was_turned_off():
-    frames = [(t, Path(f"{t}.jpg")) for t in (0.0, 1.0, 2.0, 5.0, 6.0, 9.0)]
-    shares = split_shares(frames, [2.0, 3.0, 4.0, 8.0])
-    # At an off time, a frame is the next share's; offs with no frames between them give none.
-    assert [[t for t, _ in share] for share in shares] == [[0.0, 1.0], [2.0], [5.0, 6.0], [9.0]]
-    assert split_shares(frames, []) == [frames]
-    assert split_shares([], [1.0]) == []
+    for share in ("0", "-1", "10000", "x"):
+        assert post_frame(client, sid, 1.0, jpeg(COLOURS[0]), share) == 422  # type: ignore[arg-type]
+    url = f"/api/live/{sid}/frame?t=1"
+    assert client.post(url, content=jpeg(COLOURS[0])).status_code == 422  # share is required
+    assert post_frame(client, sid, 1.0, jpeg(COLOURS[0]), share=2) == 204
+    paths = session_paths(settings.sessions_dir, sid)
+    assert [(f.t, f.share) for f in captured_frames(paths)] == [(1.0, 2)]
 
 
 def test_repeated_chunk_with_other_content_conflicts(client: TestClient, webm: bytes):
@@ -529,6 +537,6 @@ def test_live_session_produces_notes_like_an_upload(
 
 
 def test_replay_records_a_file_without_video_as_audio_only(tmp_path: Path):
-    """``iris replay-live`` starts the session as the Live page would for that file."""
-    assert has_video(make_media(tmp_path / "talk.mp4", video=True, seconds=1))
-    assert not has_video(make_media(tmp_path / "call.wav", video=False, seconds=1))
+    """``iris replay-live`` sends frames for a file with video, and none (Record audio) without."""
+    assert list(file_frames(make_media(tmp_path / "talk.mp4", video=True, seconds=2)))
+    assert list(file_frames(make_media(tmp_path / "call.wav", video=False, seconds=2))) == []

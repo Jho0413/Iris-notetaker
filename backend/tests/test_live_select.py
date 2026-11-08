@@ -606,7 +606,7 @@ async def test_screen_and_select_lanes_through_the_processor(
     processor = LiveProcessor(ctx, lanes=lambda c, tl: [ScreenLane(c, tl), SelectLane(c, tl)])
     processor.start()
     for i, frame in enumerate(three_slides().frames):
-        store_frame(ctx.paths, float(i), encode(frame))
+        store_frame(ctx.paths, float(i), 1, encode(frame))
         processor.notify_screen()
         await asyncio.sleep(0)
     timeline = await processor.finish()

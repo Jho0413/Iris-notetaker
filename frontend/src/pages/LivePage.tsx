@@ -134,7 +134,7 @@ export function LivePage() {
     // permissions leaves no session behind, whatever happens meanwhile.
     const createSession = async () => {
       const { data } = await api
-        .POST('/api/live', { body: { title: title.trim() || 'Live session', screen: mode === 'screen' } })
+        .POST('/api/live', { body: { title: title.trim() || 'Live session' } })
         .catch(() => ({ data: undefined }))
       if (!data) throw new CaptureError(UNREACHABLE)
       return data.id
