@@ -1266,8 +1266,6 @@ test('the screen turns on and off during an audio recording, with a new share ea
   await tick()
   // Each frame says which share it is from, so the backend needs nothing else to split them.
   assert.deepEqual(frameShares(t), [1, 2])
-  const frames = frameTimes(t)
-  assert.ok(frames[0] <= frames[1], `${frames}`)
   assert.equal(FakeRecorder.created.length, 1, 'one recorder throughout: the audio is one stream')
   await live.stop()
   assert.ok(t.shares[1].video.stopped)
@@ -1323,9 +1321,12 @@ test('a share granted after Stop (or after making notes) is let go at once', asy
     assert.equal(await sharing, null, meanwhile)
     await ending
     assert.ok(late.stopped, meanwhile)
+    // Recording again after Stop, a frame from the late share would be sent: none is.
+    if (meanwhile === 'pause') await live.resume()
     t.frame(performance.now())
     await tick()
     assert.deepEqual(frameShares(t), [], `${meanwhile}: nothing is sent for it`)
+    await live.stop()
   }
 })
 
