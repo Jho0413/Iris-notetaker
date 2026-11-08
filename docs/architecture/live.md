@@ -25,7 +25,7 @@ mixed in while it is shared.
 
 Audio is uploaded in 5-second chunks and, while the screen is on, about one frame per second, on
 the same clock. Each frame carries the number of the share it belongs to (`share`: 1 for the
-first, one more for each Share screen and each Continue), so the engine finds where each share
+first, one more for each Share screen and each Continue that shares the screen again), so the engine finds where each share
 starts and ends from the frames alone: nothing else is sent, so nothing else can be lost. The
 audio sources are always mixed into the one track that is recorded, even when the microphone is
 the only one, so the recording stays one stream as sources join and leave.
