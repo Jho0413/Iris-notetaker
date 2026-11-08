@@ -654,8 +654,8 @@ finished.
 
 ### Renaming
 A session's name is edited in place on the session page (click the title, or the pencil that
-shows on hover and to the keyboard). The library has no rename: its rows keep one action and
-Delete, and a session is renamed from its own page. The title
+shows on hover and to the keyboard). The library has no rename; a session is renamed from its
+own page. The title
 stays text in its own type and place, marked only by a 2px indigo underline, the one place Iris
 uses an underlined field instead of a boxed one (a title isn't a form field). The line under it
 says "Enter to save · Esc to cancel" in `text-2`, or why a save failed in `recording` red. Enter or

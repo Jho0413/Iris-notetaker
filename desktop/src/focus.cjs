@@ -25,6 +25,9 @@ function run(argv) {
 }
 `
 
+// osascript answers in about 0.1 s; past this the share has long started and focus no longer matters.
+const ACTIVATE_TIMEOUT_MS = 5000
+
 /** The CGWindowID in a desktopCapturer window source id (`window:<number>:<n>`); null for a
  * screen or anything else. */
 function windowNumber(sourceId) {
@@ -44,7 +47,7 @@ function bringSharedAppForward(sourceId, { execFile, log }) {
   const number = windowNumber(sourceId)
   if (!number) return Promise.resolve()
   return new Promise((resolve) => {
-    execFile('/usr/bin/osascript', ['-l', 'JavaScript', '-e', ACTIVATE_OWNER_SCRIPT, number], { timeout: 5000 }, (err, stdout) => {
+    execFile('/usr/bin/osascript', ['-l', 'JavaScript', '-e', ACTIVATE_OWNER_SCRIPT, number], { timeout: ACTIVATE_TIMEOUT_MS }, (err, stdout) => {
       const outcome = String(stdout ?? '').trim()
       if (err) log(`[capture] couldn't bring the shared window's app forward: ${err.message}`)
       else if (outcome !== 'activated') log(`[capture] didn't bring the shared window's app forward: ${outcome}`)
