@@ -52,3 +52,8 @@ export function saveRefused(detail: string): string {
 /** Export PDF failed: the notes couldn't be loaded, or the desktop app couldn't save the file
  *  (the reason is in the console or the app's log). */
 export const PDF_FAILED = 'The PDF couldn’t be saved. Try again.'
+
+/** The session details' button, in the rail's bar and beside the tabs (below 1120px). */
+export function detailsLabel(open: boolean): string {
+  return open ? 'Hide details' : 'Details'
+}

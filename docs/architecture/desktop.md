@@ -20,7 +20,8 @@ Iris.app
 │         app://iris/<file> → frontend/dist/<file>
 │         anything else     → index.html (client-side routes)
 │     • display-media handler: Iris's own picker (entire screen first, Iris's windows left
-│         out) for the picture; a request for sound alone gets "loopback", no picker
+│         out) for the picture; a request for sound alone gets "loopback", no picker; a shared
+│         window's app is brought to the front (src/focus.cjs)
 │     • menu bar icon (Tray): Record Audio, Record Screen…, Share Screen…/Stop Sharing and Stop,
 │       relayed to the Live page
 ├── Window (renderer): app://iris/, the web UI unchanged
@@ -87,6 +88,14 @@ doesn't arise there.
   process shows its own dialog (`will-prevent-unload`), worded by page in `src/unload.cjs`: "Stop
   recording?" for the live page, "Leave without saving?" (or "Quit without saving?", which cancels
   the quit if kept) otherwise.
+- **Sharing a window doesn't focus it.** Chromium's focus-on-share (`CaptureController.setFocusBehavior`)
+  does nothing for a source chosen by `setDisplayMediaRequestHandler` (measured, Electron 45, macOS
+  26). So once a window is chosen, the main process activates the app that owns it
+  (`src/focus.cjs`): the source id carries its macOS window number, the window list gives the
+  owner (no permission needed), and `osascript` activates it through the Objective-C bridge (no
+  Apple Events, so no Automation prompt). The app's windows come forward; if it has several, the
+  shared one may not be on top (raising one window needs Accessibility access). A screen changes
+  nothing.
 - **Capture errors** name Iris and the System Settings pane instead of the browser
   (`describeCaptureError`, when the page's protocol is `app:`).
 

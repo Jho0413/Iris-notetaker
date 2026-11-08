@@ -11,7 +11,6 @@ import { nameToSave, RENAME_HINT, renameFailure, TITLE_MAX_CHARS } from '../sess
  */
 export function TitleField(props: {
   title: string
-  size: 'page' | 'row'
   onSave: (name: string) => Promise<number>
   onDone: () => void
 }) {
@@ -47,7 +46,7 @@ export function TitleField(props: {
     <>
       <input
         ref={input}
-        className={props.size === 'page' ? 'title-field' : 'row-field'}
+        className="title-field"
         value={draft}
         maxLength={TITLE_MAX_CHARS}
         size={Math.max(10, draft.length + 1)} // where field-sizing isn't supported
@@ -71,15 +70,9 @@ export function TitleField(props: {
         }}
         onBlur={() => void commit()}
       />
-      {props.size === 'page' ? (
-        <p id={hintId} className={`edit-meta${error ? ' err' : ''}`} role="status">
-          {hint}
-        </p>
-      ) : (
-        <span id={hintId} className={`sub${error ? ' err' : ''}`} role="status">
-          {hint}
-        </span>
-      )}
+      <p id={hintId} className={`edit-meta${error ? ' err' : ''}`} role="status">
+        {hint}
+      </p>
     </>
   )
 }

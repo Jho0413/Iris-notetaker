@@ -27,6 +27,7 @@ const {
   Tray,
   webContents,
 } = require('electron')
+const { execFile } = require('node:child_process')
 const fs = require('node:fs')
 const path = require('node:path')
 const { Backend, backendCommand } = require('./src/backend.cjs')
@@ -44,6 +45,7 @@ const { busyDetail, busyKeyRefusal, busyNow, quitDetail, stopRecordings: stopEac
 const { refusedDebugSwitch } = require('./src/debugging.cjs')
 const trayRules = require('./src/tray.cjs')
 const pickerRules = require('./src/picker.cjs')
+const { bringSharedAppForward } = require('./src/focus.cjs')
 
 const PACKAGED = app.isPackaged
 const REPO = path.resolve(__dirname, '..')
@@ -809,6 +811,8 @@ function secureSession(ses) {
     }
     log(`[capture] recording ${source.id}`)
     answer({ video: source, audio: request.audioRequested ? 'loopback' : undefined })
+    // A shared window: go straight to its app (src/focus.cjs). A screen stays where it is.
+    void bringSharedAppForward(source.id, { execFile, log })
   })
 }
 
@@ -841,6 +845,9 @@ function buildMenu() {
         { role: 'quit' },
       ],
     },
+    // On macOS, Close Window (Cmd-W) is in the File menu only; the Window menu has none. It
+    // closes as the window's close button does (a recording hides the window instead).
+    { role: 'fileMenu' },
     { role: 'editMenu' },
     {
       label: 'View',

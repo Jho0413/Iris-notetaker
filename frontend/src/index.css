@@ -257,6 +257,8 @@ h1, h2, h3 { line-height: 1.2; letter-spacing: -0.01em; text-wrap: balance; }
 .chip { display: inline-flex; align-items: center; gap: 0.375rem; height: 1.5rem; padding: 0 0.5625rem;
   border-radius: 999px; font-size: 0.8125rem; font-weight: 500; white-space: nowrap;
   border: 1px solid var(--border); background: var(--surface-2); color: var(--text-2); }
+.chip { max-width: 100%; }
+.chip-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .chip .dot { width: 0.4375rem; height: 0.4375rem; border-radius: 50%; background: currentColor; }
 .chip-processing, .chip-starting, .chip-polishing { background: var(--accent-soft); border-color: var(--accent-line);
   color: var(--accent); }
@@ -309,11 +311,15 @@ h1, h2, h3 { line-height: 1.2; letter-spacing: -0.01em; text-wrap: balance; }
 .library-row .title-link:focus-visible { outline: none; }
 .library-row:has(.title-link:focus-visible) { outline: 2px solid var(--accent); outline-offset: -2px; }
 .library-row .sub { color: var(--text-2); font-size: 0.8125rem; }
+/* The status, date and cost again, under the title: shown only in a narrow window, where their
+   columns are hidden (see "Laptop widths"). */
+.library-row .row-status, .library-row .sub-fold { display: none; }
+.library-row .sub > * + *::before { content: '·'; margin: 0 0.375rem; color: var(--border-strong); }
 .library-row .meta { color: var(--text-2); }
 .library .cost-cell { text-align: right; white-space: nowrap; }
 .library-row .row-actions { display: flex; justify-content: flex-end; gap: 4px; position: relative;
   z-index: 1; }
-.choices { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; max-width: 40rem;
+.choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: 16px; max-width: 40rem;
   margin: 24px auto 0; text-align: left; }
 .choice { display: flex; flex-direction: column; gap: 6px; padding: 20px; border-radius: var(--radius-m);
   border: 1px solid var(--border); background: var(--surface); color: var(--text); text-decoration: none; }
@@ -365,10 +371,12 @@ button.choice:disabled:not([data-waiting]) { opacity: 0.55; }
 .recbar .capture-status span { display: inline-flex; align-items: center; gap: 5px; }
 .recbar .capture-status .warn { color: var(--warning); }
 .recbar .spacer { flex: 1; }
+/* Finishing the upload: on a phone the spinner is all the button shows, so it turns. */
+.recbar .btn-stop:disabled .icon { animation: spin 1.4s linear infinite; }
 .recorder { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 16px;
   padding-top: 24px; }
 .recorder .clock { font-size: 3.5rem; font-weight: 300; letter-spacing: -0.02em; line-height: 1; }
-.recorder .preview { width: min(30rem, 100%); aspect-ratio: 16 / 10; object-fit: contain;
+.recorder .preview { width: min(56rem, 100%, 88vh); aspect-ratio: 16 / 10; object-fit: contain;
   border-radius: var(--radius-m); background: var(--preview); border: 1px solid var(--border); }
 .recorder .after { color: var(--text-2); max-width: 46ch; margin: 0; }
 .setup { display: flex; flex-direction: column; gap: 20px; }
@@ -401,6 +409,8 @@ button.choice:disabled:not([data-waiting]) { opacity: 0.55; }
 .session-head h1 { margin: 0; font-size: 1.5rem; font-weight: 600; overflow-wrap: anywhere; }
 .session-meta { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 6px; color: var(--text-2); }
 .session-meta > * + *::before { content: '·'; margin-right: 10px; color: var(--border-strong); }
+.session-meta > .meta-status { display: none; }
+.session-meta > .meta-status::before { content: none; }
 .session-head .head-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
   justify-content: flex-end; }
 
@@ -426,8 +436,8 @@ button.choice:disabled:not([data-waiting]) { opacity: 0.55; }
 .rail { position: sticky; top: calc(var(--topbar) + 16px); display: flex; flex-direction: column;
   gap: 4px; padding: 16px; border-radius: var(--radius-m); background: var(--surface-2);
   border: 1px solid var(--border); max-height: calc(100vh - var(--topbar) - 32px); overflow: auto; }
-.rail h2 { margin: 12px 0 6px; font-size: 0.8125rem; font-weight: 600; color: var(--text-2); }
-.rail h2:first-child { margin-top: 0; }
+.run-details h2 { margin: 12px 0 6px; font-size: 0.8125rem; font-weight: 600; color: var(--text-2); }
+.run-details h2:first-child { margin-top: 0; }
 .rail-summary { display: none; }
 .steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
 .step { display: flex; align-items: center; gap: 8px; min-height: 1.75rem; color: var(--text-2); }
@@ -448,7 +458,7 @@ button.choice:disabled:not([data-waiting]) { opacity: 0.55; }
 .details { font-size: 0.8125rem; color: var(--text-2); margin-top: 8px; border-top: 1px solid var(--border);
   padding-top: 8px; }
 /* First in the rail until the notes are finished (no progress list or outline above it). */
-.rail-full > .cost-slot:first-child { margin-top: 0; }
+.run-details > .cost-slot:first-child { margin-top: 0; }
 .details summary { cursor: pointer; color: var(--text); font-weight: 500; padding: 4px 0;
   list-style: none; display: flex; align-items: center; gap: 6px; }
 .details summary::-webkit-details-marker { display: none; }
@@ -460,7 +470,12 @@ button.choice:disabled:not([data-waiting]) { opacity: 0.55; }
 .details td { padding: 3px 0; }
 .details td:last-child { text-align: right; }
 
-.tabs { display: flex; gap: 20px; border-bottom: 1px solid var(--border); margin-bottom: 24px; }
+.tabs { display: flex; align-items: center; gap: 20px; border-bottom: 1px solid var(--border); margin-bottom: 24px; }
+.tab-list { display: flex; gap: 20px; }
+/* Details beside the tabs, and what it opens below them: only below 1120px, where the rail
+   folds away (see "Laptop widths"). */
+.tabs-details { display: none; margin-left: auto; }
+.tabs-details-panel { display: none; }
 .tab { position: relative; height: 2.5rem; padding: 0; border: 0; background: none; cursor: pointer;
   font: 500 0.875rem/1 var(--font); color: var(--text-2); display: inline-flex; align-items: center; gap: 6px; }
 .tab:hover { color: var(--text); }
@@ -703,16 +718,15 @@ body.is-dragging, body.is-dragging * { cursor: grabbing !important; user-select:
   transition: background var(--fast) var(--ease); }
 .session-head h1.title-text:hover { background: var(--surface-2); }
 .rename-btn { color: var(--text-2); opacity: 0; transition: opacity var(--fast) var(--ease); }
-.title-line:hover .rename-btn, .library-row:hover .rename-btn, .rename-btn:focus-visible { opacity: 1; }
+.title-line:hover .rename-btn, .rename-btn:focus-visible { opacity: 1; }
 @media (hover: none) { .rename-btn { opacity: 1; } }
-.title-field, .row-field { display: block; max-width: 100%; min-width: 10ch; field-sizing: content;
+.title-field { display: block; max-width: 100%; min-width: 10ch; field-sizing: content;
   color: var(--text); background: transparent; border: 0; border-bottom: 2px solid var(--accent);
   border-radius: 0; padding: 2px 6px; margin-left: -6px; }
-.title-field:focus-visible, .row-field:focus-visible { outline: none; } /* the underline is the focus cue */
+.title-field:focus-visible { outline: none; } /* the underline is the focus cue */
 .title-field { font: 600 1.5rem/1.2 var(--font); letter-spacing: -0.01em; }
-.row-field { font: 500 0.875rem/1.5 var(--font); position: relative; z-index: 1; padding: 0 6px; }
 .edit-meta { margin: 6px 0 0; min-height: 21px; color: var(--text-2); }
-.edit-meta.err, .library-row .sub.err { color: var(--recording); }
+.edit-meta.err { color: var(--recording); }
 
 /* ---- Settings ---------------------------------------------------------------------------------- */
 
@@ -765,22 +779,43 @@ body.is-dragging, body.is-dragging * { cursor: grabbing !important; user-select:
     border-radius: 0 0 var(--radius-m) var(--radius-m); background: var(--surface-2); }
   .rail.expanded .rail-full { display: block; }
   .rail.expanded .rail-summary { border-radius: var(--radius-m) var(--radius-m) 0 0; }
+  /* With tabs, the details open under them instead, so the rail (and its grid gap) goes. */
+  .rail-tabbed { display: none; }
+  .tabs-details { display: inline-flex; }
+  .tabs-details-panel:not([hidden]) { display: block; margin-bottom: 24px; padding: 16px; border: 1px solid var(--border);
+    border-radius: var(--radius-m); background: var(--surface-2); }
 }
 @media (max-width: 53.75em) { /* 860px */
+  /* Two-line rows: the title, then status · source · date · cost, with the actions on the right. */
   .library { display: block; }
   .library-head { display: none; }
-  .library-row { grid-template-columns: minmax(0, 1fr) auto; column-gap: 1rem; padding: 10px 16px; }
-  .library-row .meta { display: none; }
-  .library-row .status-cell { grid-row: 2; }
-  .choices { grid-template-columns: 1fr; }
-  .recbar .capture-status { display: none; }
+  .library-row { grid-template-columns: minmax(0, 1fr) auto; column-gap: 1rem; padding: 0.625rem 1rem; }
+  .library-row .meta, .library-row .status-cell { display: none; }
+  .library-row .row-sub { display: flex; align-items: center; gap: 0.625rem; min-width: 0; margin-top: 0.25rem; }
+  .library-row .row-status { display: flex; min-width: 0; }
+  .library-row .sub-fold { display: inline; }
+  /* The status keeps its full width; the rest of the line gets what is left and ends with an
+     ellipsis. Only a status wider than the whole line shortens. */
+  .library-row .sub { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* What is being recorded shows as icons; the words stay for screen readers (as .sr-only). */
+  .recbar .capture-status { gap: 12px; }
+  .recbar .capture-words { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
   .session-head { flex-direction: column; }
+  .session-head .head-actions { justify-content: flex-start; }
+  /* The status joins the line under the title, so the buttons have a line of their own. While
+     the title is being renamed there is no such line, and the status stays with the buttons. */
+  .session-meta > .meta-status { display: inline-flex; }
+  .session-head:has(.meta-status) .head-actions > .chip { display: none; }
+  /* Nothing left in the actions (a session still being made has no buttons): no empty row. */
+  .session-head:has(.meta-status) .head-actions:not(:has(> :not(.chip))) { display: none; }
 }
 
 @media (max-width: 35em) { /* 560px */
-  .topbar { padding: 0 12px; }
+  .topbar, .recbar { padding: 0 12px; }
+  .recbar { gap: 8px; }
   .wordmark { margin-right: 4px; }
-  .topbar .btn-label, .recbar .btn-label { display: none; }
+  .topbar .btn-label, .recbar .btn-label, .library-row .btn-label { display: none; }
   .theme-switch { margin-left: 0; }
   .main { padding: 24px 16px 48px; }
   .settings-row:not(.settings-row-inline) { flex-direction: column; align-items: stretch; gap: 10px; }
@@ -794,15 +829,28 @@ body.is-dragging, body.is-dragging * { cursor: grabbing !important; user-select:
   .edit-strip p { flex-basis: 100%; }
   .edit-strip .hint { display: none; }
   .edit-status { margin-right: auto; }
+  /* Tabs that don't fit (long counts) scroll sideways in their row; Details stays in view. The
+     row's padding, taken back by its margins, keeps what is drawn outside a tab unclipped: the
+     focus ring (2px, 2px out) and the active tab's underline on the row's border. */
+  .tab-list { min-width: 0; overflow-x: auto; scrollbar-width: none; padding: 4px 4px 5px; margin: -4px -4px -5px; }
+  .tabs-details { flex: none; }
   /* The toolbar fits a phone: the colour shows as its dot only. */
   .tb-btn { padding: 0 6px; }
   .tb-btn .tb-word { display: none; }
 }
 
-/* The narrowest phones: the top bar's items close up so it fits in one line. */
+/* The narrowest phones: the top bar's items, the recording bar and the tabs close up so each
+   fits in one line. */
 @media (max-width: 25em) { /* 400px */
   .topbar, .topbar .actions { gap: 2px; }
   .wordmark { margin-right: 0; }
+  /* The Iris wordmark goes to the library too. */
+  .topbar nav { display: none; }
+  /* The tabs close up too, so Details still fits beside them on a 320px phone; and the
+     recording bar, so Stop does. */
+  .tabs, .tab-list { gap: 12px; }
+  .recbar, .recbar .capture-status { gap: 6px; }
+  .recbar .btn { padding: 0 0.5rem; } /* icon only by now: square */
 }
 
 /* Export PDF draws the notes in a print sheet (components/PrintSheet.tsx): laid out (so its fonts
@@ -820,7 +868,7 @@ body.is-dragging, body.is-dragging * { cursor: grabbing !important; user-select:
   html, body { background: var(--plate); }
   * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .topbar, .skip-link, .crumbs, .head-actions, .rename-btn, .ribbon, .tabs, .rail, .banner,
-  .edit-strip, .edited-meta, .menu, .sr-only { display: none !important; }
+  .edit-strip, .edited-meta, .menu, .sr-only, .tabs-details-panel, .meta-status { display: none !important; }
   .main { padding: 0; }
   .session-head { margin-bottom: 16px; }
   .session-body { display: block; }

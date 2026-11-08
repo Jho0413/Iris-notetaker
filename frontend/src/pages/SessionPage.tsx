@@ -6,7 +6,7 @@ import { FiguresGrid } from '../components/FiguresGrid'
 import { Icon } from '../components/Icon'
 import { NotesEditor } from '../components/NotesEditor'
 import { NotesView, type OutlineItem } from '../components/NotesView'
-import { ProgressRail } from '../components/ProgressRail'
+import { ProgressRail, RunDetails, type RunDetailsProps } from '../components/ProgressRail'
 import { SessionRibbon } from '../components/SessionRibbon'
 import { StatusChip } from '../components/StatusChip'
 import { StepList } from '../components/StepList'
@@ -14,7 +14,7 @@ import { TabPanel, Tabs } from '../components/Tabs'
 import { TitleField } from '../components/TitleField'
 import { TranscriptList } from '../components/TranscriptList'
 import { stepCosts, usageCost, usageRefreshKey } from '../session/cost'
-import { againLink, NOTES_EDIT, PDF_FAILED, UNREACHABLE } from '../session/messages'
+import { againLink, detailsLabel, NOTES_EDIT, PDF_FAILED, UNREACHABLE } from '../session/messages'
 import { fetchNotes, fetchTranscript } from '../session/load'
 import { usePdfExport } from '../session/usePdfExport'
 import { act } from '../session/request'
@@ -66,6 +66,7 @@ function SessionView({ id }: { id: string }) {
   const [busy, setBusy] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [renaming, setRenaming] = useState(false)
+  const [detailsOpen, setDetailsOpen] = useState(false) // below 1120px, where the rail folds away
   const [editing, setEditing] = useState(false)
   // Dropping the user's edits: "Restore generated notes", or "Use the new notes" after a re-run.
   const [confirmDrop, setConfirmDrop] = useState<'restore' | 'use-new' | null>(null)
@@ -274,6 +275,21 @@ function SessionView({ id }: { id: string }) {
   const fromLabel = ui.fromStage ? STAGE_LABELS[ui.fromStage] : 'the start'
   const failure = ui.kind === 'failed' ? failureView(session, run) : null
   const again = againLink(session.source)
+  // Once the notes are shown in tabs, Details sits beside them below 1120px instead of in a bar.
+  const tabsShown = !progress && !(editing && notes)
+  const toggleDetails = () => setDetailsOpen((open) => !open)
+  // One set of details, shown in the rail or (below 1120px, with tabs) under the tabs row.
+  const runDetails: RunDetailsProps = {
+    run,
+    finished,
+    hasEvents: stream.eventCount > 0,
+    currentStage: session.current_stage,
+    outline: notes ? outline : [],
+    stream: stream.status,
+    showProgress: finished && stream.eventCount > 0,
+    cost,
+    stepCosts: costs,
+  }
 
   return (
     <div className="session">
@@ -290,7 +306,6 @@ function SessionView({ id }: { id: string }) {
           {renaming ? (
             <TitleField
               title={session.title}
-              size="page"
               onSave={(name) => renameSession(session.id, name, setSession)}
               onDone={() => setRenaming(false)}
             />
@@ -315,6 +330,11 @@ function SessionView({ id }: { id: string }) {
                 {sessionMetaLine(session, notes?.session_type, length).map((part, i) => (
                   <span key={i} className="num">{part}</span>
                 ))}
+                {/* Below 860px the status moves here from the actions (index.css), so the buttons
+                    keep a line of their own; only one of the two is ever shown. */}
+                <span className="meta-status">
+                  <StatusChip state={ui} />
+                </span>
                 {notes?.edited && !editing && (
                   <span className="edited-meta">
                     {NOTES_EDIT.edited} ·{' '}
@@ -362,7 +382,7 @@ function SessionView({ id }: { id: string }) {
           {!working && (
             <button
               type="button"
-              className="btn btn-ghost"
+              className="btn btn-ghost btn-icon"
               aria-label="Delete session"
               title="Delete session"
               onClick={() => setConfirmDelete(true)}
@@ -474,12 +494,30 @@ function SessionView({ id }: { id: string }) {
                 idPrefix="session"
                 active={tab}
                 onChange={setTab}
+                end={
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm tabs-details"
+                    aria-expanded={detailsOpen}
+                    aria-controls="session-details"
+                    onClick={toggleDetails}
+                  >
+                    {/* The same word open or closed (aria-expanded says which), so the row's width
+                        never changes on a phone. */}
+                    {detailsLabel(false)}
+                  </button>
+                }
                 tabs={[
                   { id: 'notes', label: 'Notes' },
                   { id: 'transcript', label: 'Transcript', count: segments.length ? String(segments.length) : undefined },
                   { id: 'figures', label: 'Figures', count: figures.length ? String(figures.length) : undefined },
                 ]}
               />
+              {/* Opened by Details beside the tabs: just below it, so the button stays where it was
+                  pressed (index.css shows this below 1120px only; the rail shows it above). */}
+              <div className="tabs-details-panel" id="session-details" hidden={!detailsOpen}>
+                <RunDetails {...runDetails} />
+              </div>
 
               <TabPanel id="notes" idPrefix="session" active={tab === 'notes'}>
                 {notes ? (
@@ -530,17 +568,7 @@ function SessionView({ id }: { id: string }) {
           )}
         </div>
 
-        <ProgressRail
-          run={run}
-          finished={finished}
-          hasEvents={stream.eventCount > 0}
-          currentStage={session.current_stage}
-          outline={notes ? outline : []}
-          stream={stream.status}
-          showProgress={finished && stream.eventCount > 0}
-          cost={cost}
-          stepCosts={costs}
-        />
+        <ProgressRail {...runDetails} expanded={detailsOpen} onToggle={toggleDetails} detailsInTabs={tabsShown} />
       </div>
 
       <ConfirmDialog

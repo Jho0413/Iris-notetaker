@@ -1,18 +1,14 @@
-import { useState } from 'react'
 import type { Stage } from '../api/client'
 import { detailRows, type Cost, type StepCost } from '../session/cost'
+import { detailsLabel } from '../session/messages'
 import type { StreamStatus } from '../session/useSessionStream'
 import { STAGE_ORDER, stepLine, stepStatus, type RunState } from '../session/state'
 import { CostText } from './CostText'
 import type { OutlineItem } from './NotesView'
 import { StepList } from './StepList'
 
-/**
- * The session rail: plain-language progress (once the notes are finished; until then the progress
- * view shows it), the notes outline, the cost slot and on-demand details. Below 1120px it
- * collapses into a one-line summary that expands.
- */
-export function ProgressRail(props: {
+/** What the session's details show: in the rail, or below the tabs under 1120px. */
+export interface RunDetailsProps {
   run: RunState
   /** Stored progress when no events are known (e.g. after a backend restart). */
   finished: boolean
@@ -25,9 +21,26 @@ export function ProgressRail(props: {
   cost: Cost | null
   /** Cost per step that made model calls, in pipeline order. */
   stepCosts: StepCost[]
-}) {
-  const [expanded, setExpanded] = useState(false)
-  const { run } = props
+}
+
+/**
+ * The session rail: plain-language progress (once the notes are finished; until then the progress
+ * view shows it), the notes outline, the cost slot and on-demand details. Below 1120px it
+ * collapses into a one-line summary that expands, or, once the notes show in tabs, hides: the
+ * Details button beside the tabs opens the same details under them.
+ */
+export function ProgressRail(
+  props: RunDetailsProps & {
+    /** Whether the details are open below 1120px; the page holds it, so the Details button
+     * beside the tabs opens and closes the same state. */
+    expanded: boolean
+    onToggle: () => void
+    /** The tabs show the details themselves below 1120px (RunDetails under the tabs row), so
+     * the rail is hidden there. */
+    detailsInTabs: boolean
+  },
+) {
+  const { run, expanded } = props
   const stored = { finished: props.finished, hasEvents: props.hasEvents, currentStage: props.currentStage }
 
   // Without the progress list (it is in the main column until the notes are finished), the
@@ -38,10 +51,12 @@ export function ProgressRail(props: {
     : running.length
       ? running.map((s) => stepLine(s, run)).join(' · ')
       : props.finished ? 'All steps finished' : 'Progress'
-  const rows = detailRows(run, props.stepCosts)
 
   return (
-    <aside className={`rail${expanded ? ' expanded' : ''}`} aria-label="Session progress and details">
+    <aside
+      className={`rail${expanded ? ' expanded' : ''}${props.detailsInTabs ? ' rail-tabbed' : ''}`}
+      aria-label="Session progress and details"
+    >
       <div className="rail-summary">
         <span>{summary}</span>
         <span className="spacer" />
@@ -50,68 +65,81 @@ export function ProgressRail(props: {
           className="btn btn-ghost btn-sm"
           aria-expanded={expanded}
           aria-controls="rail-full"
-          onClick={() => setExpanded((v) => !v)}
+          onClick={props.onToggle}
         >
-          {expanded ? 'Hide details' : 'Details'}
+          {detailsLabel(expanded)}
         </button>
       </div>
       <div className="rail-full" id="rail-full">
-        {props.showProgress && (
-          <>
-            <h2>Progress</h2>
-            <StepList run={run} {...stored} />
-          </>
-        )}
-
-        {props.outline.length > 0 && (
-          <>
-            <h2>On this page</h2>
-            <ul className="outline">
-              {props.outline.map((item) => (
-                <li key={item.id}>
-                  <a href={`#${item.id}`}>{item.text}</a>
-                </li>
-              ))}
-            </ul>
-          </>
-        )}
-
-        {/* Always laid out, so the rail doesn't move when the first cost arrives. */}
-        <p className="cost-slot" style={props.cost ? undefined : { visibility: 'hidden' }} aria-hidden={!props.cost}>
-          <span>Cost</span> {props.cost && <CostText cost={props.cost} />}
-        </p>
-
-        <details className="details">
-          <summary>Details</summary>
-          {rows.length > 0 && (
-            <table>
-              <tbody>
-                {rows.map((row) => (
-                  <tr key={row.key}>
-                    <td>{row.label}</td>
-                    <td className="num">
-                      {row.cost && <CostText cost={row.cost} />}
-                      {row.cost && row.time && ' · '}
-                      {row.time}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-          {!rows.some((r) => r.time) && <p>Step times are only available for runs since Iris started.</p>}
-          {props.cost?.partial && (
-            <p>
-              Costs marked ≥ leave out model calls Iris has no price for yet, so the real cost may
-              be higher.
-            </p>
-          )}
-          <p>
-            Live updates:{' '}
-            {props.stream === 'open' ? 'connected' : props.stream === 'connecting' ? 'waiting for Iris…' : 'reconnecting…'}
-          </p>
-        </details>
+        <RunDetails {...props} />
       </div>
     </aside>
+  )
+}
+
+/** The progress (once the notes are finished), the notes outline, the cost and on-demand
+ * details. */
+export function RunDetails(props: RunDetailsProps) {
+  const { run } = props
+  const stored = { finished: props.finished, hasEvents: props.hasEvents, currentStage: props.currentStage }
+  const rows = detailRows(run, props.stepCosts)
+  return (
+    <div className="run-details">
+      {props.showProgress && (
+        <>
+          <h2>Progress</h2>
+          <StepList run={run} {...stored} />
+        </>
+      )}
+
+      {props.outline.length > 0 && (
+        <>
+          <h2>On this page</h2>
+          <ul className="outline">
+            {props.outline.map((item) => (
+              <li key={item.id}>
+                <a href={`#${item.id}`}>{item.text}</a>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+
+      {/* Always laid out, so the rail doesn't move when the first cost arrives. */}
+      <p className="cost-slot" style={props.cost ? undefined : { visibility: 'hidden' }} aria-hidden={!props.cost}>
+        <span>Cost</span> {props.cost && <CostText cost={props.cost} />}
+      </p>
+
+      <details className="details">
+        <summary>Details</summary>
+        {rows.length > 0 && (
+          <table>
+            <tbody>
+              {rows.map((row) => (
+                <tr key={row.key}>
+                  <td>{row.label}</td>
+                  <td className="num">
+                    {row.cost && <CostText cost={row.cost} />}
+                    {row.cost && row.time && ' · '}
+                    {row.time}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        {!rows.some((r) => r.time) && <p>Step times are only available for runs since Iris started.</p>}
+        {props.cost?.partial && (
+          <p>
+            Costs marked ≥ leave out model calls Iris has no price for yet, so the real cost may
+            be higher.
+          </p>
+        )}
+        <p>
+          Live updates:{' '}
+          {props.stream === 'open' ? 'connected' : props.stream === 'connecting' ? 'waiting for Iris…' : 'reconnecting…'}
+        </p>
+      </details>
+    </div>
   )
 }

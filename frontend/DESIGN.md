@@ -494,11 +494,18 @@ below are given in px at the default text size (1rem = 16px).
   separates blocks; 48px opens a notes section.
 - **Breakpoints:**
   - ≤1120px (70em): the session becomes one column and the rail collapses into a summary bar above the
-    tabs, expandable in place.
-  - ≤860px (53.75em): the library drops its header, date and cost columns, status moves under the title; the
-    recording bar hides capture status; the session header stacks.
-  - ≤560px (35em): tighter top bar and page padding; top-bar button labels hide to icons.
-  - ≤400px (25em): the top bar's items close up (2px apart) so it fits a 360px phone.
+    tabs, expandable in place. Once the notes show in tabs there is no bar: a ghost "Details" button
+    at the end of the tabs row opens the same details just below the tabs, so it stays put.
+  - ≤860px (53.75em): library rows become two lines: the title, then status · source · date · cost
+    (the header and those columns hide), with the actions on the right, centred on the row. The
+    status keeps its width; the rest of the line ends with an ellipsis. The recording bar's capture
+    status shows as icons (words on hover and for screen readers; a warning keeps its colour). The
+    session header stacks, its status joins the line under the title, and its buttons keep a line
+    of their own.
+  - ≤560px (35em): tighter top bar, recording bar and page padding; top-bar, recording-bar (Stop
+    too) and library-row button labels hide to icons.
+  - ≤400px (25em): the top bar's items close up (2px apart) and its Library link hides (the wordmark
+    goes to the library); the recording bar and the tabs close up too, so each fits a 320px phone.
 
 ## Elevation & Depth
 
@@ -650,8 +657,9 @@ finished.
   notes" (red confirm) and the primary "Keep my edits".
 
 ### Renaming
-A session's name is edited in place, on the session page (click the title, or the pencil that
-shows on hover and to the keyboard) and in a library row (the pencil in its actions). The title
+A session's name is edited in place on the session page (click the title, or the pencil that
+shows on hover and to the keyboard). The library has no rename; a session is renamed from its
+own page. The title
 stays text in its own type and place, marked only by a 2px indigo underline, the one place Iris
 uses an underlined field instead of a boxed one (a title isn't a form field). The line under it
 says "Enter to save · Esc to cancel" in `text-2`, or why a save failed in `recording` red. Enter or
@@ -674,7 +682,8 @@ step indigo spinner and `text` at 500, failed step red), the "On this page" outl
 a "Cost" line (13px `text-2` label at 600, the value right-aligned in `text` at 500 with tabular
 numerals; laid out even while empty), and a collapsed Details disclosure holding each step's plain
 label with its cost and timing, and raw errors in mono. Under 1120px it
-becomes a one-line summary bar that expands in place.
+becomes a one-line summary bar that expands in place; once the notes show in tabs, a Details
+button at the end of the tabs row replaces the bar and opens the details just below the tabs.
 
 ### Progress View
 Shown in the reading column until the notes are finished (no notes before then): an 18px/600
@@ -717,7 +726,8 @@ Pins are buttons in a labelled group.
 ### Recording Bar and Recorder
 A fixed 56px bar over the top bar while recording: `recording-soft` with a red hairline and the
 Float shadow, a pulsing red dot and "Recording" with the tabular clock, capture status, and the Stop
-button on the right. Below it the recorder centres the 56px light clock and a 16:10 preview, and
+button on the right. Below it the recorder centres the 56px light clock and a 16:10 preview (as wide
+as the window allows up to 56rem, and never taller than about half the window), and
 under the preview one 14px `text-2` progress line in tabular numerals ("Transcribed to 4:30 · 3
 screens · 2 figures read"), not announced.
 
