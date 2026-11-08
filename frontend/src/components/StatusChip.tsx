@@ -14,7 +14,8 @@ export function StatusChip({ state }: { state: UiState }) {
       {state.kind === 'finished' && <Icon name="check" />}
       {state.kind === 'stopped' && <Icon name="stopped" />}
       {(state.kind === 'failed' || state.kind === 'stalled') && <Icon name="alert" />}
-      {state.label}
+      {/* Its own box so a long label can end with an ellipsis where space is short. */}
+      <span className="chip-label">{state.label}</span>
     </span>
   )
 }

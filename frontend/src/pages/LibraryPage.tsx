@@ -190,7 +190,22 @@ export function LibraryPage() {
                   <Link to={`/sessions/${s.id}`} className="title-link">
                     {shownTitle(s.title)}
                   </Link>
-                  <span className="sub">{SOURCE_LABEL[s.source] ?? s.source}</span>
+                  {/* In a narrow window the status, date and cost columns fold into this line
+                      (index.css); the copies here are hidden otherwise, so each is read once. */}
+                  <div className="row-sub">
+                    <span className="row-status">
+                      <StatusChip state={state} />
+                    </span>
+                    <span className="sub">
+                      <span>{SOURCE_LABEL[s.source] ?? s.source}</span>
+                      <span className="sub-fold num">{formatWhen(s.created_at)}</span>
+                      {cost && (
+                        <span className="sub-fold">
+                          <CostText cost={cost} />
+                        </span>
+                      )}
+                    </span>
+                  </div>
                 </div>
                 <div className="status-cell" role="cell">
                   <StatusChip state={state} />
@@ -207,21 +222,22 @@ export function LibraryPage() {
                       type="button"
                       className="btn btn-sm"
                       onClick={() => void exportPdf(s)}
+                      aria-label="Export PDF"
                       disabled={pdf.exporting !== null}
                       aria-busy={pdf.exporting === s.id}
                     >
-                      <Icon name="download" /> Export PDF
+                      <Icon name="download" /> <span className="btn-label">Export PDF</span>
                     </button>
                   )}
                   {state.kind === 'stopped' && (
-                    <button type="button" className="btn btn-sm" onClick={() => void makeNotes(s)}>
-                      <Icon name="file" /> Make notes
+                    <button type="button" className="btn btn-sm" onClick={() => void makeNotes(s)} aria-label="Make notes">
+                      <Icon name="file" /> <span className="btn-label">Make notes</span>
                     </button>
                   )}
                   {/* A problem with the recording itself isn't fixed by trying again. */}
                   {state.kind === 'failed' && failureView(s, emptyRun()).kind === 'general' && (
-                    <button type="button" className="btn btn-sm" onClick={() => void retry(s)}>
-                      <Icon name="retry" /> Try again
+                    <button type="button" className="btn btn-sm" onClick={() => void retry(s)} aria-label="Try again">
+                      <Icon name="retry" /> <span className="btn-label">Try again</span>
                     </button>
                   )}
                   {s.status !== 'processing' && s.status !== 'created' && (

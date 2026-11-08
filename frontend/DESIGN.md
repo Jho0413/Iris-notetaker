@@ -495,9 +495,12 @@ below are given in px at the default text size (1rem = 16px).
 - **Breakpoints:**
   - ≤1120px (70em): the session becomes one column and the rail collapses into a summary bar above the
     tabs, expandable in place.
-  - ≤860px (53.75em): the library drops its header, date and cost columns, status moves under the title; the
-    recording bar hides capture status; the session header stacks.
-  - ≤560px (35em): tighter top bar and page padding; top-bar button labels hide to icons.
+  - ≤860px (53.75em): library rows become two lines: the title, then status · source · date · cost
+    (the header and those columns hide), with the actions on the right, centred on the row. The
+    status keeps its width; the rest of the line ends with an ellipsis. The recording bar hides
+    capture status; the session header stacks.
+  - ≤560px (35em): tighter top bar and page padding; top-bar and library-row button labels hide to
+    icons.
   - ≤400px (25em): the top bar's items close up (2px apart) so it fits a 360px phone.
 
 ## Elevation & Depth
