@@ -1,4 +1,5 @@
-import { useRef, type KeyboardEvent, type ReactNode } from 'react'
+import { useEffect, useRef, type KeyboardEvent, type ReactNode } from 'react'
+import { revealDelta } from './reveal'
 
 export interface TabDef<T extends string> {
   id: T
@@ -18,6 +19,21 @@ export function Tabs<T extends string>(props: {
   end?: ReactNode
 }) {
   const refs = useRef<Record<string, HTMLButtonElement | null>>({})
+  const list = useRef<HTMLDivElement>(null)
+
+  // On a phone the tabs can scroll sideways in their row (index.css): keep the chosen one in
+  // view, however it was chosen. Only the row scrolls, never the page.
+  useEffect(() => {
+    const row = list.current
+    const tab = refs.current[props.active]
+    if (!row || !tab || row.scrollWidth <= row.clientWidth) return
+    // Inside the row's padding, which is the room for the focus ring at either end.
+    const box = row.getBoundingClientRect()
+    const pad = getComputedStyle(row)
+    const view = { left: box.left + parseFloat(pad.paddingLeft), right: box.right - parseFloat(pad.paddingRight) }
+    const item = tab.getBoundingClientRect()
+    row.scrollLeft += revealDelta({ left: item.left, right: item.right }, view)
+  }, [props.active])
 
   function onKeyDown(e: KeyboardEvent, index: number) {
     const n = props.tabs.length
@@ -36,7 +52,7 @@ export function Tabs<T extends string>(props: {
 
   return (
     <div className="tabs">
-      <div className="tab-list" role="tablist" aria-label={props.label}>
+      <div ref={list} className="tab-list" role="tablist" aria-label={props.label}>
         {props.tabs.map((t, i) => (
           <button
             key={t.id}

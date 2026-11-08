@@ -515,11 +515,9 @@ function SessionView({ id }: { id: string }) {
               />
               {/* Opened by Details beside the tabs: just below it, so the button stays where it was
                   pressed (index.css shows this below 1120px only; the rail shows it above). */}
-              {detailsOpen && (
-                <div className="tabs-details-panel" id="session-details">
-                  <RunDetails {...runDetails} />
-                </div>
-              )}
+              <div className="tabs-details-panel" id="session-details" hidden={!detailsOpen}>
+                <RunDetails {...runDetails} />
+              </div>
 
               <TabPanel id="notes" idPrefix="session" active={tab === 'notes'}>
                 {notes ? (

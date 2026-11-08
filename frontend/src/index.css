@@ -782,7 +782,7 @@ body.is-dragging, body.is-dragging * { cursor: grabbing !important; user-select:
   /* With tabs, the details open under them instead, so the rail (and its grid gap) goes. */
   .rail-tabbed { display: none; }
   .tabs-details { display: inline-flex; }
-  .tabs-details-panel { display: block; margin-bottom: 24px; padding: 16px; border: 1px solid var(--border);
+  .tabs-details-panel:not([hidden]) { display: block; margin-bottom: 24px; padding: 16px; border: 1px solid var(--border);
     border-radius: var(--radius-m); background: var(--surface-2); }
 }
 @media (max-width: 53.75em) { /* 860px */
@@ -830,8 +830,9 @@ body.is-dragging, body.is-dragging * { cursor: grabbing !important; user-select:
   .edit-strip .hint { display: none; }
   .edit-status { margin-right: auto; }
   /* Tabs that don't fit (long counts) scroll sideways in their row; Details stays in view. The
-     padding keeps the active tab's underline, which sits on the row's border, unclipped. */
-  .tab-list { min-width: 0; overflow-x: auto; scrollbar-width: none; padding-bottom: 1px; margin-bottom: -1px; }
+     row's padding, taken back by its margins, keeps what is drawn outside a tab unclipped: the
+     focus ring (2px, 2px out) and the active tab's underline on the row's border. */
+  .tab-list { min-width: 0; overflow-x: auto; scrollbar-width: none; padding: 4px 4px 5px; margin: -4px -4px -5px; }
   .tabs-details { flex: none; }
   /* The toolbar fits a phone: the colour shows as its dot only. */
   .tb-btn { padding: 0 6px; }
