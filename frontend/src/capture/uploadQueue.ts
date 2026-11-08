@@ -1,14 +1,12 @@
-// Upload queue for live capture: audio chunks, frames and screen changes are posted with bounded
-// concurrency, and failed posts are retried with backoff until they succeed or are rejected, so a
-// dropped request or a backend restart doesn't lose content. They can land in any order. The
-// backend stores each by its key (audio seq, frame time, screen change time), so a retry of a post
-// that actually landed is harmless.
+// Upload queue for live capture: audio chunks and frames are posted with bounded concurrency, and
+// failed posts are retried with backoff until they succeed or are rejected, so a dropped request or
+// a backend restart doesn't lose content. They can land in any order. The backend stores each by
+// its key (audio seq, frame time and share), so a retry of a post that actually landed is harmless.
 
-export type UploadKind = 'audio' | 'frame' | 'screen'
+export type UploadKind = 'audio' | 'frame'
 
-/** Posts one item (`body` undefined: the path says it all); resolves with the HTTP status,
- * rejects on a network error. */
-export type Send = (path: string, body: Blob | undefined) => Promise<number>
+/** Posts one item; resolves with the HTTP status, rejects on a network error. */
+export type Send = (path: string, body: Blob) => Promise<number>
 
 export interface RejectedUpload {
   kind: UploadKind
@@ -27,7 +25,7 @@ export interface UploadQueueOptions {
 interface Item {
   kind: UploadKind
   path: string
-  body?: Blob
+  body: Blob
   attempts: number
 }
 
@@ -68,7 +66,7 @@ export class UploadQueue {
     return this.retrying > 0 || this.waiting.some((i) => i.attempts > 0)
   }
 
-  add(kind: UploadKind, path: string, body?: Blob): void {
+  add(kind: UploadKind, path: string, body: Blob): void {
     if (this.closed) return
     this.waiting.push({ kind, path, body, attempts: 0 })
     if (kind === 'frame') this.dropOldFrames()
@@ -137,8 +135,7 @@ export class UploadQueue {
     this.listeners.forEach((listener) => listener())
   }
 
-  /** Bound memory while the backend is unreachable. Audio and screen changes are never dropped:
-   * a lost screen-off would leave what was shown on screen across the gap. */
+  /** Bound memory while the backend is unreachable. Audio is never dropped: it is one stream. */
   private dropOldFrames(): void {
     let frames = this.waiting.filter((i) => i.kind === 'frame').length
     while (frames > this.maxQueuedFrames) {

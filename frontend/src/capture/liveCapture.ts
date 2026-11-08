@@ -1,8 +1,9 @@
 // Browser live capture: the mic and, in the desktop app, the Mac's sound, plus a screen share that
 // can be turned on and off at any time (in a browser, with its tab's sound if shared). The audio
 // sources are mixed into one track, which goes up as MediaRecorder chunks every few seconds; screen
-// frames as JPEGs at a low fixed rate while the screen is on, timed on the audio's clock, and when
-// it was turned on and off. Change detection happens in the backend, not here
+// frames as JPEGs at a low fixed rate while the screen is on, timed on the audio's clock and
+// numbered by the share they belong to, so the backend finds where each share starts and ends from
+// the frames alone. Change detection happens in the backend, not here
 // (docs/architecture/live.md). Uploads are retried until they land (uploadQueue.ts), and
 // ending the session waits for all of them, so a dropped request doesn't lose content.
 
@@ -161,6 +162,11 @@ export class LiveCapture {
   private stopFrames?: () => void
   /** The screen was on when the recording was stopped (`pause`): `resume` turns it on again. */
   private screenAtPause = false
+  /**
+   * Shares so far: each frame carries its share's number, so the backend finds the shares from the
+   * frames alone.
+   */
+  private shares = 0
   private sharing?: Promise<MediaStream | null>
   private startedAt = 0
   /** Time spent stopped (`pause`), which the recording's clock leaves out. */
@@ -298,7 +304,6 @@ export class LiveCapture {
     this.throwIfCancelled()
     // The audio's time 0: WebM timestamps start at the first recorded sample.
     this.startedAt = performance.now()
-    // On from 0 s: `POST /live` says so (`screen`), so no change is posted.
     if (got.screen) this.captureScreen(got.screen)
     // Nothing below can fail, so a start that threw never looks like a recording.
     this.env.page.addEventListener('beforeunload', this.onBeforeUnload)
@@ -318,7 +323,6 @@ export class LiveCapture {
     this.paused = true
     this.pausedAt = performance.now()
     this.screenAtPause = Boolean(this.display)
-    if (this.display) this.postScreen(false) // at the time it stopped
     if (this.recorder?.state === 'recording') {
       // Send what the recorder holds now: if the page goes away while stopped, it is uploaded.
       this.recorder.requestData()
@@ -353,10 +357,7 @@ export class LiveCapture {
         this.mixIn()
         if (this.recorder?.state === 'paused') this.recorder.resume()
         this.paused = false
-        if (got.screen) {
-          this.captureScreen(got.screen)
-          this.postScreen(true) // at the time it was turned off: the stopped time is left out
-        }
+        if (got.screen) this.captureScreen(got.screen) // a new share: what follows Stop is new
         return this.started(got)
       } catch (err) {
         this.releaseSources()
@@ -371,7 +372,7 @@ export class LiveCapture {
 
   /**
    * Turn the screen on during a recording: the picker opens (in a browser, its dialog), and the
-   * share's frames are sent from now on, with the time it was turned on. In a browser the share's
+   * share's frames are sent from now on, as a new share. In a browser the share's
    * tab sound is mixed in; in the app the picture alone is asked for, since the Mac's sound is
    * recorded throughout. Throws a `CaptureError` if nothing is shared (the picker cancelled,
    * sharing blocked); the recording carries on. Resolves to null if the recording was stopped
@@ -406,7 +407,6 @@ export class LiveCapture {
         this.listenForScreenEnd(display)
         this.mixIn()
         this.captureScreen(display)
-        this.postScreen(true)
         return display
       } finally {
         this.sharing = undefined
@@ -418,7 +418,6 @@ export class LiveCapture {
   /** Turn the screen off during a recording: the share is released and the audio carries on. */
   stopScreen(): void {
     if (!this.display || !this.recording || this.paused || this.stopping) return
-    this.postScreen(false)
     this.releaseDisplay()
   }
 
@@ -500,29 +499,25 @@ export class LiveCapture {
     }
   }
 
-  /** Send the shared screen's frames, timed on the recording's clock (stopped time left out). */
+  /**
+   * Send the shared screen's frames as a new share, timed on the recording's clock (stopped time
+   * left out).
+   */
   private captureScreen(display: MediaStream) {
     const track = display.getVideoTracks()[0]
     if (!track) return
     this.display = display
+    const share = ++this.shares
     this.stopFrames = this.env.captureFrames(track, (jpeg, at) => {
       // A frame still being grabbed when its share was turned off is dropped: none come after.
       if (!this.recording || this.paused || this.display !== display) return
-      this.queue.add('frame', `frame?t=${this.recordedSeconds(at).toFixed(3)}`, jpeg)
+      this.queue.add('frame', `frame?t=${this.recordedSeconds(at).toFixed(3)}&share=${share}`, jpeg)
     })
   }
 
   /** Seconds recorded at `at` (a `performance.now()` time): the session's clock. */
   private recordedSeconds(at: number): number {
     return (at - this.startedAt - this.pausedMs) / 1000
-  }
-
-  /** Tell the backend the screen was turned on or off now, so the notes place what was shown. */
-  private postScreen(on: boolean) {
-    const t = this.recordedSeconds(this.paused ? this.pausedAt : performance.now())
-    // No body: the desktop app's request forwarding can't read an empty one ("Could not get
-    // blob data", Electron 45), and the change is all in the query.
-    this.queue.add('screen', `screen?t=${Math.max(0, t).toFixed(3)}&on=${on}`)
   }
 
   /**
@@ -533,7 +528,6 @@ export class LiveCapture {
     display.getVideoTracks()[0]?.addEventListener('ended', () => {
       if (this.opening && !this.recording) return this.cancel(START_FAILED['screen-share-ended'])
       if (this.display !== display || this.paused || this.stopping) return
-      this.postScreen(false)
       this.releaseDisplay()
       this.options.onScreenEnded?.()
     })

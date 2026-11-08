@@ -74,7 +74,7 @@ test('concurrency is bounded', async () => {
   assert.equal(most, 2)
 })
 
-test('while uploads fail, the oldest frames are dropped but audio and screen changes never are', async () => {
+test('while uploads fail, the oldest frames are dropped but audio never is', async () => {
   let up = false
   const sent: string[] = []
   const queue = new UploadQueue(async (path) => {
@@ -83,16 +83,13 @@ test('while uploads fail, the oldest frames are dropped but audio and screen cha
     return 204
   }, { ...fast, concurrency: 1, maxQueuedFrames: 2 })
   queue.add('audio', 'audio?seq=0', blob)
-  queue.add('screen', 'screen?t=0&on=true')
   for (let i = 0; i < 5; i++) queue.add('frame', `frame?t=${i}`, blob)
-  queue.add('screen', 'screen?t=5&on=false')
   queue.add('audio', 'audio?seq=1', blob)
   up = true
   assert.equal(await queue.drain(1000), 0)
   assert.equal(queue.droppedFrames, 3)
   assert.deepEqual(sent.filter((p) => p.startsWith('audio')).sort(), ['audio?seq=0', 'audio?seq=1'])
   assert.deepEqual(sent.filter((p) => p.startsWith('frame')).sort(), ['frame?t=3', 'frame?t=4'])
-  assert.deepEqual(sent.filter((p) => p.startsWith('screen')).sort(), ['screen?t=0&on=true', 'screen?t=5&on=false'])
 })
 
 test('retryable statuses', () => {
