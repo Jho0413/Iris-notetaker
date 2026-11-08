@@ -70,14 +70,16 @@ whole request body ahead of the socket. Server-sent events stream event by event
 `EventSource` closes the backend connection, so the backend sees the client go away.
 **An empty request body can't be forwarded:** reading the body of a request sent with an empty
 `Blob` fails in the handler ("Could not get blob data", Electron 45), so the request never reaches
-the backend, and the page retries it as a network error. The Live page's screen changes carry
-everything in the query and are sent with no body.
+the backend, and the page retries it as a network error. Every live upload has a body, so this
+doesn't arise there.
 
 ## How `app://` pages differ from the browser
 
 - **`navigator.sendBeacon` throws** ("Beacons are only supported over HTTP(S)"). The live page
   ends a session on `pagehide` with a beacon, so it falls back to a `keepalive` fetch, which works
-  on `app://` (`sendBeaconOrKeepalive` in `frontend/src/capture/liveCapture.ts`).
+  on `app://` (`sendBeaconOrKeepalive` in `frontend/src/capture/liveCapture.ts`). Its JSON `Blob`
+  body reaches the backend through the forwarding intact, both when the page navigates away and
+  when its window closes (checked with a test app on Electron 45 and `src/forward.cjs`).
 - **XHR upload progress never fires** through a custom protocol, so the upload page shows
   "Uploading…" until the response. Locally, 500 MB takes about a second.
 - **Electron cancels a `beforeunload` close silently**, without a dialog. Two pages ask before

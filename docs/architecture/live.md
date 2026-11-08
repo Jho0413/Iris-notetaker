@@ -24,7 +24,9 @@ twice, and turning the screen on or off leaves no gap in it). In a browser a sha
 mixed in while it is shared.
 
 Audio is uploaded in 5-second chunks and, while the screen is on, about one frame per second, on
-the same clock, with the time the screen was turned on or off (`POST /live/{id}/screen`). The
+the same clock. Each frame carries the number of the share it belongs to (`share`: 1 for the
+first, one more for each Share screen and each Continue), so the engine finds where each share
+starts and ends from the frames alone: nothing else is sent, so nothing else can be lost. The
 audio sources are always mixed into the one track that is recorded, even when the microphone is
 the only one, so the recording stays one stream as sources join and leave.
 Failed uploads are retried, and making notes waits until everything has arrived before the
@@ -36,8 +38,8 @@ session is finished.
 - **Continue recording:** capture again in the same recording. While stopped, the microphone, the
   Mac's sound and any shared screen are released (macOS's indicators go off), so continuing asks
   for them again: if the screen was on at Stop, the picker opens again (cancelling it carries on
-  with the screen off). Stop turns the screen off and Continue on again at the same recorded
-  time, so the notes treat the share after Continue as a new one. The
+  with the screen off). The share after Continue is a new one (its frames carry the next share
+  number), even at the same recorded time, so the notes treat it as new. The
   recorder is paused, not ended, so the audio stays one WebM stream, and its timestamps leave the
   stopped time out (measured in Electron 45); frames are timed the same way. The session's clock
   is the recorded time, so the engine needs nothing for it.
@@ -132,15 +134,12 @@ Live + Session pages ◀──── SSE events (progress only; the notes once d
 
 ### Capture and store
 
-`POST /live` says whether the screen is shared from the start (`screen`, false for Record audio):
-if it is, the screen is stored as turned on at 0 s before the lanes start. The browser posts 5 s
-WebM chunks (`seq` 0, 1, 2, ...), ~1 fps JPEG frames while the screen is on, and each time the
-screen is turned on or off (`POST /live/{id}/screen?t=&on=`, stored as an empty file
-`live/screen/<t_ms>.on` or `.off`); `t` is seconds since start, the audio's clock. Each is stored
-atomically under `live/`, keyed by `seq` or `t` so a retry is a no-op, and never modified; the
-route then wakes the lane that consumes it and returns without waiting for any processing. Uploads
-are retried in parallel, so they can land in any order: a screen change can arrive after frames
-that came later.
+The browser posts 5 s WebM chunks (`seq` 0, 1, 2, ...) and, while the screen is on, ~1 fps JPEG
+frames (`POST /live/{id}/frame?t=&share=`, stored as `live/frames/<t_ms>-<share>.jpg`); `t` is
+seconds since start, the audio's clock. Each is stored atomically under `live/`, keyed by `seq`,
+or by `t` and `share`, so a retry is a no-op, and never modified; the route then wakes the lane
+that consumes it and returns without waiting for any processing. Uploads are retried in parallel,
+so they can land in any order.
 
 ### Lanes
 
@@ -152,9 +151,9 @@ which holds what each lane has finished and up to when:
 | Watermark | Meaning | Advanced by |
 |---|---|---|
 | `transcribed_to` (T_a) | the transcript is complete up to here | audio lane |
-| `closed_to` (T_m) | every moment that ends by here is closed | screen lane; while the screen is off no moment can open, so it follows T_a up to the next frame or screen-on |
+| `closed_to` (T_m) | every moment that ends by here is closed | screen lane; until the first frame no moment can open, so it follows T_a up to there |
 | `selected_to` (T_s) | every closed moment that ends by here has been read | select lane; once every closed moment is read, it follows T_m |
-| `horizon` | `min(T_a, T_s)`: evidence before it is final (select publishes in time order: nothing it reads later starts before T_s). While the screen is off it is T_a: sections are written from the speech as it is transcribed | (derived) |
+| `horizon` | `min(T_a, T_s)`: evidence before it is final (select publishes in time order: nothing it reads later starts before T_s). Until a screen is shared it is T_a: sections are written from the speech as it is transcribed | (derived) |
 
 Lanes wait on watermarks (an `asyncio.Condition`), never poll. A lane that has finished (after
 stop) or failed counts as "through" any time, so nothing downstream waits forever.
@@ -162,7 +161,7 @@ stop) or failed counts as "through" any time, so nothing downstream waits foreve
 | Lane | Input | Does | Publishes |
 |---|---|---|---|
 | **Audio** | `live/audio/*.webm` | Decodes the contiguous run of chunks into one PCM stream (`live/audio.pcm`, placed by timestamp exactly as ingest does). Cuts windows in the decoded audio (so never at a chunk edge) at the quietest point 5–15 s after the last cut, deciding each cut only once that whole range plus a second is decoded, so cuts depend on the audio alone and a restarted lane reuses its cached windows (`live/transcript_windows/`). Transcribes at most `IRIS_LIVE_TRANSCRIBE_CONCURRENCY` windows at once, each prompted (whisper-1) with the tail of the text committed when it is sent: normally the previous window. Every window is sent the spoken language (the Settings page or `IRIS_TRANSCRIBE_LANGUAGE`, default `en`, fixed when the session starts), so a misdetected first window can't pass its language on through the prompt; a cached window is reused only if it was sent the same language. Commits windows in order; a window still failing after its temporary-error retries (or on any other error) fails the lane | transcript segments, T_a, `TRANSCRIPT_CHUNK` |
-| **Screen** | `live/frames/*.jpg`, `live/screen/` | Holds frames and screen-offs back `IRIS_LIVE_FRAME_HOLDBACK_S` (session time: the latest frame or screen change, or T_a while no frames come) to order them, samples frames onto the `frame_fps` grid and normalises them with ingest's own helpers (size fixed by each share's first readable frame), writing `frames/` with ingest's names and bytes, and feeds `MomentDetector` the frames read back from `frames/`, as detect reads them. At a screen-off the open moment ends there (`screen_off`) and the detector starts afresh. While the screen is off (an audio-only recording throughout) T_m follows T_a | closed moments, T_m, `MOMENT_FOUND` |
+| **Screen** | `live/frames/*.jpg` | Holds frames back `IRIS_LIVE_FRAME_HOLDBACK_S` (session time: the latest frame, or T_a while no frames come) to order them, samples them onto the `frame_fps` grid and normalises them with ingest's own helpers (size fixed by each share's first readable frame), writing `frames/` with ingest's names and bytes, and feeds `MomentDetector` the frames read back from `frames/`, as detect reads them. Where the share number changes, the open moment ends where its share did (`end_share`) and the detector starts afresh. Until the first frame (an audio-only recording throughout) T_m follows T_a | closed moments, T_m, `MOMENT_FOUND` |
 | **Select** | closed moments + transcript | Gates each moment until T_a ≥ its end + `IRIS_LIVE_SPEECH_PAD_S`, aligns it, and reads it with the select stage's batch step and one call in flight (moments that pass the gate meanwhile go together in the next batch, up to `selection_batch_size`; visual ids continue across batches). Renders each figure in the background (`IRIS_LIVE_RENDER_CONCURRENCY`) by the render stage's rules: an API error gives the source crop, uncached, so the render stage tries it again at stop | contents, visuals, T_s, `VISUAL_SELECTED`, `VISUAL_RENDERED` |
 | **Draft** | timeline | Writes notes sections ahead of stop; no draft is made or shown. Packs the evidence before the horizon into sections like write does. A section that closes before the horizon is *frozen*: written once, with the payload and cache key write computes for it at stop (`notes_sections/`). Nothing past the horizon is written live: the sections still open are write's at stop. A payload whose call fails (after its temporary-error retries) is retried after a minute; one that fails twice, or once with a blocking error, is given up until it changes, and the write stage retries it at stop | `notes_sections/`, `NOTES_UPDATED` (`completed_parts`: sections written, for the Live page's progress line) |
 
@@ -178,16 +177,22 @@ Inputs arrive in pieces, so each lane has a rule for putting them back together:
   retry), then decoding resumes at the next WebM cluster and the gap is silence, as in ingest.
   Frames are ordered by holding them back briefly; a frame later than that is skipped live, and
   recorded as skipped input only if ingest would have sampled it (its grid cell has no earlier
-  frame). A screen-off timed at or before a frame already fed, a frame from before a
-  screen-off already applied (it belongs to the share that ended there), or a frame from before
-  T_m (its share's screen-on landed after the transcript passed it) is skipped input too: stop
-  then runs detect again from everything captured.
-- *The screen turned off and on:* ingest writes the off times to `frames.json` (`screen_off`) and
-  sizes each share from its own first frame, so a small window shared first doesn't shrink the
-  entire screen shared later. Detect ends the open moment at each off time and compares a share's
-  frames only with each other, so what was shown is placed only while it was shared: speech
-  while nothing is shared isn't aligned with the last screen, and sections can break there. The
-  live screen lane applies the same rules, so its moments are promoted at stop.
+  frame). A frame from before T_m (it arrived after the transcript passed it while nothing was
+  shared yet) is skipped input too: stop then runs detect again from everything captured.
+- *The screen turned off and on:* a share is a run of frames with the same share number. Ingest
+  writes where each share after the first starts to `frames.json` (`share_starts`) and sizes each
+  share from its own first frame, so a small window shared first doesn't shrink the entire screen
+  shared later. Detect ends a share one grid step after its last frame, or where the next share
+  starts if sooner, and compares a share's frames only with each other, so what was shown is
+  placed only while it was shared: speech while nothing is shared isn't aligned with the last
+  screen, and sections can break there. The live screen lane applies the same rules, so its
+  moments are promoted at stop. Live, nothing tells sharing stopping apart from frames still on
+  their way, so a share's last moment closes only when the next share's frames come or at stop:
+  until then nothing after its start is final, and the notes for speech after sharing stops are
+  written at stop. That is the price of not guessing; a wrong guess would cost a re-run at stop.
+  Within a share, a minimised window in the desktop app still sends frames, all black: a black
+  screen shorter than the settling time is ignored like any brief flash, and a longer one is read
+  like any other screen (select drops a blank one).
 - *Content built up over time:* `MomentDetector` keeps a slide build or a worked example as one
   moment with ordered builds, and closes it only when the next screen has settled and lasted
   `min_moment_s`, so a brief switch to another window never splits it. Open moments are not read.
@@ -243,7 +248,7 @@ recording: nothing it makes can be promoted.
 recorded file into a running backend's live API as the browser would: audio re-encoded with PyAV
 to one WebM/Opus stream posted as ~5 s byte ranges with `seq`, screen frames as JPEG once a second
 with `t`, paced in real time (or X times faster), then `POST /end`. A file with no video is
-replayed as Record audio (`screen: false`). It reports when the first
+replayed as Record audio (no frames). It reports when the first
 transcript, moment, figure and notes section events arrived, the number of notes sections written
 before stop, what was promoted, the time from stop to `done` and the cost (total and after stop)
 from `/usage`. It makes paid calls through the backend, so point the backend at a scratch data

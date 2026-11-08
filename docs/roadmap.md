@@ -41,6 +41,10 @@ Two tracks that can run side by side.
       minutes for a 1-hour upload).
 - [ ] Fix what the measurements show, e.g. a cap on redrawn figures per hour or a cheaper
       figure-check model.
+- [ ] Measure the time from stop to notes when sharing stops long before Stop: a share's last
+      moment closes only at the next share or at stop, so the notes after it are written at stop
+      (docs/architecture/live.md, "Joining what was split"). If it is too slow, close a share
+      live after a while without frames, re-running detect at stop when the guess was wrong.
 
 ### Desktop app
 
