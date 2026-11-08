@@ -845,6 +845,9 @@ function buildMenu() {
         { role: 'quit' },
       ],
     },
+    // On macOS, Close Window (Cmd-W) is in the File menu only; the Window menu has none. It
+    // closes as the window's close button does (a recording hides the window instead).
+    { role: 'fileMenu' },
     { role: 'editMenu' },
     {
       label: 'View',
