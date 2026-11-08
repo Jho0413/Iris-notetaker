@@ -7,9 +7,10 @@
   each, with ``seq`` from 0. Only the first carries the header, as with MediaRecorder timeslices.
 - **Screen frames** are sampled about once a second (at each second, the latest video frame shown
   by then, as the browser's frame ticker captures it), scaled to at most ``FRAME_MAX_WIDTH`` wide
-  like the browser does, and posted as JPEG with ``t`` (seconds since start, the audio's clock).
-- A file with **no video** is replayed as an audio-only recording (``screen: false``), as the
-  Live page's "Record audio" starts one.
+  like the browser does, and posted as JPEG with ``t`` (seconds since start, the audio's clock)
+  and ``share=1``: the file is one screen share from start to end.
+- A file with **no video** is replayed as an audio-only recording: no frames, as the Live page's
+  "Record audio" sends none until the screen is shared.
 - Everything is **paced in real time** (``speed`` > 1 plays faster: the session clock stays the
   file's), then ``POST /end`` is sent with the chunk count.
 
@@ -200,11 +201,6 @@ def file_frames(
             due += interval_s
 
 
-def has_video(path: Path) -> bool:
-    with av.open(str(path)) as container:
-        return bool(container.streams.video)
-
-
 # --- Replay -----------------------------------------------------------------------------------
 
 
@@ -275,8 +271,7 @@ async def replay(
     chunks = chunk_webm(webm)
     api = base_url.rstrip("/") + "/api"
     async with httpx.AsyncClient(timeout=60) as client:
-        screen = await asyncio.to_thread(has_video, file)
-        r = await client.post(f"{api}/live", json={"title": title or file.stem, "screen": screen})
+        r = await client.post(f"{api}/live", json={"title": title or file.stem})
         r.raise_for_status()
         sid = r.json()["id"]
         log(f"session {sid}: replaying {file.name} ({webm.duration_s:.1f} s) at {speed:g}x")
@@ -313,7 +308,7 @@ async def replay(
                 while (item := await loop.run_in_executor(pool, next, frames, None)) is not None:
                     t, jpeg = item
                     await until(t)
-                    await post(f"frame?t={t:.3f}", jpeg)
+                    await post(f"frame?t={t:.3f}&share=1", jpeg)
                     report.frames += 1
 
         done = asyncio.Event()

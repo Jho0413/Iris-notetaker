@@ -358,7 +358,7 @@ def test_an_audio_only_session_writes_its_notes_while_recording(app_client: Test
     """With no screen, the horizon follows the transcript: sections are written while recording
     (not all at stop), and stop still promotes everything."""
     client = app_client
-    sid = client.post("/api/live", json={"title": "call", "screen": False}).json()["id"]
+    sid = client.post("/api/live", json={"title": "call"}).json()["id"]
     timeline: LiveTimeline = client.app.state.runner.live.get(sid).timeline  # type: ignore[attr-defined]
     root = client.app.state.settings.sessions_dir / sid  # type: ignore[attr-defined]
     for seq, (_, data) in enumerate(recording):
@@ -393,42 +393,42 @@ def test_an_audio_only_session_writes_its_notes_while_recording(app_client: Test
 def test_a_screen_shared_for_part_of_a_recording_is_placed_only_there(
     app_client: TestClient, recording
 ):
-    """An audio recording whose screen is turned on at 30 s and off at 60 s: the screen shown is
-    one moment ending at 60 s (not at the end), notes are written past it while recording, and
-    stop still promotes everything."""
+    """An audio recording whose screen is shared from 30 s to 60 s, then again from 90 s: each
+    share is one moment ending one frame after its last, the first closes while recording once
+    the second share's frames come, the speech between them isn't aligned with either, and stop
+    still promotes everything."""
     client = app_client
-    sid = client.post("/api/live", json={"title": "call", "screen": False}).json()["id"]
+    sid = start(client)
     timeline: LiveTimeline = client.app.state.runner.live.get(sid).timeline  # type: ignore[attr-defined]
     root = client.app.state.settings.sessions_dir / sid  # type: ignore[attr-defined]
     queue = [(t, 1, "audio", seq, data) for seq, (t, data) in enumerate(recording)]
-    queue += [(30.0, 0, "on", 0, b""), (60.0, 0, "off", 0, b"")]
-    queue += [(float(s), 1, "frame", s, b"") for s in range(30, 60)]
-    for t, _, kind, key, data in sorted(queue, key=lambda item: item[:3]):
+    queue += [(float(s), 0, "frame", 1, b"") for s in range(30, 60)]
+    queue += [(float(s), 0, "frame", 2, b"") for s in range(90, SECONDS)]
+    for t, _, kind, key, data in sorted(queue, key=lambda item: item[:2]):
         if kind == "audio":
             assert post_audio(client, sid, key, data) == 204
-        elif kind == "frame":
-            assert post_frame(client, sid, t, screen_at(t)) == 204
         else:
-            on = "true" if kind == "on" else "false"
-            assert client.post(f"/api/live/{sid}/screen?t={t}&on={on}").status_code == 204
-    wait_until_caught_up(client, sid, {"transcript_chunk", "moment_found", "notes_updated"})
+            assert post_frame(client, sid, t, screen_at(t), share=key) == 204
+    wait_until_caught_up(client, sid, {"transcript_chunk", "moment_found", "visual_selected"})
 
     assert [(m.start, m.end) for m in timeline.moments] == [(30.0, 60.0)]
-    # Past the screen-off, the horizon follows the transcript again.
-    assert timeline.horizon == timeline.transcribed_to > 60.0 + 30
+    # The second share's moment is open until stop, so nothing after the first's end is final
+    # yet: the notes from 60 s on are written at stop.
+    assert timeline.horizon == 60.0
     r = client.post(f"/api/live/{sid}/end", json={"audio_chunks": len(recording)})
     assert r.status_code == 200
     session = wait_for_done(client, sid)
     assert session["status"] == "done", session.get("error")
     assert timeline.complete
-    assert read_model(root / "frames.json", FrameIndex).screen_off == [60.0]
+    assert read_model(root / "frames.json", FrameIndex).share_starts == [90.0]
     moments = read_model(root / "moments.json", Moments).moments
-    assert [(m.start, m.end) for m in moments] == [(30.0, 60.0)]
-    # Speech after the screen was turned off isn't taken as said about what was shown.
+    assert [(m.start, m.end) for m in moments] == [(30.0, 60.0), (90.0, 120.0)]
+    # Speech while nothing was shared isn't taken as said about what was shown.
     alignment = read_model(root / "alignment.json", Alignment)
-    assert all(s.start < 60.0 for item in alignment.items for s in item.transcript)
+    for item in alignment.items:
+        assert not any(s.start > 60.0 and s.end < 90.0 for s in item.transcript)
     notes = client.get(f"/api/sessions/{sid}/notes").json()
-    assert len(notes["visuals"]) == 1
+    assert len(notes["visuals"]) == 2
 
 
 def test_an_audio_failure_runs_the_full_plan(app_client: TestClient, recording, monkeypatch):

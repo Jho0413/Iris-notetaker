@@ -45,13 +45,15 @@ How it works (``MomentDetector``, incremental so live sessions can feed it frame
      build whose region is whatever newly came into view, with earlier build regions shifted to
      match. Static parts (toolbars) are ignored when matching. Content scrolled off screen counts
      as lost, so a long scroll still starts a new moment.
-  9. A live recording's screen can be turned off and on again (``FrameIndex.screen_off``). At an
-     off time the open moment ends (``screen_off``), so what was shown is not taken to be on
-     screen while nothing is shared, and the detector starts afresh: the next share may show
-     anything at any size, and is compared only with itself.
+  9. A live recording can share the screen several times (``FrameIndex.share_starts``). A share
+     ends one grid step after its last frame, or where the next share starts if sooner
+     (``share_end``): the open moment ends there (``end_share``), so what was shown is not taken
+     to be on screen while nothing is shared, and the detector starts afresh: the next share may
+     show anything at any size, and is compared only with itself.
 """
 
 import asyncio
+import math
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -228,10 +230,10 @@ class MomentDetector:
             return None
         return self._emit(current, max(end_t, current.last_t))
 
-    def screen_off(self, t: float) -> Moment | None:
-        """The screen was turned off at ``t`` (after every frame fed so far): close what is open
-        there, as ``finish`` does, and start afresh for the next share."""
-        moment = self.finish(t)
+    def end_share(self, end_t: float) -> Moment | None:
+        """The share ended at ``end_t`` (``share_end``): close what is open there, as ``finish``
+        does, and start afresh for the next share."""
+        moment = self.finish(end_t)
         self._new_share()
         return moment
 
@@ -480,6 +482,13 @@ def _sharpness(image: np.ndarray) -> float:
 # --- stage -------------------------------------------------------------------------------------
 
 
+def share_end(last_t: float, fps: float, next_start: float = math.inf) -> float:
+    """Where a share whose last frame is at ``last_t`` ends: one grid step later (the frame
+    stands for its grid cell), or where the next share starts, if sooner."""
+    step = 1.0 / fps if fps > 0 else 0.0
+    return min(last_t + step, next_start)
+
+
 def detect_moments(
     root: Path,
     index: FrameIndex,
@@ -489,7 +498,8 @@ def detect_moments(
     """Run the detector over a session's frames (blocking; call in a thread)."""
     detector = MomentDetector(params)
     moments: list[Moment] = []
-    offs = list(index.screen_off)
+    starts = iter(index.share_starts)
+    next_start = next(starts, None)
 
     def keep(m: Moment | None) -> None:
         if m is not None:
@@ -497,19 +507,17 @@ def detect_moments(
             if on_moment is not None:
                 on_moment(m)
 
-    for ref in index.frames:
-        # A frame at an off time is the next share's (as ingest splits them).
-        while offs and offs[0] <= ref.t:
-            keep(detector.screen_off(offs.pop(0)))
+    for i, ref in enumerate(index.frames):
+        if next_start is not None and ref.t >= next_start:
+            if i > 0:
+                keep(detector.end_share(share_end(index.frames[i - 1].t, index.fps, ref.t)))
+            next_start = next(starts, None)
         image = cv2.imread(str(root / ref.path), cv2.IMREAD_COLOR)
         if image is None:
             continue  # unreadable frame: skip rather than fail the session
         keep(detector.feed(ref.t, ref, image))
-    if offs:
-        keep(detector.screen_off(offs[0]))  # later offs have nothing open to close
-    elif index.frames:
-        step = 1.0 / index.fps if index.fps > 0 else 0.0
-        keep(detector.finish(index.frames[-1].t + step))
+    if index.frames:
+        keep(detector.finish(share_end(index.frames[-1].t, index.fps)))
     return moments
 
 

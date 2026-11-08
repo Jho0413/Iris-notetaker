@@ -3,11 +3,9 @@
 sessions/<id>/
     source.<ext>          uploaded recording (upload source only)
     live/audio/<n>.webm   live audio chunks, by sequence number (browser live source only)
-    live/frames/<t_ms>.jpg
-                          live screen frames as captured (browser live source only)
-    live/screen/<t_ms>.on, live/screen/<t_ms>.off
-                          when the shared screen was turned on or off, as empty files
-                          (browser live source only)
+    live/frames/<t_ms>-<share>.jpg
+                          live screen frames as captured, with the number of the screen share
+                          each belongs to (browser live source only)
     live/audio.pcm        live: the contiguous audio decoded so far, 16-bit mono at
                           audio_sample_rate (sample i is at i / rate seconds)
     live/transcript_windows/<i>_<start_ms>_<end_ms>.json
@@ -77,10 +75,6 @@ class SessionPaths:
     @property
     def live_frames_dir(self) -> Path:
         return self.root / "live" / "frames"
-
-    @property
-    def live_screen_dir(self) -> Path:
-        return self.root / "live" / "screen"
 
     # Live processing outputs (iris/live/). Each lane writes only its own; see the docstring above.
     @property

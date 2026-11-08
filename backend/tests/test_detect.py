@@ -353,10 +353,10 @@ async def test_single_frame_stage_writes_and_emits_fallback(ctx, events):
     assert events == [(EventType.MOMENT_FOUND, detect.moment_event(moments[0]))]
 
 
-# --- Screen off -------------------------------------------------------------------------------
+# --- Shares ------------------------------------------------------------------------------------
 
 
-def feed_share(det: MomentDetector, img: np.ndarray, start: int, seconds: int, seed: int = 0):
+def feed_share(det: MomentDetector, img: np.ndarray, start: float, seconds: int, seed: int = 0):
     """Feed ``img`` at 1 fps from ``start`` (with noise); return the moments closed."""
     deck = Deck(seed).hold(img, seconds)
     out = []
@@ -366,14 +366,14 @@ def feed_share(det: MomentDetector, img: np.ndarray, start: int, seconds: int, s
     return [m for m in out if m is not None]
 
 
-def test_a_screen_off_ends_the_moment_there_and_the_next_share_starts_afresh():
+def test_a_share_ending_ends_the_moment_there_and_the_next_share_starts_afresh():
     det = MomentDetector()
     assert feed_share(det, SLIDE_A, 0, 10) == []
-    first = det.screen_off(10.5)
-    assert first is not None and (first.id, first.start, first.end) == ("m001", 0.0, 10.5)
-    # The same slide shared again after the gap is a moment of its own: nothing spans the gap.
+    first = det.end_share(10.0)
+    assert first is not None and (first.id, first.start, first.end) == ("m001", 0.0, 10.0)
+    # The same slide shared again later is a moment of its own: nothing spans two shares.
     assert feed_share(det, SLIDE_A, 100, 10, seed=1) == []
-    again = det.screen_off(110.0)
+    again = det.end_share(110.0)
     assert again is not None and (again.id, again.start, again.end) == ("m002", 100.0, 110.0)
     # Another source, at another size: compared only with itself.
     small = cv2.resize(SLIDE_B, (SLIDE_B.shape[1] // 2, SLIDE_B.shape[0] // 2))
@@ -385,24 +385,53 @@ def test_a_screen_off_ends_the_moment_there_and_the_next_share_starts_afresh():
 def test_a_share_too_short_to_settle_still_gives_its_frame():
     det = MomentDetector()
     feed_share(det, SLIDE_A, 0, 10)
-    assert det.screen_off(10.0) is not None
+    assert det.end_share(10.0) is not None
     feed_share(det, SLIDE_B, 50, 1)  # one frame: never settles
-    brief = det.screen_off(51.0)
+    brief = det.end_share(51.0)
     assert brief is not None and (brief.id, brief.start, brief.end) == ("m002", 50.0, 51.0)
-    assert det.screen_off(60.0) is None  # nothing shared since: nothing to close
+    assert det.end_share(60.0) is None  # nothing shared since: nothing to close
     assert det.finish(70.0) is None
 
 
-def test_detect_moments_ends_moments_where_the_screen_was_turned_off(tmp_path):
-    (tmp_path / "frames").mkdir()
+def test_a_share_ends_a_grid_step_after_its_last_frame_or_where_the_next_starts():
+    assert detect.share_end(9.0, fps=1.0) == 10.0
+    assert detect.share_end(9.0, fps=1.0, next_start=40.0) == 10.0
+    assert detect.share_end(8.0, fps=0.5, next_start=9.0) == 9.0  # no overlap with the next
+    assert detect.share_end(9.0, fps=0.0) == 9.0
+
+
+def write_frames(root: Path, frames: list[tuple[float, np.ndarray]]) -> list[FrameRef]:
+    (root / "frames").mkdir(parents=True, exist_ok=True)
     refs = []
-    for t, img in [*((t, SLIDE_A) for t in range(10)), *((t, SLIDE_A) for t in range(40, 50))]:
-        ref = FrameRef(t=float(t), path=f"frames/{t * 1000:09d}.jpg")
-        cv2.imwrite(str(tmp_path / ref.path), img)
+    for t, img in frames:
+        ref = FrameRef(t=t, path=f"frames/{round(t * 1000):09d}.jpg")
+        cv2.imwrite(str(root / ref.path), img)
         refs.append(ref)
-    index = FrameIndex(fps=1.0, width=W, height=H, frames=refs, screen_off=[10.0, 50.0])
+    return refs
+
+
+def test_detect_moments_ends_moments_where_shares_end(tmp_path):
+    a = Deck(0).hold(SLIDE_A, 10).frames
+    again = Deck(1).hold(SLIDE_A, 10).frames
+    refs = write_frames(
+        tmp_path, [*zip(range(10), a, strict=True), *zip(range(40, 50), again, strict=True)]
+    )
+    index = FrameIndex(fps=1.0, width=W, height=H, frames=refs, share_starts=[40.0])
     spans = [(m.start, m.end) for m in detect.detect_moments(tmp_path, index)]
-    # The last share ends at its off time, not one frame after its last frame.
+    # Each share ends one grid step after its last frame: what was shown isn't taken to be on
+    # screen until the next share starts.
     assert spans == [(0.0, 10.0), (40.0, 50.0)]
-    without = index.model_copy(update={"screen_off": []})
-    assert [(m.start, m.end) for m in detect.detect_moments(tmp_path, without)] == [(0.0, 50.0)]
+    # The next share starts within a grid step of the last frame (Continue): it ends there.
+    tight = write_frames(
+        tmp_path / "tight",
+        [
+            *((t + 0.3, img) for t, img in enumerate(a)),
+            *((t + 10.1, img) for t, img in enumerate(again)),
+        ],
+    )
+    continued = FrameIndex(fps=1.0, width=W, height=H, frames=tight, share_starts=[10.1])
+    spans = [(m.start, m.end) for m in detect.detect_moments(tmp_path / "tight", continued)]
+    assert spans == [(0.3, 10.1), (10.1, 20.1)]
+    # One share: the same slide before and after 30 s without frames is one moment.
+    one_share = index.model_copy(update={"share_starts": []})
+    assert [(m.start, m.end) for m in detect.detect_moments(tmp_path, one_share)] == [(0.0, 50.0)]

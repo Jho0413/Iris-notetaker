@@ -108,15 +108,15 @@ class FrameRef(BaseModel):
 
 class FrameIndex(BaseModel):
     fps: float
-    # The first frames' size. A live recording's screen can be turned off and on again with
-    # another source, and each share keeps its own size (``screen_off``).
+    # The first frames' size. A live recording can share the screen several times, each share
+    # with its own source and size (``share_starts``).
     width: int
     height: int
     frames: list[FrameRef]
-    # Live recordings: when the shared screen was turned off (seconds, in time order). What was
-    # shown before is not on screen after, so a moment ends there, and frames after it are a new
-    # share, compared only with each other.
-    screen_off: list[float] = []
+    # Live recordings: where each share after the first starts (its first frame's ``t``, in time
+    # order). A moment ends where its share does, and each share's frames are compared only with
+    # each other. Uploads are one share.
+    share_starts: list[float] = []
 
 
 # --- Transcribe output -------------------------------------------------------------------------

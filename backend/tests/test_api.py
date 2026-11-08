@@ -49,7 +49,7 @@ def test_live_session_accepts_chunks(client: TestClient):
     sid = client.post("/api/live", json={"title": "standup"}).json()["id"]
     webm, jpeg = b"\x1a\x45\xdf\xa3webm", b"\xff\xd8\xffjpeg"  # right magic, junk content
     assert client.post(f"/api/live/{sid}/audio?seq=0", content=webm).status_code == 204
-    assert client.post(f"/api/live/{sid}/frame?t=1.5", content=jpeg).status_code == 204
+    assert client.post(f"/api/live/{sid}/frame?t=1.5&share=1", content=jpeg).status_code == 204
     assert client.post(f"/api/live/{sid}/end").status_code == 200
     wait_for_status(client, sid, {"done", "failed"})
     # No more input once recording has ended
