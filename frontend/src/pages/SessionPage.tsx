@@ -290,7 +290,6 @@ function SessionView({ id }: { id: string }) {
           {renaming ? (
             <TitleField
               title={session.title}
-              size="page"
               onSave={(name) => renameSession(session.id, name, setSession)}
               onDone={() => setRenaming(false)}
             />

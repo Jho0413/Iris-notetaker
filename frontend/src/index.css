@@ -703,16 +703,15 @@ body.is-dragging, body.is-dragging * { cursor: grabbing !important; user-select:
   transition: background var(--fast) var(--ease); }
 .session-head h1.title-text:hover { background: var(--surface-2); }
 .rename-btn { color: var(--text-2); opacity: 0; transition: opacity var(--fast) var(--ease); }
-.title-line:hover .rename-btn, .library-row:hover .rename-btn, .rename-btn:focus-visible { opacity: 1; }
+.title-line:hover .rename-btn, .rename-btn:focus-visible { opacity: 1; }
 @media (hover: none) { .rename-btn { opacity: 1; } }
-.title-field, .row-field { display: block; max-width: 100%; min-width: 10ch; field-sizing: content;
+.title-field { display: block; max-width: 100%; min-width: 10ch; field-sizing: content;
   color: var(--text); background: transparent; border: 0; border-bottom: 2px solid var(--accent);
   border-radius: 0; padding: 2px 6px; margin-left: -6px; }
-.title-field:focus-visible, .row-field:focus-visible { outline: none; } /* the underline is the focus cue */
+.title-field:focus-visible { outline: none; } /* the underline is the focus cue */
 .title-field { font: 600 1.5rem/1.2 var(--font); letter-spacing: -0.01em; }
-.row-field { font: 500 0.875rem/1.5 var(--font); position: relative; z-index: 1; padding: 0 6px; }
 .edit-meta { margin: 6px 0 0; min-height: 21px; color: var(--text-2); }
-.edit-meta.err, .library-row .sub.err { color: var(--recording); }
+.edit-meta.err { color: var(--recording); }
 
 /* ---- Settings ---------------------------------------------------------------------------------- */
 

@@ -5,14 +5,12 @@ import { ConfirmDialog } from '../components/ConfirmDialog'
 import { CostText } from '../components/CostText'
 import { Icon } from '../components/Icon'
 import { NoKeyBanner } from '../components/NoKeyBanner'
-import { TitleField } from '../components/TitleField'
 import { StatusChip } from '../components/StatusChip'
 import { sessionCost } from '../session/cost'
 import { formatWhen, shownTitle, SOURCE_LABEL } from '../session/format'
 import { PDF_FAILED, UNREACHABLE } from '../session/messages'
 import { act } from '../session/request'
 import { emptyRun, failureView, libraryState } from '../session/state'
-import { renameSession } from '../session/renameSession'
 import { usePdfExport } from '../session/usePdfExport'
 import { useTitle } from '../session/useTitle'
 import { useApiKeySet } from '../settings/useApiKeySet'
@@ -38,13 +36,6 @@ export function LibraryPage() {
   const [busy, setBusy] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
   const apiKey = useApiKeySet()
-  const [renamingId, setRenamingId] = useState<string | null>(null)
-  // A renamed row shows the engine's answer at once, without waiting for the list to reload.
-  const replaceSession = useCallback(
-    (updated: Session) =>
-      setLoad((l) => (l.kind === 'ready' ? { ...l, sessions: l.sessions.map((x) => (x.id === updated.id ? updated : x)) } : l)),
-    [],
-  )
 
   const pdf = usePdfExport()
   async function exportPdf(s: Session) {
@@ -196,22 +187,10 @@ export function LibraryPage() {
             return (
               <div className="library-row" role="row" key={s.id}>
                 <div className="title-cell" role="cell">
-                  {renamingId === s.id ? (
-                    <TitleField
-                      title={s.title}
-                      size="row"
-                      onSave={(name) => renameSession(s.id, name, replaceSession)}
-                      // Close only this row: another row's editor may have opened meanwhile.
-                      onDone={() => setRenamingId((current) => (current === s.id ? null : current))}
-                    />
-                  ) : (
-                    <>
-                      <Link to={`/sessions/${s.id}`} className="title-link">
-                        {shownTitle(s.title)}
-                      </Link>
-                      <span className="sub">{SOURCE_LABEL[s.source] ?? s.source}</span>
-                    </>
-                  )}
+                  <Link to={`/sessions/${s.id}`} className="title-link">
+                    {shownTitle(s.title)}
+                  </Link>
+                  <span className="sub">{SOURCE_LABEL[s.source] ?? s.source}</span>
                 </div>
                 <div className="status-cell" role="cell">
                   <StatusChip state={state} />
@@ -245,15 +224,6 @@ export function LibraryPage() {
                       <Icon name="retry" /> Try again
                     </button>
                   )}
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-sm btn-icon rename-btn"
-                    aria-label={`Rename ${s.title}`}
-                    title="Rename"
-                    onClick={() => setRenamingId(s.id)}
-                  >
-                    <Icon name="pencil" />
-                  </button>
                   {s.status !== 'processing' && s.status !== 'created' && (
                     <button
                       type="button"
