@@ -1,6 +1,6 @@
-import { useState } from 'react'
 import type { Stage } from '../api/client'
 import { detailRows, type Cost, type StepCost } from '../session/cost'
+import { detailsLabel } from '../session/messages'
 import type { StreamStatus } from '../session/useSessionStream'
 import { STAGE_ORDER, stepLine, stepStatus, type RunState } from '../session/state'
 import { CostText } from './CostText'
@@ -21,13 +21,18 @@ export function ProgressRail(props: {
   outline: OutlineItem[]
   stream: StreamStatus
   showProgress: boolean
+  /** Whether the details are open below 1120px; the page holds it, so a Details button beside
+   * the tabs (`detailsInTabs`) opens the same panel. */
+  expanded: boolean
+  onToggle: () => void
+  /** The tabs show their own Details button below 1120px, so the summary bar isn't needed. */
+  detailsInTabs: boolean
   /** The session's model cost so far; null shows nothing (no calls yet, or not loaded). */
   cost: Cost | null
   /** Cost per step that made model calls, in pipeline order. */
   stepCosts: StepCost[]
 }) {
-  const [expanded, setExpanded] = useState(false)
-  const { run } = props
+  const { run, expanded } = props
   const stored = { finished: props.finished, hasEvents: props.hasEvents, currentStage: props.currentStage }
 
   // Without the progress list (it is in the main column until the notes are finished), the
@@ -41,7 +46,10 @@ export function ProgressRail(props: {
   const rows = detailRows(run, props.stepCosts)
 
   return (
-    <aside className={`rail${expanded ? ' expanded' : ''}`} aria-label="Session progress and details">
+    <aside
+      className={`rail${expanded ? ' expanded' : ''}${props.detailsInTabs ? ' rail-tabbed' : ''}`}
+      aria-label="Session progress and details"
+    >
       <div className="rail-summary">
         <span>{summary}</span>
         <span className="spacer" />
@@ -50,9 +58,9 @@ export function ProgressRail(props: {
           className="btn btn-ghost btn-sm"
           aria-expanded={expanded}
           aria-controls="rail-full"
-          onClick={() => setExpanded((v) => !v)}
+          onClick={props.onToggle}
         >
-          {expanded ? 'Hide details' : 'Details'}
+          {detailsLabel(expanded)}
         </button>
       </div>
       <div className="rail-full" id="rail-full">

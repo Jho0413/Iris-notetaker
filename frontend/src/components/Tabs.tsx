@@ -13,6 +13,8 @@ export function Tabs<T extends string>(props: {
   onChange: (id: T) => void
   label: string
   idPrefix: string
+  /** Shown at the end of the row, outside the tablist (which may hold only tabs). */
+  end?: ReactNode
 }) {
   const refs = useRef<Record<string, HTMLButtonElement | null>>({})
 
@@ -32,8 +34,9 @@ export function Tabs<T extends string>(props: {
   }
 
   return (
-    <div className="tabs" role="tablist" aria-label={props.label}>
-      {props.tabs.map((t, i) => (
+    <div className="tabs">
+      <div className="tab-list" role="tablist" aria-label={props.label}>
+        {props.tabs.map((t, i) => (
         <button
           key={t.id}
           ref={(el) => {
@@ -52,7 +55,9 @@ export function Tabs<T extends string>(props: {
           {t.label}
           {t.count && <span className="count num">{t.count}</span>}
         </button>
-      ))}
+        ))}
+      </div>
+      {props.end}
     </div>
   )
 }

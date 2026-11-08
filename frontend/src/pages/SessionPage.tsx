@@ -14,7 +14,7 @@ import { TabPanel, Tabs } from '../components/Tabs'
 import { TitleField } from '../components/TitleField'
 import { TranscriptList } from '../components/TranscriptList'
 import { stepCosts, usageCost, usageRefreshKey } from '../session/cost'
-import { againLink, NOTES_EDIT, PDF_FAILED, UNREACHABLE } from '../session/messages'
+import { againLink, detailsLabel, NOTES_EDIT, PDF_FAILED, UNREACHABLE } from '../session/messages'
 import { fetchNotes, fetchTranscript } from '../session/load'
 import { usePdfExport } from '../session/usePdfExport'
 import { act } from '../session/request'
@@ -66,6 +66,7 @@ function SessionView({ id }: { id: string }) {
   const [busy, setBusy] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [renaming, setRenaming] = useState(false)
+  const [detailsOpen, setDetailsOpen] = useState(false) // below 1120px, where the rail folds away
   const [editing, setEditing] = useState(false)
   // Dropping the user's edits: "Restore generated notes", or "Use the new notes" after a re-run.
   const [confirmDrop, setConfirmDrop] = useState<'restore' | 'use-new' | null>(null)
@@ -274,6 +275,9 @@ function SessionView({ id }: { id: string }) {
   const fromLabel = ui.fromStage ? STAGE_LABELS[ui.fromStage] : 'the start'
   const failure = ui.kind === 'failed' ? failureView(session, run) : null
   const again = againLink(session.source)
+  // Once the notes are shown in tabs, Details sits beside them below 1120px instead of in a bar.
+  const tabsShown = !progress && !(editing && notes)
+  const toggleDetails = () => setDetailsOpen((open) => !open)
 
   return (
     <div className="session">
@@ -314,6 +318,11 @@ function SessionView({ id }: { id: string }) {
                 {sessionMetaLine(session, notes?.session_type, length).map((part, i) => (
                   <span key={i} className="num">{part}</span>
                 ))}
+                {/* Below 860px the status moves here from the actions (index.css), so the buttons
+                    keep a line of their own; only one of the two is ever shown. */}
+                <span className="meta-status">
+                  <StatusChip state={ui} />
+                </span>
                 {notes?.edited && !editing && (
                   <span className="edited-meta">
                     {NOTES_EDIT.edited} ·{' '}
@@ -361,7 +370,7 @@ function SessionView({ id }: { id: string }) {
           {!working && (
             <button
               type="button"
-              className="btn btn-ghost"
+              className="btn btn-ghost btn-icon"
               aria-label="Delete session"
               title="Delete session"
               onClick={() => setConfirmDelete(true)}
@@ -473,6 +482,17 @@ function SessionView({ id }: { id: string }) {
                 idPrefix="session"
                 active={tab}
                 onChange={setTab}
+                end={
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm tabs-details"
+                    aria-expanded={detailsOpen}
+                    aria-controls="rail-full"
+                    onClick={toggleDetails}
+                  >
+                    {detailsLabel(detailsOpen)}
+                  </button>
+                }
                 tabs={[
                   { id: 'notes', label: 'Notes' },
                   { id: 'transcript', label: 'Transcript', count: segments.length ? String(segments.length) : undefined },
@@ -537,6 +557,9 @@ function SessionView({ id }: { id: string }) {
           outline={notes ? outline : []}
           stream={stream.status}
           showProgress={finished && stream.eventCount > 0}
+          expanded={detailsOpen}
+          onToggle={toggleDetails}
+          detailsInTabs={tabsShown}
           cost={cost}
           stepCosts={costs}
         />

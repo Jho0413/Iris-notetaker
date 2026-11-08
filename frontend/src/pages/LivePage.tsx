@@ -15,7 +15,7 @@ import {
 } from '../capture/liveCapture'
 import { menuBar, type LiveLocationState } from '../capture/menuBar'
 import { ConfirmDialog } from '../components/ConfirmDialog'
-import { Icon } from '../components/Icon'
+import { Icon, type IconName } from '../components/Icon'
 import { UNREACHABLE } from '../session/messages'
 import { act } from '../session/request'
 import { formatClock, liveProgress } from '../session/state'
@@ -466,25 +466,17 @@ export function LivePage() {
           {phase === 'stopping' ? 'Finishing' : stopped ? 'Stopped' : 'Recording'}
           <span className="num" aria-hidden="true">{formatClock(elapsed)}</span>
         </span>
+        {/* In a narrower window each shows as its icon; the words stay for screen readers and
+            on hover (index.css). */}
         <span className="capture-status">
-          {display && !stopped && (
-            <span>
-              <Icon name="screen" /> Screen shared
-            </span>
-          )}
-          <span>
-            <Icon name="mic" /> Microphone {stopped ? 'off' : 'on'}
-          </span>
+          {display && !stopped && <CaptureItem icon="screen" words="Screen shared" />}
+          <CaptureItem icon="mic" words={`Microphone ${stopped ? 'off' : 'on'}`} />
           {desktopApp &&
             !stopped &&
             (macSound ? (
-              <span>
-                <Icon name="system" /> Mac's sound on
-              </span>
+              <CaptureItem icon="system" words="Mac's sound on" />
             ) : (
-              <span className="warn">
-                <Icon name="system" /> Mac's sound off
-              </span>
+              <CaptureItem icon="system" words="Mac's sound off" warn />
             ))}
         </span>
         <span className="spacer" />
@@ -507,13 +499,13 @@ export function LivePage() {
             </button>
           ))}
         {recording && (
-          <button type="button" className="btn btn-stop" onClick={pause}>
-            <Icon name="stop" /> Stop
+          <button type="button" className="btn btn-stop" onClick={pause} aria-label="Stop">
+            <Icon name="stop" /> <span className="btn-label">Stop</span>
           </button>
         )}
         {phase === 'stopping' && (
-          <button type="button" className="btn btn-stop" disabled>
-            Finishing the upload…
+          <button type="button" className="btn btn-stop" disabled aria-label="Finishing the upload…">
+            <Icon name="spinner" /> <span className="btn-label">Finishing the upload…</span>
           </button>
         )}
       </div>
@@ -624,5 +616,14 @@ export function LivePage() {
         onCancel={() => blocker.reset?.()}
       />
     </>
+  )
+}
+
+/** One thing being recorded (or not) in the recording bar: its icon, and its words. */
+function CaptureItem(props: { icon: IconName; words: string; warn?: boolean }) {
+  return (
+    <span className={props.warn ? 'warn' : undefined} title={props.words}>
+      <Icon name={props.icon} /> <span className="capture-words">{props.words}</span>
+    </span>
   )
 }
