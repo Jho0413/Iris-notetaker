@@ -84,6 +84,16 @@ export function LibraryPage() {
     refresh()
   }
 
+  /** A stopped recording: make its notes now (the row then shows them being made). */
+  async function makeNotes(s: Session) {
+    setActionError(null)
+    const result = await act(api.POST('/api/live/{session_id}/end', { params: { path: { session_id: s.id } } }))
+    if (!result.ok) {
+      setActionError(result.status === 0 ? UNREACHABLE : `Couldn't make notes for "${s.title}". It may already be processing.`)
+    }
+    refresh()
+  }
+
   async function confirmDelete() {
     if (!pendingDelete) return
     setBusy(true)
@@ -222,6 +232,11 @@ export function LibraryPage() {
                       aria-busy={pdf.exporting === s.id}
                     >
                       <Icon name="download" /> Export PDF
+                    </button>
+                  )}
+                  {state.kind === 'stopped' && (
+                    <button type="button" className="btn btn-sm" onClick={() => void makeNotes(s)}>
+                      <Icon name="file" /> Make notes
                     </button>
                   )}
                   {/* A problem with the recording itself isn't fixed by trying again. */}

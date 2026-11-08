@@ -536,7 +536,7 @@ status.
 Compact, quiet, and obvious about the one thing to do.
 - **Shape:** gently rounded (6px), 32px tall, 12px side padding, 500 weight, 6px icon gap, 16px icons.
 - **Primary:** indigo fill with `accent-text`. At most one per region; it is the screen's main action
-  (Export, Try again, Resume, Start recording).
+  (Export, Try again, Resume, Make notes, Start recording).
 - **Secondary (default):** `surface` fill with a `border-strong` outline and `text` label.
 - **Ghost:** no fill or border, `text-2` label; used for row actions and rail toggles.
 - **Stop / destructive:** solid recording red with `on-recording` text; the recording bar's Stop and the confirm button of
@@ -551,7 +551,8 @@ Compact, quiet, and obvious about the one thing to do.
 - **Status chip:** 24px pill, 13px/500, hairline border, always a word ("Finished", "Failed ·
   Transcribing") plus an icon or dot. Processing, polishing and starting use indigo with a spinning
   icon; finished green with a check; failed red with an alert icon; recording red with a
-  pulsing dot; stalled and orphaned states stay neutral. The amber `chip-warning` marks a missing
+  pulsing dot; stalled and orphaned states stay neutral, and so does stopped (a recording ended
+  without notes), with a dash icon. The amber `chip-warning` marks a missing
   setting (no API key).
 - **Figure badge:** smaller pill (12px/500) under a figure: Verified redraw (green), Screenshot
   (neutral), Original crop · not verified (amber).

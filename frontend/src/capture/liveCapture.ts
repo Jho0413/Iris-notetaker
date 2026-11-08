@@ -675,11 +675,19 @@ export class LiveCapture {
     ;(e as BeforeUnloadEvent).returnValue = ''
   }
 
-  /** The page is going away anyway: end with what has arrived, rather than leave it recording. */
+  /**
+   * The page is going away anyway (the tab closed, a reload, the app quitting), so nothing more
+   * will be captured. A recording capturing or stopped here is stopped without notes, so leaving
+   * never makes notes nobody asked for: the library offers Make notes or Delete. Once Make notes
+   * was chosen (`stop()`: its uploads still finishing, or its end request failed), it ends the
+   * session with what has arrived. Best effort: the desktop app also stops its recordings itself.
+   */
   private onPageHide = () => {
     if (this.finished) return
-    const body = new Blob([JSON.stringify({ allow_gaps: true })], { type: 'application/json' })
-    this.env.sendBeacon(`/api/live/${this.id}/end`, body)
+    // A body even for stop: the desktop app can't forward a request with an empty one.
+    const [action, request] = this.recording ? ['stop', {}] : ['end', { allow_gaps: true }]
+    const body = new Blob([JSON.stringify(request)], { type: 'application/json' })
+    this.env.sendBeacon(`/api/live/${this.id}/${action}`, body)
   }
 }
 

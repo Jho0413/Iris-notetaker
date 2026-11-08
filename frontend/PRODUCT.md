@@ -41,9 +41,10 @@ the original crop is shown and marked unverified.
 
 ## Capabilities and Constraints
 
-- Session states: created, recording, processing, done, failed. The pipeline stages are ingest,
-  transcribe, detect, align, select, write, render and assemble. These are internal names: the UI
-  speaks in plain language and keeps the stage names in an on-demand details view.
+- Session states: created, recording, stopped (a recording ended without notes: Make notes or
+  delete it), processing, done, failed. The pipeline stages are ingest, transcribe, detect, align,
+  select, write, render and assemble. These are internal names: the UI speaks in plain language and
+  keeps the stage names in an on-demand details view.
 - Progress arrives as server-sent events. Event history is kept in memory, so it is lost when the
   backend restarts.
 - Notes contain KaTeX math, boxes with the writer's own titles in ten colours, numbered steps and
