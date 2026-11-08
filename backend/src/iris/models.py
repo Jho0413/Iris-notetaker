@@ -22,6 +22,9 @@ class SourceKind(StrEnum):
 class SessionStatus(StrEnum):
     CREATED = "created"
     RECORDING = "recording"  # live capture in progress
+    # Live capture ended without notes (its page went away, or the app quit or crashed): nothing
+    # more is accepted, and notes are made only when asked (``POST /live/{id}/end``).
+    STOPPED = "stopped"
     PROCESSING = "processing"
     DONE = "done"
     FAILED = "failed"

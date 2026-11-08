@@ -21,6 +21,7 @@ from iris.config import Settings
 from iris.live.replay import encode_webm, file_frames
 from iris.llm.errors import UserFacingError
 from iris.llm.usage import append_record
+from iris.main import create_app
 from iris.models import (
     LIVE_WITHOUT_AUDIO,
     UNREADABLE_LIVE_AUDIO,
@@ -440,6 +441,109 @@ def test_end_with_allowed_gaps(client: TestClient, webm: bytes, settings: Settin
     assert r.status_code == 200
     assert r.json()["cost_usd"] == pytest.approx(0.01)
     wait_for_status(client, sid, {"done", "failed"})
+    audio = settings.sessions_dir / sid / "audio.wav"
+    assert len(read_wav(audio)) / 16_000 == pytest.approx(SECONDS, abs=0.1)
+
+
+def stop(client: TestClient, sid: str) -> int:
+    return client.post(f"/api/live/{sid}/stop").status_code
+
+
+def test_stop_keeps_the_recording_without_making_notes(client: TestClient, webm: bytes):
+    sid = start(client)
+    chunks = split(webm)
+    assert post_audio(client, sid, 0, chunks[0]) == 204
+    r = client.post(f"/api/live/{sid}/stop")
+    assert r.status_code == 200
+    assert r.json()["status"] == "stopped"
+    runner = client.app.state.runner  # type: ignore[attr-defined]
+    assert not runner.is_running(sid)  # no notes are made
+    # Nothing more is accepted: a chunk or frame still on its way after the page went away.
+    assert post_audio(client, sid, 1, chunks[1]) == 409
+    assert post_frame(client, sid, 1.0, jpeg(COLOURS[0])) == 409
+    assert client.get(f"/api/sessions/{sid}").json()["status"] == "stopped"
+
+
+def test_stopping_again_is_a_no_op(client: TestClient):
+    # The page's unload request and the desktop app's quit can both send it.
+    sid = start(client)
+    assert stop(client, sid) == 200
+    r = client.post(f"/api/live/{sid}/stop")
+    assert r.status_code == 200
+    assert r.json()["status"] == "stopped"
+
+
+def test_stop_is_announced_to_open_pages(client: TestClient):
+    sid = start(client)
+    stop(client, sid)
+    bus = client.app.state.bus  # type: ignore[attr-defined]
+    statuses = [e.data["status"] for e in bus.history(sid) if e.type == "status"]
+    assert statuses == ["stopped"]
+
+
+def test_make_notes_from_a_stopped_recording(client: TestClient, webm: bytes, settings: Settings):
+    sid = start(client)
+    chunks = split(webm)
+    for seq, chunk in enumerate(chunks):
+        post_audio(client, sid, seq, chunk)
+    stop(client, sid)
+    r = client.post(f"/api/live/{sid}/end", json={"allow_gaps": True})
+    assert r.status_code == 200
+    assert r.json()["status"] == "processing"
+    assert stop(client, sid) == 409  # making notes: too late to stop
+    wait_for_status(client, sid, {"done", "failed"})
+    audio = settings.sessions_dir / sid / "audio.wav"
+    assert len(read_wav(audio)) / 16_000 == pytest.approx(SECONDS, abs=0.1)
+
+
+def test_discard_a_stopped_recording(client: TestClient, settings: Settings):
+    sid = start(client)
+    stop(client, sid)
+    assert client.delete(f"/api/sessions/{sid}").status_code == 204
+    assert client.get(f"/api/sessions/{sid}").status_code == 404
+    assert not (settings.sessions_dir / sid).exists()
+    assert stop(client, sid) == 404
+
+
+def test_only_a_live_recording_can_be_stopped(client: TestClient):
+    assert stop(client, "nope") == 404
+    upload = client.post("/api/sessions", files={"file": ("talk.mp4", b"not really a video")})
+    sid = upload.json()["id"]
+    assert stop(client, sid) == 409  # an upload never records
+    wait_for_status(client, sid, {"failed"})
+    assert stop(client, sid) == 409
+    live = start(client)
+    client.post(f"/api/live/{live}/end")
+    assert stop(client, live) == 409  # making notes, then finished or failed
+    wait_for_status(client, live, {"done", "failed"})
+    assert stop(client, live) == 409
+
+
+def test_stop_keeps_live_processing_for_making_notes(client: TestClient):
+    # What arrived is still processed, so making notes later reuses that work.
+    sid = start(client)
+    live = client.app.state.runner.live  # type: ignore[attr-defined]
+    processor = live.get(sid)
+    assert processor is not None
+    stop(client, sid)
+    assert live.get(sid) is processor
+
+
+def test_make_notes_after_an_engine_restart(settings: Settings, webm: bytes):
+    # The desktop app stops a recording at quit; the next launch's engine has no live processor,
+    # and the recording waits, stopped, until notes are asked for.
+    with TestClient(create_app(settings)) as client:
+        sid = start(client)
+        for seq, chunk in enumerate(split(webm)):
+            post_audio(client, sid, seq, chunk)
+        stop(client, sid)
+    with TestClient(create_app(settings)) as client:
+        assert client.get(f"/api/sessions/{sid}").json()["status"] == "stopped"
+        assert client.app.state.runner.live.get(sid) is None  # type: ignore[attr-defined]
+        r = client.post(f"/api/live/{sid}/end", json={"allow_gaps": True})
+        assert r.status_code == 200
+        assert r.json()["status"] == "processing"
+        wait_for_status(client, sid, {"done", "failed"})
     audio = settings.sessions_dir / sid / "audio.wav"
     assert len(read_wav(audio)) / 16_000 == pytest.approx(SECONDS, abs=0.1)
 
