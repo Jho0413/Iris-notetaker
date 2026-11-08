@@ -829,6 +829,10 @@ body.is-dragging, body.is-dragging * { cursor: grabbing !important; user-select:
   .edit-strip p { flex-basis: 100%; }
   .edit-strip .hint { display: none; }
   .edit-status { margin-right: auto; }
+  /* Tabs that don't fit (long counts) scroll sideways in their row; Details stays in view. The
+     padding keeps the active tab's underline, which sits on the row's border, unclipped. */
+  .tab-list { min-width: 0; overflow-x: auto; scrollbar-width: none; padding-bottom: 1px; margin-bottom: -1px; }
+  .tabs-details { flex: none; }
   /* The toolbar fits a phone: the colour shows as its dot only. */
   .tb-btn { padding: 0 6px; }
   .tb-btn .tb-word { display: none; }
@@ -863,7 +867,7 @@ body.is-dragging, body.is-dragging * { cursor: grabbing !important; user-select:
   html, body { background: var(--plate); }
   * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .topbar, .skip-link, .crumbs, .head-actions, .rename-btn, .ribbon, .tabs, .rail, .banner,
-  .edit-strip, .edited-meta, .menu, .sr-only { display: none !important; }
+  .edit-strip, .edited-meta, .menu, .sr-only, .tabs-details-panel, .meta-status { display: none !important; }
   .main { padding: 0; }
   .session-head { margin-bottom: 16px; }
   .session-body { display: block; }

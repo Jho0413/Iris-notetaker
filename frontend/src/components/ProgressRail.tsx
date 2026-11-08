@@ -7,11 +7,6 @@ import { CostText } from './CostText'
 import type { OutlineItem } from './NotesView'
 import { StepList } from './StepList'
 
-/**
- * The session rail: plain-language progress (once the notes are finished; until then the progress
- * view shows it), the notes outline, the cost slot and on-demand details. Below 1120px it
- * collapses into a one-line summary that expands.
- */
 /** What the session's details show: in the rail, or below the tabs under 1120px. */
 export interface RunDetailsProps {
   run: RunState
@@ -28,6 +23,12 @@ export interface RunDetailsProps {
   stepCosts: StepCost[]
 }
 
+/**
+ * The session rail: plain-language progress (once the notes are finished; until then the progress
+ * view shows it), the notes outline, the cost slot and on-demand details. Below 1120px it
+ * collapses into a one-line summary that expands, or, once the notes show in tabs, hides: the
+ * Details button beside the tabs opens the same details under them.
+ */
 export function ProgressRail(
   props: RunDetailsProps & {
     /** Whether the details are open below 1120px; the page holds it, so the Details button

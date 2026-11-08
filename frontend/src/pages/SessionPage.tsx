@@ -502,7 +502,9 @@ function SessionView({ id }: { id: string }) {
                     aria-controls="session-details"
                     onClick={toggleDetails}
                   >
-                    {detailsLabel(detailsOpen)}
+                    {/* The same word open or closed (aria-expanded says which), so the row's width
+                        never changes on a phone. */}
+                    {detailsLabel(false)}
                   </button>
                 }
                 tabs={[
