@@ -128,9 +128,9 @@ async def post_frame(
 ) -> None:
     """Body: one JPEG screen frame. ``t`` is seconds since recording started (the audio's clock).
     ``share`` numbers the screen share it belongs to: 1 for the first, one more for each share
-    after it (Share screen, or Continue after Stop). A share ends one frame interval after its
-    last frame, or where the next share's frames start if sooner, so what was shown is placed
-    only while it was shared.
+    after it (Share screen, or Continue after Stop). A share ends one sampling step
+    (``1 / frame_fps``) after its last frame, or where the next share's frames start if sooner,
+    so what was shown is placed only while it was shared.
 
     Posting the same frame again is a no-op; a different body for a stored ``t`` and ``share``
     is a 409.
