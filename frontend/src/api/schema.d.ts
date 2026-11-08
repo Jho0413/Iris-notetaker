@@ -295,14 +295,40 @@ export interface paths {
         put?: never;
         /**
          * End Live
-         * @description Stop recording and finish the session: the live work is kept, the rest is processed.
+         * @description Make notes: stop recording (if it hasn't stopped already, ``/stop``) and finish the
+         *     session. The live work is kept, the rest is processed.
          *
          *     The browser flushes its uploads first and says how many audio chunks it recorded. If any are
-         *     missing, this returns 409 with ``detail.missing_audio_chunks`` and the session keeps recording,
-         *     so the browser can resend them (or end with ``allow_gaps``). Captured chunks and frames are
-         *     kept, so a failed run can be retried with ``POST /sessions/{id}/run``.
+         *     missing, this returns 409 with ``detail.missing_audio_chunks`` and the session stays as it was
+         *     (recording or stopped), so the browser can resend them (or end with ``allow_gaps``). Captured
+         *     chunks and frames are kept, so a failed run can be retried with ``POST /sessions/{id}/run``.
          */
         post: operations["end_live_api_live__session_id__end_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/live/{session_id}/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Stop Live
+         * @description Stop recording without making notes: for a recording whose page went away (closed or
+         *     reloaded, or the desktop app quit or crashed), so leaving never makes notes nobody asked for.
+         *
+         *     Nothing more is accepted; what has arrived is kept, and live processing carries on with it,
+         *     so making notes later (``/end``) reuses that work. Stopping a stopped session again is a no-op:
+         *     the page and the desktop app may both send it. Delete it with ``DELETE /sessions/{id}``.
+         */
+        post: operations["stop_live_api_live__session_id__stop_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -600,7 +626,7 @@ export interface components {
          * SessionStatus
          * @enum {string}
          */
-        SessionStatus: "created" | "recording" | "processing" | "done" | "failed";
+        SessionStatus: "created" | "recording" | "stopped" | "processing" | "done" | "failed";
         /**
          * SessionType
          * @enum {string}
@@ -1411,7 +1437,45 @@ export interface operations {
                     "application/json": components["schemas"]["Session"];
                 };
             };
-            /** @description Not recording, or audio chunks are still missing */
+            /** @description Neither recording nor stopped, or audio chunks are still missing */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stop_live_api_live__session_id__stop_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Session"];
+                };
+            };
+            /** @description Not recording: making notes, finished or failed */
             409: {
                 headers: {
                     [name: string]: unknown;

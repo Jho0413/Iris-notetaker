@@ -93,8 +93,14 @@ the repo's `backend/.env` and `backend/data/` as `make dev` does (a key saved th
 overrides `.env`). The window loads the built UI, not Vite: for UI work use `make dev` in a browser.
 
 Closing the window keeps Iris running (and making notes) in the Dock. Quitting stops the engine,
-and asks first if a session is still recording or processing; what was captured is kept, and the
-session page offers **Resume** or **Finish and make notes** next time.
+and asks first if a session is still recording or processing; what was captured is kept. A
+recording is stopped first, and the library offers **Make notes** for it; notes cut off offer
+**Try again**.
+
+The dev app stops every session still `recording` at launch (a crash leaves one behind), at quit
+and when its window crashes. It shares `backend/data/` with `make dev`, so it also stops a
+recording a browser is making through `make dev` at those moments: don't record in a browser
+while the dev app runs.
 
 ## Cost tracking
 

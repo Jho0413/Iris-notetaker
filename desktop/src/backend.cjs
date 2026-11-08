@@ -17,6 +17,7 @@ const path = require('node:path')
 const TOKEN_HEADER = 'x-iris-token'
 const LOG_ROTATE_BYTES = 10 * 1024 * 1024
 const LOG_DRAIN_MS = 2000 // after exit, how long the log waits for the rest of the output
+const REQUEST_TIMEOUT_MS = 3000 // the app's own API requests (getJson, post)
 
 /** A port nothing is listening on right now, on 127.0.0.1. */
 function freePort() {
@@ -258,30 +259,45 @@ class Backend extends EventEmitter {
     clearTimeout(timer)
   }
 
-  /** GET an API path with the token (the app's own checks, e.g. sessions in progress at quit). */
-  getJson(apiPath, timeoutMs = 3000) {
+  /** GET an API path with the token (the app's own checks, e.g. sessions in progress at quit):
+   * its JSON on a 200, else null. */
+  async getJson(apiPath, timeoutMs = REQUEST_TIMEOUT_MS) {
+    const answer = await this._call('GET', apiPath, timeoutMs)
+    if (answer?.status !== 200) return null
+    try {
+      return JSON.parse(answer.body)
+    } catch {
+      return null
+    }
+  }
+
+  /** POST to an API path with the token and no body (the app's own actions, e.g. stopping a
+   * recording at quit): the status code, or 0 if the backend didn't answer. */
+  async post(apiPath, timeoutMs = REQUEST_TIMEOUT_MS) {
+    return (await this._call('POST', apiPath, timeoutMs))?.status ?? 0
+  }
+
+  /** One request with the token: `{status, body}`, or null if the backend isn't up or didn't
+   * answer in time. Never rejects. */
+  _call(method, apiPath, timeoutMs) {
     const ready = this.ready
     if (!ready) return Promise.resolve(null)
     return new Promise((resolve) => {
-      const req = http.get(
-        { host: '127.0.0.1', port: ready.port, path: apiPath, headers: { [TOKEN_HEADER]: ready.token }, timeout: timeoutMs },
+      const req = http.request(
+        { method, host: '127.0.0.1', port: ready.port, path: apiPath, headers: { [TOKEN_HEADER]: ready.token }, timeout: timeoutMs },
         (res) => {
           let body = ''
           res.setEncoding('utf8')
           res.on('data', (c) => (body += c))
-          res.on('end', () => {
-            try {
-              resolve(res.statusCode === 200 ? JSON.parse(body) : null)
-            } catch {
-              resolve(null)
-            }
-          })
+          res.on('end', () => resolve({ status: res.statusCode, body }))
+          res.on('error', () => resolve(null))
         },
       )
       req.on('timeout', () => req.destroy())
       req.on('error', () => resolve(null))
+      req.end()
     })
   }
 }
 
-module.exports = { Backend, backendCommand, checkHealth, freePort, newToken, secretsLine }
+module.exports = { Backend, REQUEST_TIMEOUT_MS, backendCommand, checkHealth, freePort, newToken, secretsLine }

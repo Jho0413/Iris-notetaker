@@ -264,7 +264,7 @@ test('without an onEnded handler, capture finishes itself when the mic goes away
   assert.equal(t.posted('/end').length, 1)
 })
 
-test('leaving the page while recording ends the session with what arrived', async () => {
+test('leaving the page while recording stops the session without making notes', async () => {
   const t = setup()
   await capture(t.env).start('screen')
   const unload = new Event('beforeunload', { cancelable: true })
@@ -272,10 +272,39 @@ test('leaving the page while recording ends the session with what arrived', asyn
   assert.equal(unload.defaultPrevented, true) // the browser asks "leave site?"
   t.env.page.dispatchEvent(new Event('pagehide'))
   assert.equal(t.beacons.length, 1)
-  assert.equal(t.beacons[0].url, '/api/live/s1/end')
-  assert.deepEqual(JSON.parse(await t.beacons[0].body.text()), { allow_gaps: true })
+  assert.equal(t.beacons[0].url, '/api/live/s1/stop')
+  // A JSON body, never an empty one: the desktop app can't forward an empty body.
+  assert.equal(t.beacons[0].body.type, 'application/json')
+  assert.deepEqual(JSON.parse(await t.beacons[0].body.text()), {})
   await tick()
   assert.equal(t.calls.filter((c) => c.method === 'DELETE').length, 0) // what was recorded is kept
+  assert.equal(t.posted('/end').length, 0)
+})
+
+test('leaving the page after Make notes, while its upload is still finishing, makes the notes', async () => {
+  const t = setup()
+  const live = capture(t.env)
+  await live.start('screen')
+  FakeRecorder.created[0].emit('a')
+  t.failWhen((url) => url.includes('/audio')) // the upload can't finish yet
+  const making = live.stop()
+  t.env.page.dispatchEvent(new Event('pagehide'))
+  assert.equal(t.beacons.length, 1)
+  assert.equal(t.beacons[0].url, '/api/live/s1/end') // Make notes was asked for
+  assert.deepEqual(JSON.parse(await t.beacons[0].body.text()), { allow_gaps: true })
+  await assert.rejects(making)
+  t.failWhen(() => false) // let the queued upload land, so nothing is left retrying
+  await live.stop()
+})
+
+test('leaving the page after Make notes failed still makes the notes', async () => {
+  const t = setup()
+  const live = capture(t.env)
+  await live.start('audio')
+  t.failWhen((url) => url.endsWith('/end'))
+  await assert.rejects(live.stop(), /Iris isn't responding/) // the page shows Try again
+  t.env.page.dispatchEvent(new Event('pagehide'))
+  assert.deepEqual(t.beacons.map((b) => b.url), ['/api/live/s1/end'])
 })
 
 test('screen sharing denied: the mic is not requested and no session is made', async () => {
@@ -801,8 +830,8 @@ test('stop pauses the recording and releases every source; continue carries on i
   assert.deepEqual(t.mixed[0].live, [])
   t.frame(performance.now()) // a frame grabbed as it stopped is not sent
   assert.equal(t.posted('/frame').length, 0)
-  t.env.page.dispatchEvent(new Event('pagehide')) // still a recording: leaving ends it
-  assert.equal(t.beacons.length, 1)
+  t.env.page.dispatchEvent(new Event('pagehide')) // stopped, not finished: leaving stops it, no notes
+  assert.deepEqual(t.beacons.map((b) => b.url), ['/api/live/s1/stop'])
 
   const stoppedFor = 60
   await new Promise((r) => setTimeout(r, stoppedFor))

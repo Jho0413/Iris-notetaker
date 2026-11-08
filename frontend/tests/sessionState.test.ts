@@ -226,6 +226,15 @@ test('UI states cover recording, processing, polishing, stalled, finished and fa
   const rec = { ...session, status: 'recording' as const }
   assert.equal(uiState(rec, emptyRun(), { capturing: true }).kind, 'recording')
   assert.equal(uiState(rec, emptyRun()).kind, 'recording-orphan')
+  // Stopped without notes (its page went away): the same whether or not a page is capturing.
+  const stopped = { ...session, status: 'stopped' as const }
+  assert.deepEqual(libraryState(stopped), { kind: 'stopped', label: 'Stopped' })
+  assert.equal(uiState(stopped, emptyRun(), { capturing: true }).kind, 'stopped')
+  // Its status event reaches an open session page, and making notes then starts a run.
+  const stopEvents = [ev('status', { status: 'stopped' })]
+  assert.equal(uiState(rec, reduceEvents(stopEvents)).kind, 'stopped')
+  const making = reduceEvents([...stopEvents, ev('status', { status: 'processing' })])
+  assert.equal(uiState(rec, making).kind, 'processing')
   const stalled = uiState({ ...session, current_stage: 'select' }, emptyRun(), { stalled: true })
   assert.deepEqual([stalled.kind, stalled.fromStage], ['stalled', 'select'])
   assert.equal(uiState({ ...session, status: 'created' }, emptyRun()).kind, 'starting')
@@ -303,15 +312,15 @@ test('while processing, the label is the running step and its count', () => {
 
 test('the progress view replaces the notes in every state but finished', () => {
   const views = Object.fromEntries(
-    (['starting', 'processing', 'polishing', 'stalled', 'failed', 'recording-orphan', 'finished'] as
+    (['starting', 'processing', 'polishing', 'stalled', 'failed', 'recording-orphan', 'stopped', 'finished'] as
       UiStateKind[]).map((k) => [k, progressView(k)]),
   )
   assert.equal(views.finished, null)
   assert.deepEqual(views.processing, { heading: 'Making your notes', active: true })
   assert.deepEqual(views.polishing, { heading: 'Polishing your notes', active: true })
   assert.equal(views.starting?.active, true)
-  // Failed, stalled and orphaned: the banner says what to do; no timer or step line.
-  for (const k of ['failed', 'stalled', 'recording-orphan']) {
+  // Failed, stalled, orphaned and stopped: the banner says what to do; no timer or step line.
+  for (const k of ['failed', 'stalled', 'recording-orphan', 'stopped']) {
     assert.equal(views[k]?.active, false, k)
     assert.ok(views[k]?.heading, k)
   }

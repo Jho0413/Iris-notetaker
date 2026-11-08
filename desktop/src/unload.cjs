@@ -30,7 +30,7 @@ function unloadPrompt(url, { quitting = false } = {}) {
       cancelId: 1,
       leave: 0,
       message: 'Stop recording?',
-      detail: 'Iris is recording. If you leave this page, the recording stops and Iris makes notes from what it has so far.',
+      detail: 'Iris is recording. If you leave this page, the recording stops and what was recorded is kept: make notes from it in the library.',
     }
   }
   return {

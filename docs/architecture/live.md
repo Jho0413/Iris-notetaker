@@ -47,9 +47,11 @@ session is finished.
 - **Discard:** delete the recording (`DELETE /sessions/{id}`, which stops its live processing);
   nothing more is uploaded, and the page goes back to its start.
 
-Start over and Discard ask first, since they delete what was recorded. While stopped the session
-stays `recording`, so leaving the page or closing the tab ends it as it would while recording. The captured chunks stay in the session folder (`live/`), so a failed run can be retried
-with `uv run iris run <session_id>`.
+Start over and Discard ask first, since they delete what was recorded. Stop is the page's own:
+while paused on the page (after Stop, before a choice) the session stays `recording` in the
+engine (Continue needs nothing from it), so
+leaving the page stops it as it would while recording (below). The captured chunks stay in the
+session folder (`live/`), so a failed run can be retried with `uv run iris run <session_id>`.
 
 | Browser (desktop) | Microphone | Shared audio | Status |
 |---|---|---|---|
@@ -92,12 +94,32 @@ What happens when capture is interrupted:
   120 (about 2 minutes); during a longer outage the oldest queued frames are dropped to bound
   memory, so the notes may miss what was on screen then.
 - **Closing the tab while recording:** the browser asks for confirmation. If you leave, the
-  session is processed with what arrived: the page ends it with a beacon, or a keepalive request
-  where beacons aren't allowed (the app's `app://` pages). If the browser crashes instead, the
-  session stays `recording`; finish it with
-  `curl -X POST http://127.0.0.1:8000/api/live/<session_id>/end`. The desktop app hides its window
-  instead of closing it while recording, and its menu bar icon stops the recording
-  ([`desktop.md`](desktop.md)); reloading the page asks "Stop recording?".
+  session is stopped with what arrived, without notes (below, "Leaving a recording"). If the
+  browser crashes instead, the session stays `recording`; its session page offers **Finish and
+  make notes**. The desktop app hides its window instead of closing it while recording, and its
+  menu bar icon stops the recording ([`desktop.md`](desktop.md)); reloading the page asks "Stop
+  recording?".
+
+### Leaving a recording
+
+Notes are made only when asked for. A recording whose page goes away (the tab closed, a reload,
+the desktop app quitting or crashing) becomes **stopped** (`POST /live/{id}/stop`): nothing more
+is accepted, what arrived is kept, and the library and the session page offer **Make notes**
+(`POST /live/{id}/end`) or delete it (`DELETE /sessions/{id}`). It can't be continued: the page
+that held the recorder is gone, and the audio is one stream. Live processing carries on with what
+arrived, so making notes later in the same engine run reuses that work.
+
+- **The page** sends stop on `pagehide` (a beacon, or a keepalive request where beacons aren't
+  allowed: the app's `app://` pages), while recording or stopped on the page. Once Make notes was
+  chosen (its upload still finishing, or "Recording stopped" with Try again) it sends end instead,
+  as asked. Either is best effort: a crashed browser sends nothing.
+- **The desktop app** doesn't rely on that: it owns its engine and the only page recording into
+  it, so whenever no page can be recording it stops every `recording` session itself
+  ([`desktop.md`](desktop.md), "Backend lifecycle"): at quit, before the engine stops; at launch,
+  for those a crash left behind; and when its window's page crashes.
+- **The engine never stops a recording by itself:** in a browser a recording carries on through
+  an engine restart (its uploads are retried), so a session the browser left `recording` stays so.
+  Its session page says it may still be recording in another tab, with **Finish and make notes**.
 
 ## Processing while recording
 

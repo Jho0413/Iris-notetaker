@@ -155,7 +155,8 @@ function SessionView({ id }: { id: string }) {
     const result = await act(api.POST('/api/live/{session_id}/end', { params: { path: { session_id: id } } }))
     setBusy(false)
     if (!result.ok) {
-      setActionError(result.status === 0 ? UNREACHABLE : "Couldn't finish the recording. It may already be processing.")
+      const what = ui?.kind === 'stopped' ? "Couldn't make notes from the recording." : "Couldn't finish the recording."
+      setActionError(result.status === 0 ? UNREACHABLE : `${what} It may already be processing.`)
     }
     setReload((n) => n + 1)
   }
@@ -353,9 +354,9 @@ function SessionView({ id }: { id: string }) {
               {again.label}
             </Link>
           )}
-          {ui.kind === 'recording-orphan' && (
+          {(ui.kind === 'recording-orphan' || ui.kind === 'stopped') && (
             <button type="button" className="btn btn-primary" onClick={() => void finishLive()} disabled={busy}>
-              Finish and make notes
+              {ui.kind === 'stopped' ? 'Make notes' : 'Finish and make notes'}
             </button>
           )}
           {!working && (
@@ -416,6 +417,17 @@ function SessionView({ id }: { id: string }) {
                   <strong>This live session was never stopped.</strong> If it's still recording in
                   another tab, stop it there. Otherwise, finish it here to make notes from what was
                   captured.
+                </p>
+              </div>
+            </div>
+          )}
+          {ui.kind === 'stopped' && (
+            <div className="banner banner-info" role="status">
+              <Icon name="record" />
+              <div className="banner-body">
+                <p>
+                  <strong>This recording was stopped before notes were made.</strong> What was recorded is
+                  kept. Make notes from it, or delete it.
                 </p>
               </div>
             </div>

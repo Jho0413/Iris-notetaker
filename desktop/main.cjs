@@ -40,7 +40,7 @@ const policy = require('./src/policy.cjs')
 const { ORIGIN } = require('./src/routes.cjs')
 const { unloadPrompt } = require('./src/unload.cjs')
 const { pdfFileName, PDF_OPTIONS } = require('./src/pdf.cjs')
-const { busyDetail, busyKeyRefusal, busyNow } = require('./src/busy.cjs')
+const { busyDetail, busyKeyRefusal, busyNow, quitDetail, stopRecordings: stopEach } = require('./src/busy.cjs')
 const { refusedDebugSwitch } = require('./src/debugging.cjs')
 const trayRules = require('./src/tray.cjs')
 const pickerRules = require('./src/picker.cjs')
@@ -197,6 +197,8 @@ function showMainWindow({ show = true } = {}) {
     log(`[window] renderer gone: ${details.reason}`)
     if (mainWindow === win) menuBarEvent({ type: 'pageGone' })
     if (details.reason === 'clean-exit' || mainWindow !== win) return
+    // A crashed page sends nothing as it goes (no pagehide): stop what it was recording.
+    void stopRecordings('the window crashed')
     const now = Date.now()
     crashes.push(now)
     while (crashes.length && now - crashes[0] > 60_000) crashes.shift()
@@ -596,6 +598,7 @@ ipcMain.on('iris-app:recording', (event, report) => {
 // ---- backend ---------------------------------------------------------------------------------
 
 let startCount = 0 // which startBackend() call is the latest
+let launchChecked = false // the first engine start of this launch has stopped leftover recordings
 
 /** Start the engine unless it is up (a start under way is joined, never doubled). */
 async function startBackend() {
@@ -609,6 +612,12 @@ async function startBackend() {
     log(`[backend] failed to start: ${err.message}`)
     menuBarEvent({ type: 'engineFailed' })
     return offerRestart("Iris's engine didn't start.", err.message)
+  }
+  // Only on this launch's first start, before the UI loads: a restart (Restart Engine, a key
+  // change, the crash dialog) leaves the Live page recording, its uploads retried meanwhile.
+  if (!launchChecked) {
+    launchChecked = true
+    await stopRecordings('left by an earlier launch')
   }
   showUiWhenReady()
 }
@@ -655,6 +664,15 @@ async function askToRestart(message, detail) {
   }
 }
 
+/**
+ * Stop every session still "recording" (src/busy.cjs). Called whenever no page of this app can be
+ * recording: at launch, at quit before the engine stops (the page's own stop request, sent as its
+ * window closes, races the engine's shutdown), and when the window's page crashes.
+ */
+function stopRecordings(why) {
+  return stopEach(backend, why, log)
+}
+
 /** Sessions recording or making notes right now. */
 async function busySessions() {
   const capturing = trayRules.holdsRecording(menuBar.recording) // what the Live page reported
@@ -662,8 +680,8 @@ async function busySessions() {
 }
 
 /** If a session is recording or processing, ask before stopping the engine. `detail`, if any,
- * comes before the list of busy sessions. */
-async function confirmBusy(message, detail, button = 'Continue') {
+ * comes before what `describe` says about the busy sessions. */
+async function confirmBusy(message, detail, button = 'Continue', describe = busyDetail) {
   const busy = await busySessions()
   if (!busy.length) return true
   const { response } = await dialog.showMessageBox(mainWindow ?? undefined, {
@@ -672,7 +690,7 @@ async function confirmBusy(message, detail, button = 'Continue') {
     defaultId: 1,
     cancelId: 1,
     message,
-    detail: detail ? `${detail}\n\n${busyDetail(busy)}` : busyDetail(busy),
+    detail: detail ? `${detail}\n\n${describe(busy)}` : describe(busy),
   })
   return response === 0
 }
@@ -889,7 +907,7 @@ if (!app.requestSingleInstanceLock()) {
     event.preventDefault()
     if (quitAsk) return
     // The sessions alone: the engine is Iris's own business, not the user's.
-    quitAsk = confirmBusy('Quit Iris?', null, 'Quit')
+    quitAsk = confirmBusy('Quit Iris?', null, 'Quit', quitDetail)
       .then((ok) => {
         if (!ok) return
         quitConfirmed = true
@@ -898,11 +916,17 @@ if (!app.requestSingleInstanceLock()) {
       .finally(() => (quitAsk = null))
   })
 
-  // Windows are closed by now: stop the engine, then quit for real.
+  // Windows are closed by now: stop the recordings, then the engine, then quit for real.
+  let quitStop = null // the stop under way: another will-quit waits for it
   app.on('will-quit', (event) => {
     quitting = true
     if (!backend.running) return
     event.preventDefault()
-    backend.stop().finally(() => app.quit())
+    quitStop ??= stopRecordings('quitting')
+      .then(() => backend.stop())
+      .finally(() => {
+        quitStop = null // an engine started meanwhile (Restart Engine) is stopped by the next one
+        app.quit()
+      })
   })
 }

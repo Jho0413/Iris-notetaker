@@ -98,6 +98,11 @@ test('start waits for health with the token, stop is clean and expected', async 
   const status = await new Promise((r) => http.get({ host: '127.0.0.1', port: ready.port, path: '/api/sessions' }, (res) => r(res.statusCode)))
   assert.equal(status, 401)
   assert.deepEqual(await backend.getJson('/api/sessions'), [{ id: 'a', status: 'processing' }])
+  // The app's own actions: a POST with the token, answered with its status code.
+  assert.equal(await backend.post('/api/live/b/stop'), 200)
+  assert.equal(await backend.post('/api/live/a/stop'), 409)
+  assert.equal(await backend.getJson('/api/live/b/stop'), null) // a GET there is a 404: no JSON
+  assert.equal(await backend.getJson('/api/not-json'), null) // a 200 that isn't JSON
   await assert.rejects(backend.start(), /already running/)
   const exit = exitEvent(backend)
   await backend.stop()
@@ -105,7 +110,9 @@ test('start waits for health with the token, stop is clean and expected', async 
   assert.equal(backend.info(), null)
   assert.equal(backend.running, false)
   assert.equal(await backend.getJson('/api/sessions'), null)
+  assert.equal(await backend.post('/api/live/b/stop'), 0) // stopped: no answer
   const logged = fs.readFileSync(logFile, 'utf8')
+  assert.match(logged, /stopped b\n/)
   // The fake backend got the secrets on stdin and none in its environment.
   assert.match(logged, /fake backend ok stdin=\["openai_api_key","api_token"\] key=set secrets-in-env=none parent=\d+/)
   assert.doesNotMatch(logged, /sk-key/)

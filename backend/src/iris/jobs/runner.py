@@ -58,7 +58,9 @@ class JobRunner:
         (a quit or restart mid-run, a crash, a forced quit, power loss). Checked here and not at
         shutdown, which a crash never reaches. The stage it stopped at is kept, and so are the
         finished stages' outputs, so **Try again** resumes from it. ``recording`` sessions are
-        left alone: the session page offers to finish them. A CLI run (``iris process``) on the
+        left alone: in a browser a recording carries on through an engine restart (its uploads
+        are retried), and the desktop app, which owns its only recording page, stops its own at
+        launch (``POST /live/{id}/stop``). A CLI run (``iris process``) on the
         same data while the engine starts is marked too, though it carries on; if it finishes,
         ``run`` clears the mark.
         """

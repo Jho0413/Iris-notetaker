@@ -128,7 +128,7 @@ export function emptyRun(): RunState {
   return { stages, chunks: {}, moments: {}, figures: {}, figureOrder: [], notes: null }
 }
 
-const STATUSES: readonly string[] = ['created', 'recording', 'processing', 'done', 'failed']
+const STATUSES: readonly string[] = ['created', 'recording', 'stopped', 'processing', 'done', 'failed']
 
 function isStage(value: unknown): value is Stage {
   return typeof value === 'string' && (STAGE_ORDER as readonly string[]).includes(value)
@@ -357,6 +357,7 @@ export function sessionLength(session: Session, segs: readonly Segment[]): numbe
 export type UiStateKind =
   | 'recording'
   | 'recording-orphan'
+  | 'stopped'
   | 'starting'
   | 'processing'
   | 'polishing'
@@ -386,6 +387,9 @@ export function uiState(
       return page.capturing
         ? { kind: 'recording', label: 'Recording' }
         : { kind: 'recording-orphan', label: 'Recording not stopped' }
+    // Recording ended without notes (its page went away, or the app quit): make them or delete it.
+    case 'stopped':
+      return { kind: 'stopped', label: 'Stopped' }
     case 'created':
       return { kind: 'starting', label: 'Starting…' }
     case 'done':
@@ -489,6 +493,7 @@ export function progressView(kind: UiStateKind): ProgressView | null {
       return { heading: "Your notes aren't finished", active: false }
     case 'recording':
     case 'recording-orphan':
+    case 'stopped':
       return { heading: 'No notes yet', active: false }
   }
 }

@@ -4,7 +4,8 @@ Chunks may arrive out of order or more than once (the browser retries failed upl
 keyed by ``seq``, and frames by ``t`` and ``share``, so neither loses nor duplicates content
 (``sources/browser_live.py``).
 Each handler reads the whole body first, then checks the session is still recording and stores
-the file with no ``await`` in between, so nothing is stored after ``end`` has started ingest.
+the file with no ``await`` in between, so nothing is stored after ``end`` has started ingest, or
+after ``stop``.
 """
 
 import asyncio
@@ -13,9 +14,9 @@ from typing import Annotated
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
-from iris.api.deps import PathsDep, RunnerDep, SessionDep, SettingsDep, StoreDep
+from iris.api.deps import BusDep, PathsDep, RunnerDep, SessionDep, SettingsDep, StoreDep
 from iris.llm.usage import with_cost
-from iris.models import Session, SessionStatus, SourceKind
+from iris.models import EventType, Session, SessionStatus, SourceKind
 from iris.sources.browser_live import (
     JPEG_MAGIC,
     MAX_AUDIO_SEQ,
@@ -55,12 +56,20 @@ class LiveEnd(BaseModel):
     )
 
 
-def _require_recording(store: SessionStore, session_id: str) -> Session:
-    """The session's current state (not the one read before an ``await``), if recording."""
+# What a live session can be in to take each request: input only while recording; stop, and making
+# notes, also once stopped (a stopped session's notes are made only when asked).
+RECORDING = frozenset({SessionStatus.RECORDING})
+RECORDING_OR_STOPPED = frozenset({SessionStatus.RECORDING, SessionStatus.STOPPED})
+
+
+def _require_live(
+    store: SessionStore, session_id: str, statuses: frozenset[SessionStatus] = RECORDING
+) -> Session:
+    """The session's current state (not the one read before an ``await``), if in ``statuses``."""
     session = store.get(session_id)
     if session is None:
         raise HTTPException(404, "session not found")
-    if session.source != SourceKind.BROWSER_LIVE or session.status != SessionStatus.RECORDING:
+    if session.source != SourceKind.BROWSER_LIVE or session.status not in statuses:
         raise HTTPException(409, "session is not recording")
     return session
 
@@ -106,7 +115,7 @@ async def post_audio(
     data = await _read_body(request)
     if seq == 0 and not data.startswith(WEBM_MAGIC):
         raise HTTPException(415, "audio must be WebM")
-    _require_recording(store, session.id)
+    _require_live(store, session.id)
     # Small synchronous write, deliberately with no await after the status check (see above).
     try:
         store_audio_chunk(paths, seq, data)
@@ -138,7 +147,7 @@ async def post_frame(
     data = await _read_body(request)
     if not data.startswith(JPEG_MAGIC):
         raise HTTPException(415, "frame must be a JPEG")
-    _require_recording(store, session.id)
+    _require_live(store, session.id)
     try:
         store_frame(paths, t, share, data)
     except ChunkConflict as e:
@@ -150,7 +159,9 @@ async def post_frame(
 @router.post(
     "/{session_id}/end",
     response_model=Session,
-    responses={409: {"description": "Not recording, or audio chunks are still missing"}},
+    responses={
+        409: {"description": "Neither recording nor stopped, or audio chunks are still missing"}
+    },
 )
 async def end_live(
     session: SessionDep,
@@ -159,15 +170,16 @@ async def end_live(
     runner: RunnerDep,
     body: LiveEnd | None = None,
 ) -> Session:
-    """Stop recording and finish the session: the live work is kept, the rest is processed.
+    """Make notes: stop recording (if it hasn't stopped already, ``/stop``) and finish the
+    session. The live work is kept, the rest is processed.
 
     The browser flushes its uploads first and says how many audio chunks it recorded. If any are
-    missing, this returns 409 with ``detail.missing_audio_chunks`` and the session keeps recording,
-    so the browser can resend them (or end with ``allow_gaps``). Captured chunks and frames are
-    kept, so a failed run can be retried with ``POST /sessions/{id}/run``.
+    missing, this returns 409 with ``detail.missing_audio_chunks`` and the session stays as it was
+    (recording or stopped), so the browser can resend them (or end with ``allow_gaps``). Captured
+    chunks and frames are kept, so a failed run can be retried with ``POST /sessions/{id}/run``.
     """
     body = body or LiveEnd()
-    _require_recording(store, session.id)
+    _require_live(store, session.id, RECORDING_OR_STOPPED)
     if body.audio_chunks is not None and not body.allow_gaps:
         missing = missing_audio_chunks(paths, body.audio_chunks)
         if missing:
@@ -178,8 +190,30 @@ async def end_live(
                     "missing_audio_chunks": missing[:MAX_LISTED_MISSING],
                 },
             )
-    # Leave RECORDING before any await, so no chunk is accepted once ingest may have started.
+    # Leave RECORDING (or STOPPED) before any await, so no chunk is accepted once ingest may have
+    # started, and no second end or stop is.
     store.update(session.id, status=SessionStatus.PROCESSING)
     runner.start(session.id)
     # Live work has made model calls already, so the returned session carries their cost.
+    return await asyncio.to_thread(with_cost, store.get(session.id), paths.usage_log)  # type: ignore[arg-type]
+
+
+@router.post(
+    "/{session_id}/stop",
+    response_model=Session,
+    responses={409: {"description": "Not recording: making notes, finished or failed"}},
+)
+async def stop_live(session: SessionDep, paths: PathsDep, store: StoreDep, bus: BusDep) -> Session:
+    """Stop recording without making notes: for a recording whose page went away (closed or
+    reloaded, or the desktop app quit or crashed), so leaving never makes notes nobody asked for.
+
+    Nothing more is accepted; what has arrived is kept, and live processing carries on with it,
+    so making notes later (``/end``) reuses that work. Stopping a stopped session again is a no-op:
+    the page and the desktop app may both send it. Delete it with ``DELETE /sessions/{id}``.
+    """
+    current = _require_live(store, session.id, RECORDING_OR_STOPPED)
+    # No await since the check, so no chunk is stored once this has answered.
+    if current.status == SessionStatus.RECORDING:
+        store.update(session.id, status=SessionStatus.STOPPED)
+        bus.publish(session.id, EventType.STATUS, {"status": SessionStatus.STOPPED})
     return await asyncio.to_thread(with_cost, store.get(session.id), paths.usage_log)  # type: ignore[arg-type]
