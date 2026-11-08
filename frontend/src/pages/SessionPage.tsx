@@ -6,7 +6,7 @@ import { FiguresGrid } from '../components/FiguresGrid'
 import { Icon } from '../components/Icon'
 import { NotesEditor } from '../components/NotesEditor'
 import { NotesView, type OutlineItem } from '../components/NotesView'
-import { ProgressRail } from '../components/ProgressRail'
+import { ProgressRail, RunDetails, type RunDetailsProps } from '../components/ProgressRail'
 import { SessionRibbon } from '../components/SessionRibbon'
 import { StatusChip } from '../components/StatusChip'
 import { StepList } from '../components/StepList'
@@ -278,6 +278,18 @@ function SessionView({ id }: { id: string }) {
   // Once the notes are shown in tabs, Details sits beside them below 1120px instead of in a bar.
   const tabsShown = !progress && !(editing && notes)
   const toggleDetails = () => setDetailsOpen((open) => !open)
+  // One set of details, shown in the rail or (below 1120px, with tabs) under the tabs row.
+  const runDetails: RunDetailsProps = {
+    run,
+    finished,
+    hasEvents: stream.eventCount > 0,
+    currentStage: session.current_stage,
+    outline: notes ? outline : [],
+    stream: stream.status,
+    showProgress: finished && stream.eventCount > 0,
+    cost,
+    stepCosts: costs,
+  }
 
   return (
     <div className="session">
@@ -487,7 +499,7 @@ function SessionView({ id }: { id: string }) {
                     type="button"
                     className="btn btn-ghost btn-sm tabs-details"
                     aria-expanded={detailsOpen}
-                    aria-controls="rail-full"
+                    aria-controls="session-details"
                     onClick={toggleDetails}
                   >
                     {detailsLabel(detailsOpen)}
@@ -499,6 +511,13 @@ function SessionView({ id }: { id: string }) {
                   { id: 'figures', label: 'Figures', count: figures.length ? String(figures.length) : undefined },
                 ]}
               />
+              {/* Opened by Details beside the tabs: just below it, so the button stays where it was
+                  pressed (index.css shows this below 1120px only; the rail shows it above). */}
+              {detailsOpen && (
+                <div className="tabs-details-panel" id="session-details">
+                  <RunDetails {...runDetails} />
+                </div>
+              )}
 
               <TabPanel id="notes" idPrefix="session" active={tab === 'notes'}>
                 {notes ? (
@@ -549,20 +568,7 @@ function SessionView({ id }: { id: string }) {
           )}
         </div>
 
-        <ProgressRail
-          run={run}
-          finished={finished}
-          hasEvents={stream.eventCount > 0}
-          currentStage={session.current_stage}
-          outline={notes ? outline : []}
-          stream={stream.status}
-          showProgress={finished && stream.eventCount > 0}
-          expanded={detailsOpen}
-          onToggle={toggleDetails}
-          detailsInTabs={tabsShown}
-          cost={cost}
-          stepCosts={costs}
-        />
+        <ProgressRail {...runDetails} expanded={detailsOpen} onToggle={toggleDetails} detailsInTabs={tabsShown} />
       </div>
 
       <ConfirmDialog

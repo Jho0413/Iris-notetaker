@@ -371,6 +371,8 @@ button.choice:disabled:not([data-waiting]) { opacity: 0.55; }
 .recbar .capture-status span { display: inline-flex; align-items: center; gap: 5px; }
 .recbar .capture-status .warn { color: var(--warning); }
 .recbar .spacer { flex: 1; }
+/* Finishing the upload: on a phone the spinner is all the button shows, so it turns. */
+.recbar .btn-stop:disabled .icon { animation: spin 1.4s linear infinite; }
 .recorder { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 16px;
   padding-top: 24px; }
 .recorder .clock { font-size: 3.5rem; font-weight: 300; letter-spacing: -0.02em; line-height: 1; }
@@ -434,8 +436,8 @@ button.choice:disabled:not([data-waiting]) { opacity: 0.55; }
 .rail { position: sticky; top: calc(var(--topbar) + 16px); display: flex; flex-direction: column;
   gap: 4px; padding: 16px; border-radius: var(--radius-m); background: var(--surface-2);
   border: 1px solid var(--border); max-height: calc(100vh - var(--topbar) - 32px); overflow: auto; }
-.rail h2 { margin: 12px 0 6px; font-size: 0.8125rem; font-weight: 600; color: var(--text-2); }
-.rail h2:first-child { margin-top: 0; }
+.run-details h2 { margin: 12px 0 6px; font-size: 0.8125rem; font-weight: 600; color: var(--text-2); }
+.run-details h2:first-child { margin-top: 0; }
 .rail-summary { display: none; }
 .steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
 .step { display: flex; align-items: center; gap: 8px; min-height: 1.75rem; color: var(--text-2); }
@@ -456,7 +458,7 @@ button.choice:disabled:not([data-waiting]) { opacity: 0.55; }
 .details { font-size: 0.8125rem; color: var(--text-2); margin-top: 8px; border-top: 1px solid var(--border);
   padding-top: 8px; }
 /* First in the rail until the notes are finished (no progress list or outline above it). */
-.rail-full > .cost-slot:first-child { margin-top: 0; }
+.run-details > .cost-slot:first-child { margin-top: 0; }
 .details summary { cursor: pointer; color: var(--text); font-weight: 500; padding: 4px 0;
   list-style: none; display: flex; align-items: center; gap: 6px; }
 .details summary::-webkit-details-marker { display: none; }
@@ -470,8 +472,10 @@ button.choice:disabled:not([data-waiting]) { opacity: 0.55; }
 
 .tabs { display: flex; align-items: center; gap: 20px; border-bottom: 1px solid var(--border); margin-bottom: 24px; }
 .tab-list { display: flex; gap: 20px; }
-/* Details beside the tabs: only below 1120px, where the rail folds away (see "Laptop widths"). */
+/* Details beside the tabs, and what it opens below them: only below 1120px, where the rail
+   folds away (see "Laptop widths"). */
 .tabs-details { display: none; margin-left: auto; }
+.tabs-details-panel { display: none; }
 .tab { position: relative; height: 2.5rem; padding: 0; border: 0; background: none; cursor: pointer;
   font: 500 0.875rem/1 var(--font); color: var(--text-2); display: inline-flex; align-items: center; gap: 6px; }
 .tab:hover { color: var(--text); }
@@ -775,9 +779,11 @@ body.is-dragging, body.is-dragging * { cursor: grabbing !important; user-select:
     border-radius: 0 0 var(--radius-m) var(--radius-m); background: var(--surface-2); }
   .rail.expanded .rail-full { display: block; }
   .rail.expanded .rail-summary { border-radius: var(--radius-m) var(--radius-m) 0 0; }
-  .rail-tabbed .rail-summary { display: none; }
-  .rail-tabbed .rail-full { border-top: 1px solid var(--border); border-radius: var(--radius-m); }
+  /* With tabs, the details open under them instead, so the rail (and its grid gap) goes. */
+  .rail-tabbed { display: none; }
   .tabs-details { display: inline-flex; }
+  .tabs-details-panel { display: block; margin-bottom: 24px; padding: 16px; border: 1px solid var(--border);
+    border-radius: var(--radius-m); background: var(--surface-2); }
 }
 @media (max-width: 53.75em) { /* 860px */
   /* Two-line rows: the title, then status · source · date · cost, with the actions on the right. */
@@ -801,6 +807,8 @@ body.is-dragging, body.is-dragging * { cursor: grabbing !important; user-select:
      the title is being renamed there is no such line, and the status stays with the buttons. */
   .session-meta > .meta-status { display: inline-flex; }
   .session-head:has(.meta-status) .head-actions > .chip { display: none; }
+  /* Nothing left in the actions (a session still being made has no buttons): no empty row. */
+  .session-head:has(.meta-status) .head-actions:not(:has(> :not(.chip))) { display: none; }
 }
 
 @media (max-width: 35em) { /* 560px */

@@ -6,7 +6,8 @@ export interface TabDef<T extends string> {
   count?: string
 }
 
-/** ARIA tabs: arrow keys, Home and End move between tabs; Tab moves into the panel. */
+/** ARIA tabs: arrow keys, Home and End move between tabs; Tab moves on to `end`, if any, then
+ * into the panel. */
 export function Tabs<T extends string>(props: {
   tabs: TabDef<T>[]
   active: T
@@ -37,24 +38,24 @@ export function Tabs<T extends string>(props: {
     <div className="tabs">
       <div className="tab-list" role="tablist" aria-label={props.label}>
         {props.tabs.map((t, i) => (
-        <button
-          key={t.id}
-          ref={(el) => {
-            refs.current[t.id] = el
-          }}
-          type="button"
-          role="tab"
-          id={`${props.idPrefix}-tab-${t.id}`}
-          aria-controls={`${props.idPrefix}-panel-${t.id}`}
-          aria-selected={props.active === t.id}
-          tabIndex={props.active === t.id ? 0 : -1}
-          className="tab"
-          onClick={() => props.onChange(t.id)}
-          onKeyDown={(e) => onKeyDown(e, i)}
-        >
-          {t.label}
-          {t.count && <span className="count num">{t.count}</span>}
-        </button>
+          <button
+            key={t.id}
+            ref={(el) => {
+              refs.current[t.id] = el
+            }}
+            type="button"
+            role="tab"
+            id={`${props.idPrefix}-tab-${t.id}`}
+            aria-controls={`${props.idPrefix}-panel-${t.id}`}
+            aria-selected={props.active === t.id}
+            tabIndex={props.active === t.id ? 0 : -1}
+            className="tab"
+            onClick={() => props.onChange(t.id)}
+            onKeyDown={(e) => onKeyDown(e, i)}
+          >
+            {t.label}
+            {t.count && <span className="count num">{t.count}</span>}
+          </button>
         ))}
       </div>
       {props.end}

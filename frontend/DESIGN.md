@@ -495,7 +495,7 @@ below are given in px at the default text size (1rem = 16px).
 - **Breakpoints:**
   - ≤1120px (70em): the session becomes one column and the rail collapses into a summary bar above the
     tabs, expandable in place. Once the notes show in tabs there is no bar: a ghost "Details" button
-    at the end of the tabs row opens the same panel.
+    at the end of the tabs row opens the same details just below the tabs, so it stays put.
   - ≤860px (53.75em): library rows become two lines: the title, then status · source · date · cost
     (the header and those columns hide), with the actions on the right, centred on the row. The
     status keeps its width; the rest of the line ends with an ellipsis. The recording bar's capture
@@ -683,7 +683,7 @@ a "Cost" line (13px `text-2` label at 600, the value right-aligned in `text` at 
 numerals; laid out even while empty), and a collapsed Details disclosure holding each step's plain
 label with its cost and timing, and raw errors in mono. Under 1120px it
 becomes a one-line summary bar that expands in place; once the notes show in tabs, a Details
-button at the end of the tabs row replaces the bar.
+button at the end of the tabs row replaces the bar and opens the details just below the tabs.
 
 ### Progress View
 Shown in the reading column until the notes are finished (no notes before then): an 18px/600
