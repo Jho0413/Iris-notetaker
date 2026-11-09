@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Everything else in Iris.app that runs: Electron's helpers and the bundled Python engine. -->
+<plist version="1.0">
+  <dict>
+    <!-- The renderer helpers run V8 too. Python doesn't need it, but electron-builder signs every
+         nested binary with this one file. -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <!-- Ad-hoc signed, no Team ID: without this the helpers can't load Electron's framework, nor
+         Python its own extension modules. -->
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+  </dict>
+</plist>
