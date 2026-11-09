@@ -3,12 +3,14 @@
 // sources are mixed into one track, which goes up as MediaRecorder chunks every few seconds; screen
 // frames as JPEGs at a low fixed rate while the screen is on, timed on the audio's clock and
 // numbered by the share they belong to, so the backend finds where each share starts and ends from
-// the frames alone. Change detection happens in the backend, not here
-// Uploads are retried until they land (uploadQueue.ts), and
-// ending the session waits for all of them, so a dropped request doesn't lose content.
+// the frames alone. Change detection happens in the backend, not here. Uploads are retried
+// through outages and busy answers (uploadQueue.ts; one the backend refuses outright is dropped),
+// and finishing the recording (making notes, or keeping it without) waits for all of them, so a
+// dropped request doesn't lose content.
 
+import { engineDidNotAnswer } from '../session/request.ts'
 import { CaptureError, describeCaptureError, inDesktopApp, pickAudioMimeType } from './captureErrors.ts'
-import { EndSessionError, MissingAudioError, endLiveSession } from './endSession.ts'
+import { EndSessionError, MissingAudioError, endLiveSession, stopLiveSession } from './endSession.ts'
 import { UploadQueue, type UploadQueueOptions } from './uploadQueue.ts'
 
 const AUDIO_CHUNK_MS = 5000
@@ -23,6 +25,9 @@ const RECORDER_STOP_TIMEOUT_MS = 2000 // a recorder that never reports 'stop' do
 export type CaptureMode = 'audio' | 'screen'
 
 export type EndReason = 'microphone-ended' | 'recorder-error'
+
+/** The request that finishes a recording: `end` makes notes, `stop` keeps it without notes. */
+type FinishRequest = 'end' | 'stop'
 
 /** Why `start()` failed when capture ended before recording began. */
 const START_FAILED: Record<EndReason | 'screen-share-ended', string> = {
@@ -47,7 +52,7 @@ export interface LiveCaptureOptions {
    * carries on with the mic.
    */
   onMacSoundEnded?: () => void
-  /** How long `stop()` waits for pending uploads before giving up (it can be called again). */
+  /** How long `stop()` and `keep()` wait for pending uploads before giving up (they can be called again). */
   drainTimeoutMs?: number
   uploads?: UploadQueueOptions
 }
@@ -183,7 +188,11 @@ export class LiveCapture {
   private opening?: Promise<StartedRecording>
   private cancelled = false
   private cancelOpening?: (err: CaptureError) => void
+  /** The finish under way or done (`stop` or `keep`), and the request it ends with. */
   private stopping?: Promise<void>
+  private stoppingWith?: FinishRequest
+  /** Make notes was asked for (`stop`): from then on, finishing makes them, even after a failure. */
+  private notesChosen = false
 
   /**
    * `createSession` makes the session to record into (`POST /live`) and resolves to its id, or
@@ -251,18 +260,41 @@ export class LiveCapture {
   }
 
   /**
-   * Stop capture, upload everything still pending, then tell the backend to process the
-   * session. Throws if uploads or the end request fail; nothing captured is discarded, so
+   * Make notes: stop capture, upload everything still pending, then tell the backend to process
+   * the session. Throws if uploads or the end request fail; nothing captured is discarded, so
    * calling `stop()` again retries. Called while `start()` is still asking for permissions, it
    * cancels the start instead (nothing was recorded, so the session is discarded). After a
    * failed start there is nothing to finish, so it resolves without contacting the backend.
+   * After `keep`, it makes notes from the kept recording once the keep has settled.
    */
   stop(): Promise<void> {
-    this.stopping ??= this.finish().catch((err: unknown) => {
-      this.stopping = undefined
-      throw err
-    })
-    return this.stopping
+    this.notesChosen = true
+    return this.finishWith('end')
+  }
+
+  /**
+   * Keep the recording without making notes (leaving the Live page): as `stop`, but the backend
+   * is told only to stop recording, so the library offers Make notes or Delete. Throws, and is
+   * retried, the same way. Once Make notes was chosen it joins that instead (or retries it, if
+   * it failed): keeping never undoes Make notes.
+   */
+  keep(): Promise<void> {
+    return this.finishWith(this.notesChosen ? 'end' : 'stop')
+  }
+
+  /** One finish at a time: a call joins the one under way (or done), unless it makes notes after a keep. */
+  private finishWith(request: FinishRequest): Promise<void> {
+    if (this.stopping && (request === 'stop' || this.stoppingWith === 'end')) return this.stopping
+    const kept = this.stopping?.catch(() => {})
+    const finishing: Promise<void> = (kept ? kept.then(() => this.finish(request)) : this.finish(request)).catch(
+      (err: unknown) => {
+        if (this.stopping === finishing) this.stopping = undefined
+        throw err
+      },
+    )
+    this.stopping = finishing
+    this.stoppingWith = request
+    return finishing
   }
 
   private async open(mode: CaptureMode): Promise<StartedRecording> {
@@ -316,7 +348,8 @@ export class LiveCapture {
    * Stop capturing, keeping the recording: the recorder pauses (its clock too, so the stopped
    * time isn't in the recording, measured in Electron 45), frames stop, and the microphone, the
    * Mac's sound and any shared screen are released (the screen is turned off). `resume` carries
-   * on in the same recording; `stop` makes notes from it; `discard` throws it away.
+   * on in the same recording; `stop` makes notes from it; `keep` keeps it without notes; `discard`
+   * throws it away.
    */
   pause(): void {
     if (!this.recording || this.paused || this.stopping || this.resuming) return
@@ -433,11 +466,13 @@ export class LiveCapture {
       await this.opening.catch(() => {})
       return
     }
+    const notDeleted = "Iris isn't responding, so the recording wasn't deleted. Try again."
     const res = await this.env
       .fetch(`/api/sessions/${this.id}`, { method: 'DELETE' })
       .catch((err: unknown) => {
-        throw new CaptureError("Iris isn't responding, so the recording wasn't deleted. Try again.", { cause: err })
+        throw new CaptureError(notDeleted, { cause: err })
       })
+    if (engineDidNotAnswer(res.status)) throw new CaptureError(notDeleted)
     // 404: already gone (a delete that arrived, or the session was removed elsewhere).
     if (!res.ok && res.status !== 404) {
       throw new CaptureError("Iris couldn't delete the recording. Try again.")
@@ -587,7 +622,8 @@ export class LiveCapture {
     else void this.stop().catch(() => {})
   }
 
-  private async finish(): Promise<void> {
+  /** Stop capturing, upload what is left, then send `request`: `end` makes notes, `stop` keeps it. */
+  private async finish(request: FinishRequest): Promise<void> {
     if (this.opening) {
       // start() fails now, releasing what it has and discarding the session.
       this.cancel('Recording was cancelled before it started.')
@@ -616,15 +652,19 @@ export class LiveCapture {
     }
     const rejectedAudio = this.queue.rejected.filter((r) => r.kind === 'audio')
     if (rejectedAudio.length) console.warn('Iris rejected audio chunks; they become silence', rejectedAudio)
-    const request = { audioChunks: this.seq, allowGaps: rejectedAudio.length > 0 }
-    try {
-      await endLiveSession(this.id!, request, this.env.fetch)
-    } catch (err) {
-      if (!(err instanceof MissingAudioError)) throw err
-      // Every upload was acknowledged, so there is nothing left to resend: finish with silence
-      // where the backend is missing audio rather than leave the session stuck recording.
-      console.warn('Iris is missing audio chunks; they become silence', err.missing)
-      await endLiveSession(this.id!, { ...request, allowGaps: true }, this.env.fetch)
+    if (request === 'stop') {
+      await stopLiveSession(this.id!, this.env.fetch)
+    } else {
+      const end = { audioChunks: this.seq, allowGaps: rejectedAudio.length > 0 }
+      try {
+        await endLiveSession(this.id!, end, this.env.fetch)
+      } catch (err) {
+        if (!(err instanceof MissingAudioError)) throw err
+        // Every upload was acknowledged, so there is nothing left to resend: finish with silence
+        // where the backend is missing audio rather than leave the session stuck recording.
+        console.warn('Iris is missing audio chunks; they become silence', err.missing)
+        await endLiveSession(this.id!, { ...end, allowGaps: true }, this.env.fetch)
+      }
     }
     this.finished = true
     this.env.page.removeEventListener('beforeunload', this.onBeforeUnload)
@@ -677,15 +717,16 @@ export class LiveCapture {
 
   /**
    * The page is going away anyway (the tab closed, a reload, the app quitting), so nothing more
-   * will be captured. A recording capturing or stopped here is stopped without notes, so leaving
-   * never makes notes nobody asked for: the library offers Make notes or Delete. Once Make notes
-   * was chosen (`stop()`: its uploads still finishing, or its end request failed), it ends the
-   * session with what has arrived. Best effort: the desktop app also stops its recordings itself.
+   * will be captured. A recording capturing, stopped, or being kept (`keep()`: its uploads still
+   * finishing, or its stop request failed) is stopped without notes, so leaving never makes notes
+   * nobody asked for: the library offers Make notes or Delete. Once Make notes was chosen
+   * (`stop()`, likewise), it ends the session with what has arrived. Best effort: the desktop app
+   * also stops its recordings itself.
    */
   private onPageHide = () => {
     if (this.finished) return
     // A body even for stop: the desktop app can't forward a request with an empty one.
-    const [action, request] = this.recording ? ['stop', {}] : ['end', { allow_gaps: true }]
+    const [action, request] = this.notesChosen ? ['end', { allow_gaps: true }] : ['stop', {}]
     const body = new Blob([JSON.stringify(request)], { type: 'application/json' })
     this.env.sendBeacon(`/api/live/${this.id}/${action}`, body)
   }

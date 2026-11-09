@@ -4,7 +4,8 @@
 import type { Session } from '../api/client'
 import type { Provenance } from './state'
 
-/** Any request that never reached Iris (it is down or restarting). */
+/** Nothing answered the request (status 0 from `act()`): the network failed, or only the engine
+ * is down and the dev proxy or the app's handler answered in its place (`engineDidNotAnswer`). */
 export const UNREACHABLE = "Iris isn't responding. Try again in a moment."
 
 /** Badges for how a figure was made. An original image is labelled neutrally, with no reason. */

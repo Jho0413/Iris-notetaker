@@ -307,6 +307,161 @@ test('leaving the page after Make notes failed still makes the notes', async () 
   assert.deepEqual(t.beacons.map((b) => b.url), ['/api/live/s1/end'])
 })
 
+test('keep (leaving the Live page) uploads the last chunk, then stops the session without notes', async () => {
+  const t = setup()
+  const live = capture(t.env)
+  await live.start('screen')
+  FakeRecorder.created[0].emit('a')
+  await live.keep()
+
+  assert.deepEqual(
+    t.posted('/audio').map((c) => c.url),
+    ['/api/live/s1/audio?seq=0', '/api/live/s1/audio?seq=1'],
+  )
+  const stop = t.posted('/stop')
+  assert.equal(stop.length, 1)
+  // A JSON body, never an empty one: the desktop app can't forward an empty body.
+  assert.deepEqual(JSON.parse(stop[0].body as string), {})
+  assert.equal(t.posted('/end').length, 0)
+  assert.equal(t.calls.filter((c) => c.method === 'DELETE').length, 0) // what was recorded is kept
+  assert.ok(t.display.stopped && t.mic.stopped)
+  // Kept: closing the tab afterwards neither asks nor sends anything more.
+  const unload = new Event('beforeunload', { cancelable: true })
+  t.env.page.dispatchEvent(unload)
+  assert.equal(unload.defaultPrevented, false)
+  t.env.page.dispatchEvent(new Event('pagehide'))
+  assert.equal(t.beacons.length, 0)
+})
+
+test('keep while stopped uploads what the recorder held, then stops the session', async () => {
+  const t = setup()
+  const live = capture(t.env)
+  await live.start('audio')
+  live.pause()
+  await live.keep()
+  assert.equal(t.posted('/audio').length, 2) // what Stop flushed, and the recorder's last chunk
+  assert.equal(t.posted('/stop').length, 1)
+  assert.equal(t.posted('/end').length, 0)
+})
+
+test('the tab closed while a keep is still uploading stops the session; it never makes notes', async () => {
+  const t = setup()
+  const live = capture(t.env)
+  await live.start('screen')
+  FakeRecorder.created[0].emit('a')
+  t.failWhen((url) => url.includes('/audio')) // the upload can't finish yet
+  const keeping = live.keep()
+  t.env.page.dispatchEvent(new Event('pagehide'))
+  assert.deepEqual(t.beacons.map((b) => b.url), ['/api/live/s1/stop'])
+  assert.deepEqual(JSON.parse(await t.beacons[0].body.text()), {})
+  await assert.rejects(keeping, /haven't reached Iris/)
+  // After the keep failed too.
+  t.env.page.dispatchEvent(new Event('pagehide'))
+  assert.deepEqual(t.beacons.map((b) => b.url), ['/api/live/s1/stop', '/api/live/s1/stop'])
+
+  t.failWhen(() => false) // the backend is back: trying again keeps, with every chunk
+  await live.keep()
+  assert.equal(t.posted('/audio').length, 2)
+  assert.equal(t.posted('/stop').length, 1)
+  assert.equal(t.posted('/end').length, 0)
+})
+
+test('a failed keep request can be retried and still keeps', async () => {
+  const t = setup()
+  const live = capture(t.env)
+  await live.start('audio')
+  t.failWhen((url) => url.endsWith('/stop'))
+  await assert.rejects(live.keep(), /Iris isn't responding, so the recording couldn't be stopped/)
+  t.failWhen(() => false)
+  await live.keep()
+  assert.equal(t.posted('/stop').length, 1)
+  assert.equal(t.posted('/end').length, 0)
+})
+
+/** A capture whose stop request is answered with `status`; everything else as `setup()`. */
+function stopAnswering(status: number) {
+  const t = setup()
+  const fetchFn = t.env.fetch
+  return capture({
+    ...t.env,
+    fetch: async (url: string, init?: RequestInit) =>
+      url.endsWith('/stop') ? new Response(null, { status }) : fetchFn(url, init),
+  })
+}
+
+test('keep: a session no longer recording, or gone, counts as kept; any other refusal is an error', async () => {
+  for (const [status, ok] of [
+    [409, true],
+    [404, true], // deleted elsewhere: nothing left to keep, so retrying would fail forever
+    [500, false],
+  ] as const) {
+    const live = stopAnswering(status)
+    await live.start('audio')
+    if (ok) await live.keep()
+    else await assert.rejects(live.keep(), /Iris couldn't stop the recording/)
+  }
+})
+
+test("keep: a gateway error (only the engine is down) says Iris isn't responding", async () => {
+  for (const status of [502, 503]) {
+    const live = stopAnswering(status)
+    await live.start('audio')
+    await assert.rejects(live.keep(), /Iris isn't responding, so the recording couldn't be stopped/)
+  }
+})
+
+test('keep after Make notes was chosen joins it, and retries the notes if they failed', async () => {
+  const t = setup()
+  const live = capture(t.env)
+  await live.start('screen')
+  const making = live.stop()
+  assert.equal(live.keep(), making)
+  await making
+  assert.equal(t.posted('/end').length, 1)
+  assert.equal(t.posted('/stop').length, 0)
+
+  const u = setup()
+  const failed = capture(u.env)
+  await failed.start('audio')
+  u.failWhen((url) => url.endsWith('/end'))
+  await assert.rejects(failed.stop())
+  u.failWhen(() => false)
+  await failed.keep() // the page went away after Make notes failed: the notes are still made
+  assert.equal(u.posted('/end').length, 1)
+  assert.equal(u.posted('/stop').length, 0)
+})
+
+test('Make notes after a keep makes them once the keep has settled', async () => {
+  const t = setup()
+  const live = capture(t.env)
+  await live.start('audio')
+  const keeping = live.keep()
+  const making = live.stop()
+  assert.notEqual(making, keeping)
+  await making
+  assert.deepEqual(
+    t.calls.filter((c) => c.url.endsWith('/stop') || c.url.endsWith('/end')).map((c) => c.url),
+    ['/api/live/s1/stop', '/api/live/s1/end'],
+  )
+  assert.equal(live.keep(), making) // and from then on, keeping joins the notes
+})
+
+test('the tab closed while Make notes waits behind a keep still in flight makes the notes', async () => {
+  const t = setup()
+  const live = capture(t.env)
+  await live.start('audio')
+  FakeRecorder.created[0].emit('a')
+  t.failWhen((url) => url.includes('/audio')) // the keep's upload can't finish yet
+  const keeping = live.keep()
+  const making = live.stop()
+  t.env.page.dispatchEvent(new Event('pagehide'))
+  assert.deepEqual(t.beacons.map((b) => b.url), ['/api/live/s1/end'])
+  assert.deepEqual(JSON.parse(await t.beacons[0].body.text()), { allow_gaps: true })
+  t.failWhen(() => false) // let the queued upload land, so nothing is left retrying
+  await keeping.catch(() => {})
+  await making
+})
+
 test('screen sharing denied: the mic is not requested and no session is made', async () => {
   let micAsked = false
   const t = setup({
@@ -940,6 +1095,19 @@ test('discard while recording works too, and a failed delete can be retried', as
   t.failWhen((url) => url === '/api/sessions/s1')
   await assert.rejects(live.discard(), /wasn't deleted/)
   t.failWhen(() => false)
+  await live.discard()
+  assert.deepEqual(t.calls.map((c) => `${c.method} ${c.url}`), ['DELETE /api/sessions/s1'])
+})
+
+test("a delete answered in place of the engine says Iris isn't responding, and can be retried", async () => {
+  const t = resumableSetup()
+  const live = capture(t.env)
+  await live.start('audio')
+  const reach = t.env.fetch
+  t.env.fetch = async (url, init) =>
+    init?.method === 'DELETE' ? new Response('{"detail":"The Iris engine is not running."}', { status: 503 }) : reach(url, init)
+  await assert.rejects(live.discard(), /Iris isn't responding, so the recording wasn't deleted/)
+  t.env.fetch = reach
   await live.discard()
   assert.deepEqual(t.calls.map((c) => `${c.method} ${c.url}`), ['DELETE /api/sessions/s1'])
 })

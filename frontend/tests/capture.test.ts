@@ -189,6 +189,17 @@ test('ending a session that already ended (lost response) counts as success', as
   )
 })
 
+test("ending while only the engine is down says Iris isn't responding, as with no answer at all", async () => {
+  for (const status of [502, 503]) {
+    await assert.rejects(
+      endLiveSession('s1', { audioChunks: 1, allowGaps: false }, async () => respond(status, { detail: 'SECRET' })),
+      (err: unknown) =>
+        err instanceof EndSessionError &&
+        err.message === "Iris isn't responding, so the session couldn't be finished. Try again in a moment.",
+    )
+  }
+})
+
 test('ending while the backend is down fails with a clear message', async () => {
   await assert.rejects(
     endLiveSession('s1', { audioChunks: 1, allowGaps: false }, async () => {
