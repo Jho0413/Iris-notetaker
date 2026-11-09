@@ -112,7 +112,7 @@ async def rerun(
     settings: SettingsDep,
     from_stage: Stage | None = None,
 ) -> Session:
-    """Re-run the pipeline, optionally from a given stage (never lose a session: principle 4)."""
+    """Re-run the pipeline, optionally from a given stage; finished stages are kept."""
     if runner.is_running(session.id):
         raise HTTPException(409, "session is already processing")
     runner.start(session.id, from_stage)

@@ -1,5 +1,4 @@
-"""OpenAI client. All model calls go through here so cost and latency can be tracked in one place
-(docs/architecture/overview.md).
+"""OpenAI client. All model calls go through here so cost and latency can be tracked in one place.
 
 ``get_openai`` returns the SDK client behind a thin proxy: the model-call methods in ``METERED``
 report every call (usage, latency, failures) to ``iris.llm.usage``; everything else passes

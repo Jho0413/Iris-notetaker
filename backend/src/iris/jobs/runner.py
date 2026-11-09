@@ -1,6 +1,6 @@
 """Runs a session's pipeline as an in-process asyncio task. Single user, so no queue server.
 
-A failed run is recorded twice (docs/architecture/errors.md): for the user, one of
+A failed run is recorded twice: for the user, one of
 our own messages (``UserFacingError``'s for a known input problem, else ``GENERIC_FAILURE``) and its
 kind, published in the ``error`` event; for developers, the raw error in the log and the session
 record (``iris show``). Exception text never reaches the API. A run cut off by Iris stopping is

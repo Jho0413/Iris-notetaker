@@ -71,7 +71,8 @@ but it is still proven to work (step 4).
   `tmp_path` (synthetic video/audio/frames); don't commit large binaries.
 - **Docs are overviews.** `docs/` explains the shape, the flow and the decisions with their why;
   the detail stays in the code and its comments. A change that alters a flow or a decision updates
-  its page.
+  its page. Links run one way: a page's "Where to look" points at the code; code comments explain
+  themselves and never point at a docs page.
 - **Commits:** one short single-line message, `<type>(<domain>): <comment>`, e.g.
   `fix(render): retry transient API errors per figure`. No body, no `Co-Authored-By`, no AI
   attribution.

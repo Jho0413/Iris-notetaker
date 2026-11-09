@@ -1,6 +1,6 @@
 """Promotion: at stop, the live lanes' outputs become the pipeline's own.
 
-docs/architecture/live.md, "Stop". After the lanes have finished and ingest
+After the lanes have finished and ingest
 has written ``audio.wav`` and ``frames/`` + ``frames.json``, the job runner asks ``promotable``
 which stages the live work replaces, writes their outputs with ``promote`` and runs the rest of
 the plan (``remaining_plan``):

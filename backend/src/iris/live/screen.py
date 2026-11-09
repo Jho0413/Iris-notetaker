@@ -7,7 +7,7 @@ Writes: frames/<t_ms>.jpg (the same names and bytes ingest writes), live/frames.
 Publishes: closed moments (and so ``closed_to``); emits MOMENT_FOUND per moment, with the data
         the detect stage emits.
 
-How it works (docs/architecture/live.md):
+How it works:
   1. Frames are held back so they are handled in time order: one at ``t`` is handled once the
      recording is known to have reached ``t + live_frame_holdback_s`` (session time: the latest
      frame captured, or ``transcribed_to`` while no frames come), or at stop. A frame that can
