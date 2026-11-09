@@ -48,7 +48,9 @@ codesign --verify --deep --strict "$APP"
 # debugger in, for the app or its engine.
 # Captured first, not piped to grep -q: under pipefail, grep quitting early fails the pipeline.
 for bin in "$APP" "$APP/Contents/Resources/backend/python/bin/python3"; do
-  signature="$(codesign -dv "$bin" 2>&1)"
+  signature="$(codesign -dv "$bin" 2>&1)" || {
+    echo "build-app.sh: can't read the signature of $bin: $signature" >&2; exit 1
+  }
   entitlements="$(codesign -d --entitlements - "$bin" 2>/dev/null)"
   if [[ "$signature" != *flags=*runtime* ]]; then
     echo "build-app.sh: $bin is not signed with the hardened runtime" >&2; exit 1
