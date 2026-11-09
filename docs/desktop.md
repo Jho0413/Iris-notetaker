@@ -147,17 +147,26 @@ app the user switches to, and leave out Iris's own windows, which recording neve
   debugging.
 - **No developer tools** in the packaged app: from them, whoever is at the keyboard could call
   the engine through the window with the token added. The dev app keeps them.
+- **The hardened runtime** has macOS refuse a debugger attaching to the app or its engine, and
+  libraries added to them at launch. Only what Iris needs is let back in: compiling JavaScript as
+  it runs, the microphone, and loading its own libraries.
 
-*Why the fuses:* anything running as the user could otherwise start Iris with its own code in
-it, and borrow the Keychain's trust in Iris to read the key.
+*Why the fuses and the hardened runtime:* anything running as the user could otherwise start Iris
+with its own code in it, or reach into it while it runs, and borrow the Keychain's trust in Iris
+to read the key. The fuses close Electron's ways in, the hardened runtime the Mac's.
 
 ## Packaging
 
 1. `make desktop` builds the UI, then a standalone Python with Iris installed into it, then the
    app and a `.dmg` with electron-builder.
 2. The engine runs from that bundled Python, isolated from the user's environment, so nothing has
-   to be installed. A smoke test runs the bundle before the build is accepted.
-3. The app is ad-hoc signed, not notarized, so every build is a new app to macOS
+   to be installed. A smoke test runs the bundle before the build is accepted, and again once it
+   is signed inside the app, where the hardened runtime decides what it may load.
+3. The engine's code is compiled ahead, in a form that stays valid when the build copies it into
+   the app, so the engine starts without compiling it again. The second smoke test runs it in a way
+   that would save anything it had to compile, and the signature is checked afterwards: a write
+   would break the app's seal, so a passing build proves nothing needed compiling.
+4. The app is ad-hoc signed, not notarized, so every build is a new app to macOS
    ([`development.md`](development.md#opening-a-downloaded-copy-of-the-app)).
 
 ## Limits
@@ -166,7 +175,11 @@ The key protection keeps it from other programs running as the user. It doesn't 
 
 - a keylogger or screen reader catching the key as it is typed;
 - anything reading the session files in the data folder, which are plain files;
-- anything with admin rights, or a process the user lets through the Keychain's own prompt.
+- anything with admin rights, or a process the user lets through the Keychain's own prompt;
+- a program that can write into `Iris.app` swapping in a library of its own. macOS only checks
+  that an app's libraries come from the same developer when the app is signed with an Apple
+  developer certificate; an ad-hoc or self-signed app has no developer to check against, so that
+  check is off.
 
 ## Where to look
 
@@ -174,6 +187,7 @@ The key protection keeps it from other programs running as the user. It doesn't 
 - `desktop/src/`: the main process's parts, each tested in `desktop/test/`; the decisions
   (`routes.cjs`, `policy.cjs`, `tray.cjs`, `picker.cjs`) are pure functions.
 - `desktop/pages/`: the starting page, the key window and the picker, with their preloads.
-- `desktop/electron-builder.yml`: packaging, signing and the fuses.
+- `desktop/electron-builder.yml`: packaging, signing, the fuses and the hardened runtime, with its
+  entitlements in `desktop/build-resources/`.
 - `desktop/scripts/`: the build, the backend bundle and its smoke test.
 - `backend/src/iris/launch_secrets.py`, `parent.py`, `api/token.py`: the engine's side.
