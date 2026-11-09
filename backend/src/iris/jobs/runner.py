@@ -95,8 +95,9 @@ class JobRunner:
         try:
             timeline = None
             if ctx.source == SourceKind.BROWSER_LIVE:
-                # Recording has stopped: let the live lanes flush before ingest reads live/.
-                # None when the session has no processor (a re-run, or live processing is off).
+                # Making notes: let the live lanes flush before ingest reads live/.
+                # None when the session has no processor: a re-run, or live processing is off
+                # (making notes starts one if the engine restarted since recording).
                 timeline = await self.live.finish(session_id)
             if timeline is not None and from_stage is None:
                 await self._run_live(ctx, timeline)
@@ -143,7 +144,7 @@ class JobRunner:
                 raise first_error(error) from None
 
     async def _run_live(self, ctx: StageContext, timeline: LiveTimeline) -> None:
-        """A live session at stop: ingest, promote what the live lanes finished, run the rest.
+        """A live session's notes: ingest, promote what the live lanes finished, run the rest.
 
         What can be promoted is decided after ingest, which leaves the frames the live moments
         refer to in place (``live/promote.py``). The live lanes write no notes draft, only the

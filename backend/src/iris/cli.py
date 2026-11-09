@@ -1,6 +1,6 @@
 """Command line entry point.
 
-iris serve [--secrets-from-stdin]   run the API (http://localhost:8000); the desktop app
+iris serve [--secrets-from-stdin]   run the API (http://127.0.0.1:8000); the desktop app
                                     passes the OpenAI key and API token on stdin
                                     (iris/launch_secrets.py)
 iris process <file>                 create a session from a recording and run the pipeline

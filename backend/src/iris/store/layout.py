@@ -44,7 +44,6 @@ sessions/<id>/
     notes_synthesis.json  SynthesizedDraft: the notes draft after the synthesis pass
     synthesis.json        SynthesisReport: what synthesis did, or why it skipped or failed
     notes.json            Notes
-    notes.md              final markdown (for export)
     notes_edits.json      NotesEdits: the user's edited notes, latest save only. Written by the
                           API, never by a stage, so re-runs keep them
     usage_calls.jsonl     one UsageRecord per model call, appended by iris.llm.usage
@@ -138,6 +137,10 @@ class SessionPaths:
         return self.root / "alignment.json"
 
     @property
+    def selection_batches_dir(self) -> Path:
+        return self.root / "selection_batches"
+
+    @property
     def selection(self) -> Path:
         return self.root / "selection.json"
 
@@ -146,8 +149,16 @@ class SessionPaths:
         return self.root / "visuals"
 
     @property
+    def render_cache_dir(self) -> Path:
+        return self.root / "render_cache"
+
+    @property
     def renders(self) -> Path:
         return self.root / "renders.json"
+
+    @property
+    def notes_sections_dir(self) -> Path:
+        return self.root / "notes_sections"
 
     @property
     def notes_draft(self) -> Path:
@@ -168,10 +179,6 @@ class SessionPaths:
     @property
     def notes(self) -> Path:
         return self.root / "notes.json"
-
-    @property
-    def notes_md(self) -> Path:
-        return self.root / "notes.md"
 
     # Written by the API (the user's edits), never by a stage.
     @property

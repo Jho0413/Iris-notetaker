@@ -4,7 +4,7 @@ Reads transcript.json and selection.json. Writes notes_draft.json after each com
 section and emits NOTES_UPDATED. Assemble publishes notes.json only after this stage succeeds.
 
 Sections are planned so that the live draft lane (``iris/live/draft.py``) can write the final ones
-while recording and this stage reuses them at stop:
+while recording and this stage reuses them when notes are made:
 
 - *Part boundaries depend only on earlier evidence.* Records are packed in time order and a part
   closes when the next record would exceed the budget, so appending evidence never moves an
@@ -349,7 +349,8 @@ def section_payload(
 ) -> str:
     """The model input for one part. ``first`` is the session's first section (``None`` for the
     first part); ``later`` says whether parts follow. Nothing here depends on how many parts the
-    session has, so a part written live has the payload, and the cache key, it has at stop.
+    session has, so a part written live has the payload, and the cache key, it has when notes
+    are made.
 
     ``earlier`` defaults to ``first is not None``. The live draft lane sets it for a later part
     when the first part could not be written, so that part is still written as a continuation."""
@@ -379,7 +380,7 @@ def section_key(ctx: StageContext, payload: str) -> str:
 
 
 def section_cache_path(ctx: StageContext, payload: str) -> Path:
-    return ctx.paths.root / "notes_sections" / f"{section_key(ctx, payload)}.json"
+    return ctx.paths.notes_sections_dir / f"{section_key(ctx, payload)}.json"
 
 
 async def write_section(

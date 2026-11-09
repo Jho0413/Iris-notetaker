@@ -15,9 +15,9 @@
   file's), then ``POST /end`` is sent with the chunk count.
 
 It follows the session's events and reports when the first transcript, moment, figure and notes
-section arrived, how many notes sections were written before stop, how long stop took to reach
-``done``, whether stop promoted the live work, and the model cost (total and after stop) from
-``/api/sessions/{id}/usage``.
+section arrived, how many notes sections were written before ``/end``, how long making notes
+took to reach ``done``, whether it promoted the live work, and the model cost (total and after
+``/end``) from ``/api/sessions/{id}/usage``.
 
 The encoding helpers (``encode_webm``, ``chunk_webm``) are shared with the tests, which build
 synthetic recordings with them. PyAV only: no ``ffmpeg`` CLI.
@@ -215,13 +215,13 @@ class ReplayReport:
     # Seconds after recording started that each event type first arrived (wall clock, scaled
     # back to session time when sped up).
     first: dict[str, float] = field(default_factory=dict)
-    sections_live: int = 0  # notes sections written before stop (live notes_updated)
+    sections_live: int = 0  # notes sections written before /end (live notes_updated)
     promoted: list[str] = field(default_factory=list)
-    stop_to_done_s: float | None = None
+    notes_to_done_s: float | None = None
     cost_usd: float | None = None
-    cost_after_stop_usd: float | None = None
+    cost_after_notes_usd: float | None = None
     calls: int = 0
-    calls_after_stop: dict[str, int] = field(default_factory=dict)  # by stage
+    calls_after_notes: dict[str, int] = field(default_factory=dict)  # by stage
 
     def lines(self) -> list[str]:
         def at(kind: str) -> str:
@@ -236,15 +236,15 @@ class ReplayReport:
             f"  first transcript {at('transcript_chunk')}, moment {at('moment_found')}, "
             f"figure {at('visual_selected')}, notes section {at('notes_updated')}",
             f"  notes sections written live: {self.sections_live}",
-            f"  promoted at stop: {', '.join(self.promoted) or 'nothing'}",
+            f"  promoted at make notes: {', '.join(self.promoted) or 'nothing'}",
         ]
-        if self.stop_to_done_s is not None:
-            out.append(f"  stop to done: {self.stop_to_done_s:.1f} s")
+        if self.notes_to_done_s is not None:
+            out.append(f"  make notes to done: {self.notes_to_done_s:.1f} s")
         if self.cost_usd is not None:
-            after = ", ".join(f"{s} {n}" for s, n in sorted(self.calls_after_stop.items()))
+            after = ", ".join(f"{s} {n}" for s, n in sorted(self.calls_after_notes.items()))
             out.append(
-                f"  cost ${self.cost_usd:.4f} over {self.calls} calls; after stop "
-                f"${self.cost_after_stop_usd or 0:.4f} ({after or 'no calls'})"
+                f"  cost ${self.cost_usd:.4f} over {self.calls} calls; after make notes "
+                f"${self.cost_after_notes_usd or 0:.4f} ({after or 'no calls'})"
             )
         return out
 
@@ -312,7 +312,7 @@ async def replay(
                     report.frames += 1
 
         done = asyncio.Event()
-        stopped_at: list[float] = []
+        notes_at: list[float] = []
 
         async def follow() -> None:
             async with client.stream("GET", f"{api}/sessions/{sid}/events", timeout=None) as r:
@@ -322,7 +322,7 @@ async def replay(
                     event = json.loads(line[5:])
                     kind, data = event["type"], event.get("data") or {}
                     report.first.setdefault(kind, now())
-                    if kind == "notes_updated" and data.get("live") and not stopped_at:
+                    if kind == "notes_updated" and data.get("live") and not notes_at:
                         report.sections_live = data.get("completed_parts", report.sections_live)
                     if kind == "stage_finished" and data.get("promoted"):
                         report.promoted.append(data["stage"])
@@ -335,13 +335,13 @@ async def replay(
         try:
             await asyncio.gather(send_audio(), send_frames())
             await until(webm.duration_s)
-            stop_wall = datetime.now(UTC)
-            stopped_at.append(loop.time())
-            log(f"  stop at {now():.1f} s")
+            notes_wall = datetime.now(UTC)
+            notes_at.append(loop.time())
+            log(f"  make notes at {now():.1f} s")
             r = await client.post(f"{api}/live/{sid}/end", json={"audio_chunks": len(chunks)})
             r.raise_for_status()
             await asyncio.wait_for(done.wait(), timeout_s)
-            report.stop_to_done_s = loop.time() - stopped_at[0]
+            report.notes_to_done_s = loop.time() - notes_at[0]
         finally:
             follower.cancel()
             await asyncio.gather(follower, return_exceptions=True)
@@ -353,11 +353,11 @@ async def replay(
         records = usage.get("records", [])
         report.cost_usd = usage.get("total", {}).get("cost_usd")
         report.calls = len(records)
-        after = [r for r in records if datetime.fromisoformat(r["at"]) >= stop_wall]
-        report.cost_after_stop_usd = sum(r.get("cost_usd") or 0 for r in after)
+        after = [r for r in records if datetime.fromisoformat(r["at"]) >= notes_wall]
+        report.cost_after_notes_usd = sum(r.get("cost_usd") or 0 for r in after)
         for r in after:
             stage = r.get("stage") or "none"
-            report.calls_after_stop[stage] = report.calls_after_stop.get(stage, 0) + 1
+            report.calls_after_notes[stage] = report.calls_after_notes.get(stage, 0) + 1
     return report
 
 

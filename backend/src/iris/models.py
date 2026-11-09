@@ -242,7 +242,8 @@ class RenderedVisual(BaseModel):
     id: str
     path: str  # final visual, relative to the session folder
     render_as: RenderAs  # the renderer that produced it (may differ from the requested one)
-    verified: bool  # passed the check against the source; False only for screenshot fallbacks
+    # Passed the check, or a screenshot select chose (used as is, unchecked); False for fallbacks.
+    verified: bool
     attempts: int
     # For debugging, never served: the last failed check's problems, or the API error that made
     # it fall back to the source crop.

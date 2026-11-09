@@ -1,7 +1,7 @@
 """Assemble: resolve ``[visual:<id>]`` markers into figures and store the final notes.
 
 Reads:  notes_draft.json, selection.json, renders.json and notes_synthesis.json (when present)
-Writes: notes.json (Notes), notes.md
+Writes: notes.json (Notes)
 
 The synthesized draft replaces the notes draft only while it was made from exactly that draft and
 selection; otherwise (absent, stale after a re-run, or unreadable) the notes draft is used.
@@ -111,5 +111,4 @@ async def run(ctx: StageContext) -> None:
         format_version=FORMAT_VERSION,
     )
     write_model(ctx.paths.notes, notes)
-    ctx.paths.notes_md.write_text(markdown)
     ctx.emit(EventType.NOTES_UPDATED, {"final": True})

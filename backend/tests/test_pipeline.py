@@ -89,7 +89,6 @@ async def test_assemble_resolves_markers_and_drops_unknown(ctx: StageContext):
     assert notes.markdown == "Intro\n\n::figure{#v1}\n\n\n"
     assert notes.format_version == 2
     assert "nope" not in notes.markdown
-    assert ctx.paths.notes_md.read_text() == notes.markdown
 
 
 def test_leading_heading_repeating_the_title_is_dropped():

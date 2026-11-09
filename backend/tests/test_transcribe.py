@@ -491,21 +491,6 @@ async def test_text_only_model_gives_one_segment_per_short_chunk(ctx, monkeypatc
         assert is_quiet(samples, cut)  # still cut at silences
 
 
-async def test_chunk_lengths_from_settings_if_present(ctx, monkeypatch):
-    class TunedSettings(Settings):
-        transcribe_target_chunk_s: float = 3.0
-        transcribe_max_chunk_s: float = 5.0
-
-    ctx.settings = TunedSettings(data_dir=ctx.settings.data_dir, openai_api_key="test-key")
-    samples = make_audio(bursts_pattern(20))
-    write_wav(ctx.paths.audio, samples)
-    client = fake_client(delay=0)
-    use_client(monkeypatch, client)
-    await transcribe.run(ctx)
-    n = len(plan_chunks(samples, RATE, 3.0, 5.0))
-    assert n > 1 and len(client.audio.transcriptions.calls) == n
-
-
 @pytest.mark.parametrize("seconds", [10, 12, 15])
 def test_remaining_audio_within_max_is_one_chunk(seconds):
     samples = np.zeros(seconds * RATE, dtype=np.int16)

@@ -15,24 +15,24 @@ How it works:
      flight; the moments that passed the gate meanwhile go together in the next batch (up to
      ``selection_batch_size``), with earlier moments' content as context. Visual ids continue the
      pipeline's numbering. A batch made of the same moments, after the same content, as one of
-     the select stage's has the same cache key, so stop reuses it.
+     the select stage's has the same cache key, so making notes reuses it.
   3. Each new figure renders in the background (``render.render_visual``), at most
      ``live_render_concurrency`` at once, by the render stage's rules: an API error gives the
-     source crop, unverified and uncached, so the render stage tries the redraw again at stop. A
-     render that raises (a blocking error) is logged and leaves no cache entry; the next model
-     call (a batch here, or the run at stop) fails on the same error.
+     source crop, unverified and uncached, so the render stage tries the redraw again when notes
+     are made. A render that raises (a blocking error) is logged and leaves no cache entry; the
+     next model call (a batch here, or the run that makes notes) fails on the same error.
   4. ``selected_to`` advances to the end of the last moment read, never past ``closed_to``.
      With every closed moment read, it follows ``closed_to``: that moves on its own while no
      screen is shared (an audio-only recording), and the horizon then follows the transcript.
   5. When ``timeline.upstream_failed``: no more model calls; renders still running are
-     cancelled (they leave no cache entry). Wait for stop.
+     cancelled (they leave no cache entry). Wait for notes to be asked for.
   6. Batches depend on timing, so the lane records each batch's moment ids. A fresh lane (after
      a backend restart) replays them: it waits until all of an earlier batch's moments pass the
      gate and reads them together, so every batch already paid for is a cache hit.
   7. On ``timeline.ending``: wait for the screen lane to finish and the gate to pass (a finished
-     audio lane passes it), read the remaining moments, wait for the renders already running,
-     and return. Renders not started by then are left to the render stage, which renders every
-     figure at stop anyway, with more concurrency (once the live selection is promoted, the
+     audio lane passes it), read the remaining moments, wait for the renders already running, and
+     return. Renders not started by then are left to the render stage, which renders every figure
+     when notes are made anyway, with more concurrency (once the live selection is promoted, the
      renders done live are its cache hits).
 """
 
@@ -112,7 +112,7 @@ class SelectLane(LiveLane):
         return self.read == len(tl.moments) and tl.closed_to > tl.selected_to
 
     def _drained(self) -> bool:
-        """Stop was requested, the screen lane will close no more moments and all are read."""
+        """Notes were asked for, the screen lane will close no more moments and all are read."""
         tl = self.timeline
         return tl.ending and tl.done(Lane.SCREEN) and self.read == len(tl.moments)
 
@@ -191,7 +191,7 @@ class SelectLane(LiveLane):
     async def _render(self, visual: Visual) -> None:
         async with self._render_limit:
             if self.timeline.ending or self._halted():
-                return  # the render stage renders it at stop, if it runs
+                return  # the render stage renders it when notes are made, if it runs
             try:
                 with usage.recording(self.ctx, Stage.RENDER):
                     rendered = await render.render_visual(self.ctx, visual)

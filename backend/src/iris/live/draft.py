@@ -1,4 +1,4 @@
-"""Draft lane: writes the notes sections that are final while recording, ahead of stop.
+"""Draft lane: writes the notes sections that are final while recording, ahead of making notes.
 
 Reads:  the timeline (transcript, selection, horizon)
 Writes: notes_sections/ (the write stage's cache) only. No draft is shown while recording.
@@ -13,19 +13,21 @@ How it works:
   2. A part that closed before the horizon is final (the timeline never adds evidence before the
      horizon: see its docstring). It is *frozen*: written once through ``write.write_section``,
      with the payload, and so the cache key in ``notes_sections/``, that the write stage computes
-     for the same part at stop. Stop then reuses it without a call, so the time from stop to
-     notes depends on what was still open, not on how long the session was. Nothing past the
-     horizon is written live: the open parts are the write stage's at stop.
+     for the same part when notes are made. Making notes then reuses it without a call, so the
+     time from asking for notes to having them depends on what was still open, not on how long
+     the session was. Nothing past the horizon is written live: the open parts are the write
+     stage's when notes are made.
   3. A payload is tried at most ``MAX_ATTEMPTS`` times, ``RETRY_DELAY_S`` apart (each try
      retries temporary API errors itself, in ``write.write_section``); after that, or at once on
-     a blocking error, the lane gives up on it until it changes (the write stage retries it at
-     stop). A part that can't
-     be written blocks nothing, except that while the first part waits for its retry the later
-     parts wait too (their payloads carry its title). Once it is given up, they are written
-     without it, as continuations.
-  4. ``timeline.upstream_failed``: no more calls (nothing made can be promoted); wait for stop.
+     a blocking error, the lane gives up on it until it changes (the write stage retries it when
+     notes are made). A part that can't be written blocks nothing, except that while the first
+     part waits for its retry the later parts wait too (their payloads carry its title). Once it
+     is given up, they are written without it, as continuations.
+  4. ``timeline.upstream_failed``: no more calls (nothing made can be promoted); wait for notes
+     to be asked for.
   5. On ``timeline.ending``: return. A call in flight is finished, since the write stage would
-     make that very call. No call starts after stop, not even a retry of a temporary error.
+     make that very call. No call starts once notes are asked for, not even a retry of a
+     temporary error.
 
 After a backend restart a fresh lane re-plans from the timeline and its frozen parts hit the
 cache.
@@ -61,7 +63,7 @@ def plan(
 
 class DraftLane(LiveLane):
     lane = Lane.DRAFT
-    retries_end_at_stop = True  # no call starts after stop, not even a retry
+    retries_end_at_notes = True  # no call starts once notes are asked for, not even a retry
 
     def __init__(self, ctx: StageContext, timeline: LiveTimeline):
         super().__init__(ctx, timeline)
@@ -147,7 +149,8 @@ class DraftLane(LiveLane):
         return True
 
     async def _wait(self, seen: tuple, now: float) -> None:
-        """Until the evidence changes, stop, an upstream failure, or ``self._due``."""
+        """Until the evidence changes, notes are asked for, an upstream lane fails, or
+        ``self._due``."""
         tl = self.timeline
         waiting = tl.wait_until(lambda: tl.ending or self._halted() or self._evidence() != seen)
         due = self._due

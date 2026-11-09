@@ -2,7 +2,7 @@
 
 Reads:  live/frames/<t_ms>-<share>.jpg
 Writes: frames/<t_ms>.jpg (the same names and bytes ingest writes), live/frames.json (the
-        frames fed so far, rewritten at most every ``INDEX_SAVE_S`` and at stop),
+        frames fed so far, rewritten at most every ``INDEX_SAVE_S`` and when notes are made),
         live/moments.json
 Publishes: closed moments (and so ``closed_to``); emits MOMENT_FOUND per moment, with the data
         the detect stage emits.
@@ -10,15 +10,15 @@ Publishes: closed moments (and so ``closed_to``); emits MOMENT_FOUND per moment,
 How it works:
   1. Frames are held back so they are handled in time order: one at ``t`` is handled once the
      recording is known to have reached ``t + live_frame_holdback_s`` (session time: the latest
-     frame captured, or ``transcribed_to`` while no frames come), or at stop. A frame that can
-     no longer be handled in that order is too late (``_lateness``): one earlier than a frame
-     already fed, or before ``closed_to``. If ingest would have used it, the live moments now
-     differ from ingest's, so it is recorded with ``timeline.mark_skipped_input(Lane.SCREEN)``;
-     a late frame whose grid cell already has an earlier frame is dropped by ingest too, and
-     nothing is lost.
+     frame captured, or ``transcribed_to`` while no frames come), or when notes are made. A frame
+     that can no longer be handled in that order is too late (``_lateness``): one earlier than a
+     frame already fed, or before ``closed_to``. If ingest would have used it, the live moments now
+     differ from ingest's, so it is recorded with ``timeline.mark_skipped_input(Lane.SCREEN)``; a
+     late frame whose grid cell already has an earlier frame is dropped by ingest too, and nothing
+     is lost.
   2. Frames are sampled onto the ``frame_fps`` grid and normalised by ``GridSampler`` and
      ``FrameNormaliser``, the helpers ``finalize_frames`` uses (size fixed by each share's first
-     readable frame, letterboxed), so ``frames/`` holds what ingest writes at stop.
+     readable frame, letterboxed), so ``frames/`` holds what ingest writes when notes are made.
   3. Each normalised frame is read back from ``frames/`` (as the detect stage reads it) and fed to
      ``MomentDetector`` in a worker thread. Where the share number changes, ``detector.end_share``
      closes the open moment where the share ended (``share_end``), as ``detect_moments`` does.
@@ -27,8 +27,8 @@ How it works:
      screen is shared), no moment is open, and none can start before the first frame:
      ``closed_to`` follows ``transcribed_to`` up to there, so the select lane, and so the horizon,
      follow the transcript and notes are written while nothing is shared. Once a share has
-     started, a moment stays open until the next share's frames or stop say where it ended:
-     nothing else can tell sharing stopping from frames still on their way.
+     started, a moment stays open until the next share's frames or making notes say where it
+     ended: nothing else can tell sharing stopping from frames still on their way.
   5. On ``timeline.ending``: everything held is handled, ``detector.finish`` closes the last
      moment one grid step after the last frame (as ``detect_moments`` does), and the lane
      returns.
@@ -63,7 +63,8 @@ log = logging.getLogger(__name__)
 # the lane can be cancelled between calls.
 FEED_BATCH = 30
 # live/frames.json lists every frame so far, so rewriting it per frame would cost disk writes
-# quadratic in the session length. It is rewritten at most this often (session time) and at stop.
+# quadratic in the session length. It is rewritten at most this often (session time) and when
+# notes are made.
 INDEX_SAVE_S = 30.0
 
 
@@ -185,14 +186,14 @@ class ScreenLane(LiveLane):
 
     async def _follow(self, feed: ScreenFeed) -> None:
         """Handle frames in time order as they arrive, and move ``closed_to`` until the first
-        frame, until stop (steps 1 to 4)."""
+        frame, until notes are asked for (steps 1 to 4)."""
         tl = self.timeline
         holdback_ms = round(self.ctx.settings.live_frame_holdback_s * 1000)
         seen: set[tuple[float, int]] = set()  # captured frames already handled
         held: list[CapturedFrame] = []  # captured, not handled yet
         latest_ms = -1  # the latest frame captured
         while True:
-            # Read before listing, so everything stored before stop was requested is handled.
+            # Read before listing, so everything stored before notes were asked for is handled.
             ending = tl.ending
             transcribed_to = tl.transcribed_to
             for frame in await asyncio.to_thread(captured_frames, self.ctx.paths):
@@ -232,7 +233,7 @@ class ScreenLane(LiveLane):
 
     async def _wait(self, transcribed_to: float) -> None:
         """Sleep until new input arrives, the transcript moves on (the clock that releases what
-        is held while no frames come) or stop is requested."""
+        is held while no frames come) or notes are asked for."""
         tl = self.timeline
         waits = [
             asyncio.ensure_future(self.wait_for_input()),

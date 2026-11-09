@@ -190,6 +190,11 @@ async def end_live(
                     "missing_audio_chunks": missing[:MAX_LISTED_MISSING],
                 },
             )
+    # After an engine restart the session has no processor yet (e.g. the desktop app quit and
+    # stopped it): fresh lanes catch up on the captured files and their caches before the run
+    # finishes them, so the work done before the restart is promoted, not paid for again. Started
+    # before the status changes, so an error here leaves the session as it was.
+    runner.live.ensure(session.id)
     # Leave RECORDING (or STOPPED) before any await, so no chunk is accepted once ingest may have
     # started, and no second end or stop is.
     store.update(session.id, status=SessionStatus.PROCESSING)

@@ -10,10 +10,11 @@ Two halves:
 contiguous run of ``seq``: at the end of chunk n it blocks until chunk n+1 is stored, so the
 chunks decode as the one WebM stream they are cut from, never chunk by chunk. Samples go through
 ``PlacedWav`` exactly as in ``finalize_audio``, into ``live/audio.pcm`` (sample i is at i / rate
-s, session time), so the live PCM is the same audio ingest writes at stop. If chunk n is missing
+s, session time), so the live PCM is the same audio ingest writes later. If chunk n is missing
 while later ones are stored, it is waited for ``live_audio_gap_wait_s`` (wall clock); then decoding
 resumes at the next WebM cluster with the stream header prepended, the gap stays silence, and the
-lane marks ``skipped_input``. Chunk 0 (the header) has no substitute and is waited for until stop.
+lane marks ``skipped_input``. Chunk 0 (the header) has no substitute and is waited for until notes
+are asked for.
 
 **Windows** (the event loop). A window is cut at the quietest point between
 ``live_window_min_s`` and ``live_window_max_s`` after the previous cut (``transcribe.QuietProfile``;
@@ -21,9 +22,9 @@ among equally quiet points the latest, so windows are long and few). A cut is on
 the whole search range plus ``CONFIRM_S`` is decoded: the cut never falls in the last moments of
 decoded audio, where a pause can't be confirmed yet, and it depends only on the audio, never on
 how much had arrived, so a lane restarted after a backend restart reproduces the same cuts and
-reuses its cached windows. Cuts are made in decoded audio, so a chunk edge is never a cut. At stop
-the rest of the audio is cut the same way and the last window ends where the audio ends
-(stretched by up to ``CONFIRM_S`` rather than leave a tail shorter than ``MIN_TAIL_S``).
+reuses its cached windows. Cuts are made in decoded audio, so a chunk edge is never a cut. When
+notes are asked for, the rest of the audio is cut the same way and the last window ends where the
+audio ends (stretched by up to ``CONFIRM_S`` rather than leave a tail shorter than ``MIN_TAIL_S``).
 
 Windows are transcribed with ``transcribe.transcribe_chunk``, at most
 ``live_transcribe_concurrency`` at once (a window starts only while fewer than that many are
@@ -31,10 +32,10 @@ uncommitted), each retried after a temporary API error (``retry_temporary``, wit
 ``api_retry_delays_s``) before the lane fails; other errors fail it at once. Each window is
 prompted with the tail of the text *committed when it is sent*: normally that is the previous
 window (windows end ~10 s apart and take a few seconds to transcribe), while a backlog (a slow API,
-or stop) is worked through concurrently with slightly older context. The cache entry records the
-prompt and which window it was taken from, and is reused only if its audio, model and prompt
-match the text now committed there; a damaged entry is regenerated. Every window is sent the
-configured ``transcribe_language`` (the cache records it too), so a misdetected first window
+or making notes) is worked through concurrently with slightly older context. The cache entry
+records the prompt and which window it was taken from, and is reused only if its audio, model and
+prompt match the text now committed there; a damaged entry is regenerated. Every window is sent
+the configured ``transcribe_language`` (the cache records it too), so a misdetected first window
 can't carry the wrong language into the rest through the prompt. Windows commit strictly in
 order. The transcript's language is that of the first window with speech (the timeline keeps the
 first language published, and silent windows are often misdetected), in the timeline and
@@ -81,7 +82,7 @@ log = logging.getLogger(__name__)
 CONFIRM_S = 1.0  # decoded audio needed past a window's search range before it is cut
 PROMPT_CHARS = 500  # tail of the committed transcript sent as a window's prompt (~120 tokens)
 MIN_API_S = 0.1  # the API rejects shorter audio; a shorter final window is committed empty
-MIN_TAIL_S = 1.0  # at stop, a shorter last window joins the one before (whisper hallucinates)
+MIN_TAIL_S = 1.0  # at the end, a shorter last window joins the one before (whisper hallucinates)
 PROGRESS_S = 5.0  # while catching up, the decoder reports progress at least this often
 
 
@@ -120,7 +121,7 @@ class LiveDecoder:
         self._poke.set()
 
     def end(self) -> None:
-        """Recording stopped: decode what is stored, then return."""
+        """Notes were asked for, so nothing more arrives: decode what is stored, then return."""
         self._ending = True
         self._poke.set()
 

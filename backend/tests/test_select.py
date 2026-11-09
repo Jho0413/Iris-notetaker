@@ -141,7 +141,7 @@ async def test_invalid_decision_ids_do_not_publish_a_batch(setup, ids):
         await select.run(ctx)
     assert not ctx.paths.selection.exists()
     assert events == []
-    assert list((ctx.paths.root / "selection_batches").glob("*.json")) == []
+    assert list(ctx.paths.selection_batches_dir.glob("*.json")) == []
 
 
 async def test_failed_batch_resumes_from_content_cache(setup):
@@ -221,7 +221,7 @@ async def test_damaged_cache_is_replaced_and_reused(setup, damaged):
     write_model(ctx.paths.alignment, Alignment(items=items[:1]))
     parse.return_value = response(decision("m0"))
     await select.run(ctx)
-    cache = next((ctx.paths.root / "selection_batches").glob("*.json"))
+    cache = next(ctx.paths.selection_batches_dir.glob("*.json"))
     cache.write_bytes(damaged)
     await select.run(ctx)
     assert parse.await_count == 2
@@ -235,7 +235,7 @@ async def test_failed_replacement_does_not_cache_invalid_model_output(setup):
     write_model(ctx.paths.alignment, Alignment(items=items[:1]))
     parse.return_value = response(decision("m0"))
     await select.run(ctx)
-    cache = next((ctx.paths.root / "selection_batches").glob("*.json"))
+    cache = next(ctx.paths.selection_batches_dir.glob("*.json"))
     cache.write_text("{broken")
     parse.return_value = response(decision("invented"))
     with pytest.raises(ValueError, match="exactly once"):
@@ -324,7 +324,7 @@ async def test_selection_through_sdk_parser(setup, monkeypatch, valid):
             with pytest.raises(ValidationError):
                 await select.run(ctx)
             assert not ctx.paths.selection.exists()
-            assert not list((ctx.paths.root / "selection_batches").glob("*.json"))
+            assert not list(ctx.paths.selection_batches_dir.glob("*.json"))
 
     assert len(requests) == 1
     assert requests[0]["response_format"]["json_schema"]["strict"] is True

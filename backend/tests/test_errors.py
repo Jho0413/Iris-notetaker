@@ -314,9 +314,7 @@ async def test_an_api_error_gives_the_source_crop_unverified_and_uncached(
     source = (ctx.paths.root / "visuals/v1.source.jpg").read_bytes()
     assert (ctx.paths.root / v1.path).read_bytes() == source
     assert renders["v2"].verified and renders["v2"].render_as == "svg"
-    cached = [
-        json.loads(p.read_text())["id"] for p in (ctx.paths.root / "render_cache").glob("*.json")
-    ]
+    cached = [json.loads(p.read_text())["id"] for p in ctx.paths.render_cache_dir.glob("*.json")]
     assert cached == ["v2"]  # the fallback is not cached
     notes = read_model(ctx.paths.notes, Notes)
     assert {v.id: v.verified for v in notes.visuals} == {"v1": False, "v2": True}
@@ -346,7 +344,7 @@ async def test_a_quality_failure_still_tries_the_other_renderer(tmp_path, monkey
     assert drawer.calls == ["v1", "v1"]  # svg, then image
     [v1] = read_model(ctx.paths.renders, Renders).visuals
     assert (v1.verified, v1.attempts) == (False, 2)
-    assert list((ctx.paths.root / "render_cache").glob("*.json"))  # a quality fallback is cached
+    assert list(ctx.paths.render_cache_dir.glob("*.json"))  # a quality fallback is cached
     runner.store.close()
 
 
@@ -480,7 +478,7 @@ async def test_a_persistent_temporary_error_fails_select_with_the_generic_messag
     session = runner.store.get(sid)
     assert session.status == SessionStatus.FAILED and session.current_stage == Stage.SELECT
     assert (session.failure_message, session.failure_kind) == (GENERIC_FAILURE, "general")
-    assert len(list((ctx.paths.root / "selection_batches").glob("*.json"))) == 1  # kept
+    assert len(list(ctx.paths.selection_batches_dir.glob("*.json"))) == 1  # kept
     runner.store.close()
 
 

@@ -273,11 +273,11 @@ class EarlyLane(LiveLane):
         return  # gave up before stop
 
 
-async def test_a_lane_that_returns_before_stop_has_failed(tmp_path: Path):
+async def test_a_lane_that_returns_before_notes_are_asked_for_has_failed(tmp_path: Path):
     processor = LiveProcessor(ctx(tmp_path), lambda c, tl: [EarlyLane(c, tl)])
     processor.start()
     await settle()
-    assert "before stop" in processor.timeline.failed[Lane.AUDIO]
+    assert "before notes were asked for" in processor.timeline.failed[Lane.AUDIO]
     timeline = await asyncio.wait_for(processor.finish(), 1)
     assert not timeline.complete
 

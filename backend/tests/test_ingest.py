@@ -8,6 +8,7 @@ import av
 import cv2
 import numpy as np
 import pytest
+from pydantic import ValidationError
 
 from iris.config import Settings
 from iris.llm.errors import UserFacingError
@@ -157,6 +158,17 @@ def test_audio_is_16k_mono_s16(media: Path, tmp_path: Path):
     assert duration == pytest.approx(SECONDS, abs=0.1)
     assert np.abs(samples[16_000:32_000]).max() > 5000  # the sine survived
     assert not (tmp_path / "audio.wav.tmp").exists()
+
+
+@pytest.mark.parametrize("rate", [7_999, 16_001, 44_100])
+def test_audio_sample_rate_outside_what_the_speech_models_take_is_rejected(rate: int):
+    with pytest.raises(ValidationError):
+        Settings(audio_sample_rate=rate)
+
+
+@pytest.mark.parametrize("rate", [8_000, 16_000])
+def test_audio_sample_rate_within_bounds_is_accepted(rate: int):
+    assert Settings(audio_sample_rate=rate).audio_sample_rate == rate
 
 
 def test_audio_starting_late_is_padded_with_silence(tmp_path: Path):

@@ -333,7 +333,7 @@ async def test_parts_frozen_live_are_reused_by_the_write_stage_at_stop(tmp_path,
     assert all(p["later_parts"] for p in notes.payloads)
     # Only the cache is written: no draft is shown while recording.
     assert not ctx.paths.notes_draft.exists()
-    assert len(list((ctx.paths.root / "notes_sections").glob("*.json"))) == len(closed)
+    assert len(list(ctx.paths.notes_sections_dir.glob("*.json"))) == len(closed)
     assert live_counts(events) == list(range(1, len(closed) + 1))
 
     stop_payloads = await stop_and_write(ctx, tl, task)
@@ -423,7 +423,7 @@ async def test_stop_lets_a_call_in_flight_finish(tmp_path, notes):
     notes.gate.set()
     await asyncio.wait_for(task, 2)
     assert notes.calls == 1 and notes.cancelled == 0  # and no new call is started after stop
-    assert len(list((ctx.paths.root / "notes_sections").glob("*.json"))) == 1
+    assert len(list(ctx.paths.notes_sections_dir.glob("*.json"))) == 1
 
 
 async def test_a_failed_call_is_retried_after_the_retry_delay(tmp_path, notes, monkeypatch):
@@ -534,7 +534,7 @@ async def test_a_model_that_always_fails_validation_is_called_at_most_twice_per_
     assert notes.calls == draft.MAX_ATTEMPTS * len(closed)
     payloads = [json.dumps(p, sort_keys=True) for p in notes.payloads]
     assert len(set(payloads)) == len(closed)
-    assert events == [] and not list((ctx.paths.root / "notes_sections").glob("*.json"))
+    assert events == [] and not list(ctx.paths.notes_sections_dir.glob("*.json"))
 
     # The lane keeps working: a part that closes later is a new payload, and the model is back.
     notes.invalid = lambda data: False

@@ -318,7 +318,7 @@ async def read_batch(
     order across batches. Saves each figure's source crop and emits VISUAL_SELECTED. Used by
     ``run`` and by the live select lane, so both make the same calls and cache entries.
     """
-    cache_dir = ctx.paths.root / "selection_batches"
+    cache_dir = ctx.paths.selection_batches_dir
     cache_dir.mkdir(exist_ok=True)
     ctx.paths.visuals_dir.mkdir(exist_ok=True)
     prepared = await asyncio.to_thread(
@@ -391,7 +391,7 @@ async def run(ctx: StageContext) -> None:
     if len({item.moment.id for item in items}) != len(items):
         raise ValueError("alignment contains duplicate moment ids")
     selection = Selection(visuals=[])
-    (ctx.paths.root / "selection_batches").mkdir(exist_ok=True)
+    ctx.paths.selection_batches_dir.mkdir(exist_ok=True)
     ctx.paths.visuals_dir.mkdir(exist_ok=True)
     size = ctx.settings.selection_batch_size
     for offset in range(0, len(items), size):

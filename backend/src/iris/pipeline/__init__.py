@@ -63,7 +63,7 @@ PLAN: list[list[Stage]] = [
     [Stage.ALIGN],
     [Stage.SELECT],
     [Stage.WRITE, Stage.RENDER],  # notes only need figure descriptions, not the images
-    [Stage.ASSEMBLE],  # the notes as written: shown while synthesis runs
+    [Stage.ASSEMBLE],  # the notes as written: kept if synthesis fails
     [Stage.SYNTHESIZE],  # consolidated notes replace them; on failure the assembled notes stay
 ]
 
