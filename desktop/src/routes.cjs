@@ -2,8 +2,10 @@
 // The Electron glue is in handler.cjs.
 //
 //   app://iris/api/...   → forwarded to the backend at http://127.0.0.1:<port>/api/...
-//   app://iris/<file>    → a file inside the built UI (frontend/dist)
-//   anything else        → index.html, so React Router can show deep routes after a reload
+//   app://iris/<file>    → a file inside the built UI (frontend/dist); a missing path with no
+//                          extension → index.html, so React Router can show deep routes after a
+//                          reload (handler.cjs); a missing file → 404
+//   anything else        → denied (another host, user info, a bad escape or a NUL): 404
 
 const path = require('node:path')
 

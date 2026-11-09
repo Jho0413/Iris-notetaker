@@ -117,8 +117,9 @@ function trayView(state, now) {
 }
 
 /**
- * Whether closing the window hides it instead: while capture runs, closing would end the
- * recording, and the menu bar can still stop it and show the window again.
+ * Whether closing the window hides it instead: while a recording is open (recording, stopped,
+ * continuing or finishing its upload), closing would end it, and the menu bar can still act on it
+ * and show the window again.
  */
 function hideOnClose(state) {
   return ['recording', 'stopped', 'continuing', 'stopping'].includes(state.phase)
@@ -128,9 +129,9 @@ function hideOnClose(state) {
 const asking = (phase) => phase === 'starting' || phase === 'continuing'
 
 /**
- * Whether the Live page holds a recording: capturing, stopped, continuing, or still uploading
- * one. A start that is only asking for permissions holds none (its session is made once they are
- * granted), so quitting then cuts nothing short.
+ * Whether the Live page holds a recording: capturing, stopped, continuing, still uploading one,
+ * or ended with notes not started (Try again). A start that is only asking for permissions holds
+ * none (its session is made once they are granted), so quitting then cuts nothing short.
  */
 function holdsRecording(state) {
   return state.phase !== 'idle' && state.phase !== 'starting'

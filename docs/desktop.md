@@ -77,8 +77,8 @@ bundled libraries; a blank window would look broken.
    goes.
 3. Requests and responses are streamed both ways, so a large upload is piped through, never held
    in memory, and the progress stream arrives event by event.
-4. While the engine is down, the handler answers for it, so the UI still loads and can say the
-   engine isn't running.
+4. While the engine is down, the handler answers for it, so the UI still loads and its pages say
+   Iris isn't responding.
 
 *Why:* the engine stays an engine and never serves a client's files, and the page needs no token
 or port. The token is added in the handler, not the page, because the progress stream and images
@@ -145,9 +145,11 @@ app the user switches to, and leave out Iris's own windows, which recording neve
 - **Fuses** turn off running Iris as plain Node, `NODE_OPTIONS`, `--inspect` and loading code
   from outside its signed `app.asar`; the packaged app quits at once if started with remote
   debugging.
+- **No developer tools** in the packaged app: from them, whoever is at the keyboard could call
+  the engine through the window with the token added. The dev app keeps them.
 
-*Why:* anything running as the user could otherwise start Iris with its own code in it, and
-borrow the Keychain's trust in Iris to read the key.
+*Why the fuses:* anything running as the user could otherwise start Iris with its own code in
+it, and borrow the Keychain's trust in Iris to read the key.
 
 ## Packaging
 
@@ -164,8 +166,7 @@ The key protection keeps it from other programs running as the user. It doesn't 
 
 - a keylogger or screen reader catching the key as it is typed;
 - anything reading the session files in the data folder, which are plain files;
-- anything with admin rights, or a process the user lets through the Keychain's own prompt;
-- whoever is at the keyboard: the packaged app can still open its developer tools.
+- anything with admin rights, or a process the user lets through the Keychain's own prompt.
 
 ## Where to look
 
