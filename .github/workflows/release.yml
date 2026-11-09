@@ -1,0 +1,120 @@
+name: Release
+
+# Builds Iris.app and its .dmg on a Mac and attaches the .dmg to a draft GitHub Release for the
+# version in desktop/package.json. Bump that version in a PR first, then run this from main:
+# Actions → Release → Run workflow, or `gh workflow run release.yml`. Publishing the draft
+# creates the tag on the commit it was built from.
+#
+# Three jobs so the token that can write to the repository never shares a job with the build,
+# whose dependency installs run third-party scripts.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  version:
+    name: Check the version is new
+    runs-on: ubuntu-latest # cheap, and fails in seconds before the Mac build starts
+    timeout-minutes: 5
+    permissions:
+      contents: write # only a token that can write sees draft releases
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Check the version is new
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "$GITHUB_REF" != refs/heads/main ]; then
+            echo "::error::Releases are built from main, not $GITHUB_REF_NAME."
+            exit 1
+          fi
+          version="$(jq -r .version desktop/package.json)"
+          tag="v$version"
+          # Every release, drafts included (a draft has no tag until it is published), and any tag
+          # of that name. An API error fails the step rather than reading as "not released".
+          releases="$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" --jq '.[].tag_name')"
+          tags="$(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/$tag" --jq '.[].ref')"
+          if grep -qxF "$tag" <<< "$releases" || grep -qxF "refs/tags/$tag" <<< "$tags"; then
+            echo "::error::$tag is already released, drafted or tagged. Bump the version first."
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build the .dmg
+    needs: version
+    runs-on: macos-latest # Apple Silicon, which the build requires
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            frontend/package-lock.json
+            desktop/package-lock.json
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          working-directory: backend
+          enable-cache: true
+
+      - name: Install the UI and desktop dependencies
+        run: |
+          npm ci --prefix frontend
+          npm ci --prefix desktop
+
+      - name: Build Iris.app and the .dmg
+        run: make desktop
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dmg
+          path: desktop/dist/Iris-${{ needs.version.outputs.version }}-arm64.dmg
+          if-no-files-found: error
+          # Only the release job needs it, minutes later; the release asset is the copy that stays.
+          # Already compressed, so zipping it again would only spend Mac minutes.
+          retention-days: 1
+          compression-level: 0
+
+  release:
+    name: Draft the release
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write # create the release
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: dmg
+
+      - name: Draft the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.version.outputs.version }}
+          TAG: ${{ needs.version.outputs.tag }}
+        run: |
+          gh release create "$TAG" "Iris-$VERSION-arm64.dmg" --repo "$GITHUB_REPOSITORY" \
+            --draft --target "$GITHUB_SHA" --title "Iris $VERSION" --generate-notes

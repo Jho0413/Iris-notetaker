@@ -63,4 +63,6 @@ docs/       how it works
 ```
 
 CI (`.github/workflows/ci.yml`) runs the backend, frontend and desktop checks on every pull request
-and must pass before merging.
+and must pass before merging. The Release workflow (`.github/workflows/release.yml`), run by hand,
+builds the `.dmg` and drafts a GitHub release
+([`docs/development.md`](docs/development.md#releasing)).
