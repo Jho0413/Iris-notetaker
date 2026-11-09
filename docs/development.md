@@ -68,6 +68,25 @@ The checks every change must pass, and what to regenerate after an API change, a
 [`CLAUDE.md`](../CLAUDE.md) ("Checks"); CI runs the same ones. For a quick local run, `make lint`
 and `make test` cover most of them (not the frontend build).
 
+## Releasing
+
+1. Bump the version in a PR, and merge it: in `desktop/`, `npm version <x.y.z> --no-git-tag-version`
+   (it updates `package.json` and its lockfile together). The app, the `.dmg`'s name and the
+   release all read it from `package.json`.
+2. Run the **Release** workflow from `main`: Actions → Release → Run workflow, or
+   `gh workflow run release.yml`. It refuses a version that is already released, drafted or
+   tagged, then builds the app on a GitHub-hosted Apple Silicon Mac with `make desktop`, including
+   its smoke tests and signature checks. The tests in "Checks" aren't rerun: CI ran them before the
+   merge.
+3. It leaves a **draft** release, "Iris <version>", with the `.dmg` and notes listing the merged
+   PRs. Check it, then publish it; publishing creates the `v<version>` tag on the commit it was
+   built from. To build the same version again, delete its draft first.
+
+*Why a draft:* nothing reaches anyone until you have looked at the build. *Why by hand:* a release
+is a decision, not something every merge should make, and while the repository is private its Mac
+minutes count against the free Actions allowance at about ten times the Linux rate (free once it
+is public).
+
 ## Settings
 
 Settings are `IRIS_*` environment variables, plus the key as `OPENAI_API_KEY`; the full list is in
