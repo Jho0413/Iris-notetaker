@@ -2,8 +2,8 @@
 
 ``LiveProcessor`` runs the lanes (``iris/live/``) as asyncio tasks that share one
 ``LiveTimeline``. The API wakes a lane when its input arrives; the job runner calls ``finish``
-when recording stops, before processing the session. A failing lane is logged and marked failed
-on the timeline: the recording carries on, and stop promotes less of the live work (only the
+when notes are made, before processing the session. A failing lane is logged and marked failed
+on the timeline: the recording carries on, and making notes promotes less of the live work (only the
 transcript, or nothing) and runs more of the pipeline (``live/promote.py``).
 """
 
@@ -66,8 +66,8 @@ class LiveProcessor:
         """Run one lane; however it ends, it ends finished or failed, never neither."""
         tl = self.timeline
 
-        def stopped() -> bool:  # no more retries: nothing can be promoted, or (draft) stop
-            return tl.upstream_failed(lane.lane) or (lane.retries_end_at_stop and tl.ending)
+        def stopped() -> bool:  # no more retries: nothing can be promoted, or (draft) making notes
+            return tl.upstream_failed(lane.lane) or (lane.retries_end_at_notes and tl.ending)
 
         async def pause(delay: float) -> bool:
             try:
@@ -80,7 +80,7 @@ class LiveProcessor:
             with retries_until(stopped, pause):
                 await lane.run()
             if not self.timeline.ending:
-                raise RuntimeError("the lane returned before stop was requested")
+                raise RuntimeError("the lane returned before notes were asked for")
         except asyncio.CancelledError:
             await self.timeline.fail_lane(lane.lane, "cancelled")
             raise
@@ -106,7 +106,7 @@ class LiveProcessor:
         """Ask every lane to flush, wait for all of them, and return the final timeline.
 
         Lanes still running after ``finish_timeout_s`` are cancelled and marked failed, so a stuck
-        lane delays stop by at most that long; stop then redoes that lane's work in the pipeline.
+        lane delays making notes by at most that long; the pipeline then redoes that lane's work.
         Cancelling the caller cancels the lanes too.
         """
         await self.timeline.request_end()
@@ -158,7 +158,8 @@ class LiveRegistry:
 
     def ensure(self, session_id: str) -> LiveProcessor | None:
         """The session's running processor, starting one if needed (at ``POST /live``, or on the
-        first chunk after a backend restart). ``None`` when live processing is off."""
+        first chunk or at make notes after a backend restart). ``None`` when live processing is
+        off."""
         if not self.enabled:
             return None
         processor = self._processors.get(session_id)

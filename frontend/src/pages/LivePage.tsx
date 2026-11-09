@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { useBlocker, useLocation, useNavigate } from 'react-router-dom'
+import { type Location, useBlocker, useLocation, useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import { CaptureError, inDesktopApp } from '../capture/captureErrors'
 import { EndSessionError } from '../capture/endSession'
@@ -17,7 +17,6 @@ import { menuBar, type LiveLocationState } from '../capture/menuBar'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { Icon, type IconName } from '../components/Icon'
 import { UNREACHABLE } from '../session/messages'
-import { act } from '../session/request'
 import { formatClock, liveProgress } from '../session/state'
 import { useSessionStream } from '../session/useSessionStream'
 import { useTitle } from '../session/useTitle'
@@ -26,8 +25,8 @@ import { irisApp, type RecordCommand } from '../settings/appBridge'
 /**
  * `stopped`: capture is paused (Stop): make notes, continue, start over or discard; `continuing`:
  * asking for the sources again (Continue), still stopped until they are granted.
- * `stopping`: finishing the upload to make notes. `unfinished`: capture has ended, but telling the
- * backend to make notes failed; `finishing`: retrying that request.
+ * `stopping`: finishing the upload, to make notes or, leaving the page, to keep the recording.
+ * `unfinished`: capture has ended, but making notes (or keeping it) failed; `finishing`: retrying.
  */
 type Phase =
   | 'idle'
@@ -79,6 +78,8 @@ export function LivePage() {
   const [discarded, setDiscarded] = useState(false)
   const capture = useRef<LiveCapture | null>(null)
   const stopping = useRef(false)
+  // Leaving was confirmed: where to go once the recording is kept (a failed keep is retried first).
+  const [leavingTo, setLeavingTo] = useState<Location | null>(null)
   const [mode, setMode] = useState<CaptureMode>('screen')
   // The screen share, for its preview; kept while stopped for Continue's label (LiveCapture itself
   // decides whether Continue asks for a screen again).
@@ -92,7 +93,7 @@ export function LivePage() {
   // The stopped page shows while asking to continue too, its buttons waiting.
   const stopped = phase === 'stopped' || continuing
   const busy = continuing || discarding
-  // Started and not yet handed over (or thrown away): leaving the page would end it.
+  // Started and not yet handed over (or thrown away): leaving the page would stop it.
   const open = recording || stopped
   // Told to the menu bar while stopped too, so a refusal brings the window up once per recording.
   const soundRefused = open && macSoundRefused(desktopApp, { macSound })
@@ -104,8 +105,12 @@ export function LivePage() {
   const stream = useSessionStream(open || phase === 'stopping' ? sessionId ?? undefined : undefined)
   const progress = liveProgress(stream.run)
 
-  // Leaving ends the recording: the browser asks before closing the tab, the app before navigating.
-  const blocker = useBlocker(open)
+  // Leaving stops the recording (kept, without notes): the browser asks before closing the tab, the
+  // app before navigating. Going to the Live page itself (its header link) isn't leaving: the page
+  // stays mounted, so the recording carries on and nothing is asked.
+  const blocker = useBlocker(
+    ({ currentLocation, nextLocation }) => open && currentLocation.pathname !== nextLocation.pathname,
+  )
   useEffect(() => {
     if (!open) return
     const onBeforeUnload = (e: BeforeUnloadEvent) => e.preventDefault()
@@ -118,12 +123,12 @@ export function LivePage() {
     return () => window.clearInterval(timer)
   }, [recording])
 
-  // If the page goes away mid-recording anyway, end the session so it gets processed. During a
-  // start, stopping cancels it: everything granted is released (and a session made meanwhile is
-  // deleted).
-  // Until that stop settles the app's menu bar says the upload is finishing, so quitting still asks
+  // If the page goes away with a recording open anyway, keep it without notes, unless Make notes was
+  // chosen: then the notes are still made. During a start, keeping cancels it: everything granted
+  // is released (and a session made meanwhile is deleted).
+  // Until that settles the app's menu bar says the upload is finishing, so quitting still asks
   // (capture/menuBar.ts: chunks not yet uploaded are only in this window's memory).
-  useEffect(() => () => menuBar.left(capture.current?.stop()), [])
+  useEffect(() => () => menuBar.left(capture.current?.keep()), [])
 
   async function start(mode: CaptureMode) {
     setError(null)
@@ -166,19 +171,20 @@ export function LivePage() {
   }
 
   /**
-   * Stop capture and hand over to processing. Stopping tears capture down, uploads what is still
-   * queued, then tells the backend to finish. A failure leaves the recording stopped but
-   * unfinished: the page then offers to retry (`finish`), which resends what is still queued and
-   * the finish request through the same capture. Resolves to the finished session's id, or null.
+   * Stop capture and hand over to processing, or with `keep` (leaving the page) keep the recording
+   * without notes, for the library. Stopping tears capture down, uploads what is still queued,
+   * then tells the backend. A failure leaves the recording stopped but unfinished: the page then
+   * offers to retry (`finish`), which resends what is still queued and the request through the
+   * same capture. Resolves to the session's id, or null.
    */
-  async function stop(): Promise<string | null> {
+  async function stop(keep = false): Promise<string | null> {
     const live = capture.current
     if (!live || stopping.current) return null
     stopping.current = true
     setError(null)
     setPhase('stopping')
     try {
-      await live.stop()
+      await (keep ? live.keep() : live.stop())
       capture.current = null
       return live.sessionId ?? null
     } catch (err) {
@@ -192,26 +198,19 @@ export function LivePage() {
   }
 
   async function finish() {
-    if (!sessionId) return
+    // Unfinished only after a failed stop(), which leaves the capture in place to retry with.
+    const live = capture.current
+    if (!live || !sessionId) return
     setPhase('finishing')
     setError(null)
-    const live = capture.current
-    if (live) {
-      try {
-        await live.stop()
-        capture.current = null
-        return navigate(`/sessions/${sessionId}`)
-      } catch (err) {
-        setPhase('unfinished')
-        setError(finishError(err))
-        return
-      }
+    try {
+      await (leavingTo ? live.keep() : live.stop())
+      capture.current = null
+      navigate(leavingTo ?? `/sessions/${sessionId}`)
+    } catch (err) {
+      setPhase('unfinished')
+      setError(finishError(err))
     }
-    const result = await act(api.POST('/api/live/{session_id}/end', { params: { path: { session_id: sessionId } } }))
-    // 409: the session is no longer recording, so an earlier finish request did arrive.
-    if (result.ok || result.status === 409) return navigate(`/sessions/${sessionId}`)
-    setPhase('unfinished')
-    setError(result.status === 0 ? UNREACHABLE : "Iris couldn't finish the session. Try again in a moment.")
   }
 
   /** Stop: capture pauses and every device is let go; the stopped page offers what next. */
@@ -357,7 +356,8 @@ export function LivePage() {
           <Icon name="alert" />
           <div className="banner-body">
             <p>
-              <strong>Iris couldn't start making the notes.</strong> {error}
+              <strong>{leavingTo ? "Iris couldn't finish keeping the recording." : "Iris couldn't start making the notes."}</strong>{' '}
+              {error}
             </p>
             <div className="banner-actions">
               <button type="button" className="btn btn-primary" onClick={() => void finish()} disabled={phase === 'finishing'}>
@@ -605,13 +605,14 @@ export function LivePage() {
       <ConfirmDialog
         open={blocker.state === 'blocked'}
         title="Stop recording and leave?"
-        body="Leaving this page ends the recording. Iris will make notes from what was captured so far."
+        body="Iris keeps what was recorded: make notes from it in the library."
         confirm="Stop and leave"
         cancel={stopped ? 'Stay' : 'Keep recording'}
         danger
         busy={phase === 'stopping'}
         onConfirm={() => {
-          void stop().then((ok) => (ok ? blocker.proceed?.() : blocker.reset?.()))
+          if (blocker.location) setLeavingTo(blocker.location)
+          void stop(true).then((ok) => (ok ? blocker.proceed?.() : blocker.reset?.()))
         }}
         onCancel={() => blocker.reset?.()}
       />

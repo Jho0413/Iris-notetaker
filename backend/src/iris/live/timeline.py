@@ -8,8 +8,8 @@ downstream wait on the watermarks they depend on:
   shared (an audio-only recording) no moment can open, so it follows ``transcribed_to``.
 - ``selected_to`` (T_s): every closed moment that ends by here has been read. Select lane. Once
   every closed moment is read, it follows ``closed_to``.
-- ``horizon``: ``min(T_a, T_s)``. Evidence before it is final, so the draft lane may write its
-  notes sections ahead of stop. With no screen it is ``transcribed_to``: notes are written from
+- ``horizon``: ``min(T_a, T_s)``. Evidence before it is final, so the draft lane may write its notes
+  sections ahead of making notes. With no screen it is ``transcribed_to``: notes are written from
   the speech as it is transcribed.
 
 Selection is published in time order and never reaches back: every moment read after
@@ -18,16 +18,18 @@ elements and figures are timed within the moment). ``publish_selection`` rejects
 breaks this. It is what makes evidence before the horizon final: a moment read later can neither
 add a record before the horizon nor span a time before it.
 
-A lane that has finished (flushed everything after stop) or failed counts as through any time
-(``through``), so a lane waiting on it never waits forever. Watermarks only move forward.
+A lane that has finished (flushed everything once notes were asked for) or failed counts as through
+any time (``through``), so a lane waiting on it never waits forever. Watermarks only move forward.
 
 A failed lane is not a finished one, though: everything downstream of it is working on
 incomplete evidence. ``upstream_failed(lane)`` tells a lane so; it then stops making paid model
-calls and only waits for stop (stop redoes that work in the pipeline anyway).
+calls and only waits for notes to be asked for (making notes redoes that work in the pipeline
+anyway).
 
-``complete`` decides whether stop may promote the live outputs. It covers the lanes whose outputs
-are promoted (audio, screen, select); the draft lane only fills caches, so its failure costs
-nothing at stop. Input skipped live is recorded per lane, so stop can re-run only what it affects.
+``complete`` decides whether making notes may promote the live outputs. It covers the lanes whose
+outputs are promoted (audio, screen, select); the draft lane only fills caches, so its failure
+costs nothing when notes are made. Input skipped live is recorded per lane, so making notes can
+re-run only what it affects.
 
 Every method runs on the event loop; none blocks. Waiters are woken by ``asyncio.Condition``.
 """
@@ -45,7 +47,7 @@ class Lane(StrEnum):
     AUDIO = "audio"
     SCREEN = "screen"
     SELECT = "select"
-    DRAFT = "draft"  # writes the final notes sections ahead of stop (live/draft.py)
+    DRAFT = "draft"  # writes the final notes sections ahead of making notes (live/draft.py)
 
 
 # The lanes whose results each lane uses, directly or through another lane.
@@ -55,7 +57,7 @@ UPSTREAM: dict[Lane, frozenset[Lane]] = {
     Lane.SELECT: frozenset({Lane.AUDIO, Lane.SCREEN}),
     Lane.DRAFT: frozenset({Lane.AUDIO, Lane.SCREEN, Lane.SELECT}),
 }
-# The lanes whose outputs stop promotes (transcript, moments, alignment, selection).
+# The lanes whose outputs making notes promotes (transcript, moments, alignment, selection).
 PROMOTED: frozenset[Lane] = frozenset({Lane.AUDIO, Lane.SCREEN, Lane.SELECT})
 
 
@@ -74,14 +76,14 @@ class LiveTimeline:
     rejected_moment_ids: list[str] = field(default_factory=list)
     selected_to: float = 0.0
     # Lifecycle
-    ending: bool = False  # stop requested: lanes flush what they hold, then return
+    ending: bool = False  # notes asked for: lanes flush what they hold, then return
     finished: set[Lane] = field(default_factory=set)
     failed: dict[Lane, str] = field(default_factory=dict)
     absent: set[Lane] = field(
         default_factory=set
     )  # not run by this processor: done, never finished
     # Lanes that left some captured input unused (a late frame, an undecodable chunk); their
-    # outputs miss it, so stop re-runs from the stage they replace.
+    # outputs miss it, so making notes re-runs from the stage they replace.
     skipped_input: set[Lane] = field(default_factory=set)
     _changed: asyncio.Condition = field(default_factory=asyncio.Condition, repr=False)
 
@@ -118,7 +120,8 @@ class LiveTimeline:
     @property
     def complete(self) -> bool:
         """The promoted lanes all finished, none failed, and none skipped captured input, so the
-        live transcript, moments and selection can replace the pipeline's own at stop."""
+        live transcript, moments and selection can replace the pipeline's own when notes are
+        made."""
         return (
             self.finished >= PROMOTED
             and not (PROMOTED & self.failed.keys())

@@ -262,7 +262,7 @@ def _publish(ctx: StageContext, cached: Path, visual_id: str, ext: str) -> str:
 async def render_visual(ctx: StageContext, visual: Visual) -> RenderedVisual:
     source_rel = visual.source_path or visual.path
     source = (ctx.paths.root / source_rel).read_bytes()
-    cache_dir = ctx.paths.root / "render_cache"
+    cache_dir = ctx.paths.render_cache_dir
     key = _cache_key(ctx, visual, source)
     entry = cache_dir / f"{key}.json"
     try:

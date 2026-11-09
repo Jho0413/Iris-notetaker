@@ -8,8 +8,14 @@ figure, a live window) acts on the kind:
 - ``BLOCKING`` errors (a missing or rejected key, exhausted credit, a missing model) fail the run
   at once and cancel the work in progress (``gather_units``), since nothing else can succeed;
 - ``REJECTED`` (this input only), ``BAD_OUTPUT`` and ``INTERNAL`` errors fail the unit. Each
-  stage decides what a failed unit means: render shows the source crop, the others fail the run
-  once their other units have finished (and been cached).
+  stage decides what a failed unit means: render tries a ``BAD_OUTPUT`` figure again with feedback
+  and shows the source crop if nothing passes; the others fail the run once their other units
+  have finished (and been cached).
+
+Some units don't fail the run: synthesis is a polish, so any failure (``BLOCKING`` too) keeps the
+assembled notes; while recording, a failed live audio window or select batch fails only its lane
+(Make notes then runs the full plan), and the draft lane tries a failed section once more later,
+or gives it up at once on a ``BLOCKING`` error.
 
 What the user is told is separate (``UserFacingError``, ``FailureMessage`` in ``models.py``): only
 messages we wrote, never the exception text, which goes to the log and the session record
@@ -138,8 +144,9 @@ async def retry_temporary[T](
     ``TEMPORARY`` error. Any other error, or the last temporary one, is raised as is, as is a
     temporary one once the ``retries_until`` scope has stopped.
 
-    One unit of work at a time: the SDK has already retried the request a couple of times over
-    about ten seconds, so these delays are longer (``Settings.api_retry_delays_s``).
+    One unit of work at a time: the SDK has already retried the request twice (about 0.5 s, then
+    1 s, or as long as the server's Retry-After asks), so these delays are longer
+    (``Settings.api_retry_delays_s``).
     """
     scope = _SCOPE.get() or NO_STOP
     for delay in delays:

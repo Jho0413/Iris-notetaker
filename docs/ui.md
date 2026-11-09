@@ -64,9 +64,14 @@ Pages that hold unsaved work (the editor, Settings, a recording) ask before they
    go through the action wrapper; saving and renaming catch the same failure themselves. Either
    way "the engine never answered" becomes an answer like any other, so the button always comes
    back.
-3. A few requests can't use the typed client: an upload, which needs its progress; live capture,
+3. While only the engine is down, Vite or the app handler still answers, with a gateway error of
+   its own. The engine never sends those, so the typed client treats them as no answer at all, and
+   every page says Iris isn't responding instead of its own failure ("couldn't save", "couldn't
+   delete").
+4. A few requests can't use the typed client: an upload, which needs its progress; live capture,
    which sends raw audio and frames; the progress stream; and figure and file addresses, which
-   are plain links.
+   are plain links. The upload, finishing a recording and discarding one read a gateway error the
+   same way.
 
 *Why:* one way to reach the engine, in both places, means one UI to build and test, and the
 generated types catch a route that changed before anyone runs the page.
@@ -138,7 +143,7 @@ comes from the engine's settings, never from the app. The app's side is in
 
 ## Limits
 
-- What bypasses the typed client (step 3 of "Talking to the engine") isn't checked by the
+- What bypasses the typed client (step 4 of "Talking to the engine") isn't checked by the
   typecheck.
 - The notes show only once the run is done; until then the session page shows progress.
 - Live capture's browser limits are in [`recording-live.md`](recording-live.md#limits).

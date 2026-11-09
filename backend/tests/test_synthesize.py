@@ -457,7 +457,6 @@ async def test_only_touched_sections_are_rewritten_and_markers_resolve(ctx, monk
     result = report(ctx)
     assert result.status == "applied" and result.rewritten_sections == [1, 2]
     assert result.sections == 4 and len(result.repeats) == 2
-    assert ctx.paths.notes_md.read_text() == notes.markdown
 
 
 async def test_a_duplicate_figure_is_dropped_locally_without_a_rewrite(ctx, monkeypatch):

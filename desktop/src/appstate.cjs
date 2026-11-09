@@ -3,7 +3,7 @@
 // things (e.g. a "What's new" seen) belong here too, not in a file each.
 //
 // Never a reason to fail: a missing or damaged file reads as no flags set, and a write that fails
-// is reported, not thrown (the flag is then simply not remembered).
+// returns its error, never throws (the flag is then simply not remembered; the caller logs why).
 
 const fs = require('node:fs')
 const path = require('node:path')
@@ -24,16 +24,16 @@ function createAppState(file) {
     get(name) {
       return read()[name]
     },
-    /** Set one flag, keeping the others. Returns false if it couldn't be written. */
+    /** Set one flag, keeping the others. Returns null, or the error if it couldn't be written. */
     set(name, value) {
       try {
         fs.mkdirSync(path.dirname(file), { recursive: true })
         const tmp = `${file}.tmp`
         fs.writeFileSync(tmp, JSON.stringify({ ...read(), [name]: value }, null, 2))
         fs.renameSync(tmp, file) // atomic: a crash never leaves a half-written file
-        return true
-      } catch {
-        return false
+        return null
+      } catch (err) {
+        return err
       }
     },
   }

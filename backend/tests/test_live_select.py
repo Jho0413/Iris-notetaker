@@ -386,7 +386,7 @@ async def test_an_api_error_in_a_live_render_gives_the_source_crop_uncached(
         "render_as": "screenshot",
         "verified": False,
     }
-    assert not list((ctx.paths.root / "render_cache").glob("*.json"))
+    assert not list(ctx.paths.render_cache_dir.glob("*.json"))
 
     write_model(ctx.paths.selection, timeline.selection())
     await render.run(ctx)

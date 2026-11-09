@@ -67,6 +67,16 @@ test('a rejection is told apart, without the backend detail or status', async ()
   }
 })
 
+test("an answer in place of the engine (dev proxy, the app's handler) is a lost connection", async () => {
+  for (const status of [502, 503]) {
+    const { xhr, result } = start()
+    xhr.status = status
+    xhr.response = { detail: 'The Iris engine is not running.' }
+    xhr.onload?.()
+    await assert.rejects(result, (err) => err instanceof UploadError && err.kind === 'network')
+  }
+})
+
 test('network failures and cancellation are told apart', async () => {
   const net = start()
   net.xhr.onerror?.()

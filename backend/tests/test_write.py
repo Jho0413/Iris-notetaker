@@ -88,7 +88,7 @@ async def test_writes_draft_assembles_and_reuses_cache(setup):
     )
     await write.run(ctx)
     assert generate.await_count == 1
-    cache = next((ctx.paths.root / "notes_sections").glob("*.json"))
+    cache = next(ctx.paths.notes_sections_dir.glob("*.json"))
     cache.write_text("{damaged")
     await write.run(ctx)
     assert generate.await_count == 2
@@ -155,7 +155,7 @@ async def test_invalid_output_is_not_cached_or_published(setup, bad):
     with pytest.raises(ValueError):
         await write.run(ctx)
     assert not ctx.paths.notes_draft.exists()
-    assert not list((ctx.paths.root / "notes_sections").glob("*.json"))
+    assert not list(ctx.paths.notes_sections_dir.glob("*.json"))
     assert events == []
 
 

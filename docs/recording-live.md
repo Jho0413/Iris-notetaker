@@ -119,16 +119,19 @@ the others knowing; a lane whose input lane failed stops making paid calls.
 ## Making notes and promotion
 
 1. The run starts. The lanes flush what they still hold (the last window, the last moment, the
-   remaining batches), then ingest writes the standard session files from `live/`.
+   remaining batches), then ingest writes the standard session files from `live/`. If the engine
+   restarted since the recording (the desktop app quit and stopped it, say), no lanes are running:
+   fresh ones start first and catch up from the captured files. Their caches make that quick and
+   free, so only what was still open when recording stopped is paid for.
 2. Promotion keeps the lanes' work as far as it holds together, in pipeline order. If the audio,
    screen and select lanes all finished cleanly, the transcript, moments, alignment and selection
    become the stages' outputs and the run goes on from write, where the sections written live and
    the figures redrawn live are cache hits. If only the audio lane did, the run goes on from
    detect, so the speech isn't transcribed twice. Otherwise (the audio lane failed or missed a
-   chunk, or no audio arrived after an engine restart, so no lanes were running) the full
-   pipeline runs, as for an upload.
+   chunk) the full pipeline runs, as for an upload.
 3. The rest of the pipeline runs as usual. The time from make notes to finished notes depends on
-   what was still open at the end, not on how long the session was.
+   what was still open at the end, not on how long the session was (after a restart, plus a
+   short catch-up that grows with the length of the recording).
 4. Live processing can be turned off with a setting; a recording is then processed like an upload.
 
 *Why:* live processing is best effort. The captured files stay the recording, so a lane that
@@ -142,7 +145,10 @@ more can be recorded. The engine never ends a recording on its own.
 1. If the page closes or reloads, it tells the engine to stop the recording: it is stopped and
    kept, and notes can be made from it later. If make notes was already chosen, it tells the
    engine to finish instead.
-2. Leaving the Live page for another Iris page asks first and, if confirmed, makes notes.
+2. Leaving the Live page for another Iris page asks first and, if confirmed, does the same: it
+   sends what is still waiting, then stops the recording and keeps it, so notes can be made from
+   it in the library. If that can't finish (the engine isn't answering), the page stays and says
+   so, and trying again keeps it, never makes notes.
 3. In a browser, a recording carries on through an engine restart, its posts retried until they
    land.
 4. In the desktop app, the app stops any recording its page left behind
@@ -159,10 +165,6 @@ more can be recorded. The engine never ends a recording on its own.
 - The last screen shown stays open until the next share or make notes, so a long stretch on one
   screen, or after sharing stops, is only read at make notes and finishes about as fast as an
   upload would.
-- A recording that gets no new audio after an engine restart (it was stopped, or paused and then
-  made into notes) keeps none of the live work: the full pipeline runs and the speech is paid for
-  again. A recording that carries on after the restart rebuilds its lanes from the captured files
-  and their caches.
 
 ## Where to look
 

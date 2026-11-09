@@ -87,6 +87,11 @@ if (debugSwitch) {
 
 const keystore = createKeyStore({ safeStorage, file: path.join(USER_DATA, 'openai-key.bin') })
 const appState = createAppState(path.join(USER_DATA, 'app-state.json')) // flags such as welcomeShown
+// Logged, not shown: if the flag can't be written the only cost is the welcome again next launch.
+function rememberWelcomeShown() {
+  const err = appState.set(WELCOME_SHOWN, true)
+  if (err) log(`[app] couldn't remember the welcome was shown: ${err.message}`)
+}
 // Decrypted once per launch: each decrypt reads the Keychain, and an app whose signature changed
 // (every rebuild, for an ad-hoc signed app) makes macOS ask the user each time.
 // A failed load is remembered too: a key macOS won't decrypt (e.g. Deny on the Keychain prompt)
@@ -132,8 +137,12 @@ const WEB_PREFERENCES = {
   sandbox: true,
   nodeIntegration: false,
   webSecurity: true,
-  // Recording happens with Iris in the background: don't throttle its 1 fps frame ticker.
+  // Recording happens with Iris in the background: don't throttle the page (the 1 fps frame
+  // timer itself runs in a worker, which isn't throttled anyway).
   backgroundThrottling: false,
+  // DevTools in a friend's copy would let anyone at the keyboard call the engine through the
+  // window (every app://iris/api request gets the token added). Development keeps them.
+  devTools: !PACKAGED,
 }
 
 function background() {
@@ -158,7 +167,8 @@ function showMainWindow({ show = true } = {}) {
     title: 'Iris',
     show: false,
     backgroundColor: background(),
-    // The UI's bridge to the app: two key actions, checked per call (policy.fromIrisWindow).
+    // The UI's bridge to the app: changeKey, removeKey and savePdf, plus the menu bar's recording
+    // relay, checked per call (policy.fromIrisWindow).
     webPreferences: { ...WEB_PREFERENCES, preload: path.join(PAGES, 'preload-main.cjs') },
   })
   mainWindow = win
@@ -506,7 +516,7 @@ ipcMain.handle('iris-picker:open-settings', (event) => {
 // capture code runs in the window), so the icon only relays: "Record Audio" or "Record Screen…"
 // asks the page to start (making the window, hidden, if it was closed), and only the picker
 // shows (none for audio); Share Screen… and Stop Sharing turn the page's screen on and off (only
-// the picker shows); Stop asks the page to stop, which makes notes as its own Stop does.
+// the picker shows); Stop asks the page to pause, as its own Stop does.
 let tray = null
 let startAnswerTimer = null
 let trayTicker = null
@@ -853,7 +863,7 @@ function buildMenu() {
       label: 'View',
       submenu: [
         { role: 'reload' },
-        { role: 'toggleDevTools' },
+        ...(PACKAGED ? [] : [{ role: 'toggleDevTools' }]),
         { type: 'separator' },
         { role: 'resetZoom' },
         { role: 'zoomIn' },
@@ -891,12 +901,12 @@ if (!app.requestSingleInstanceLock()) {
     if (PACKAGED) {
       const hasKey = Boolean(currentKey())
       if (shouldWelcome({ hasKey, seen: appState.get(WELCOME_SHOWN) === true })) {
-        appState.set(WELCOME_SHOWN, true) // before asking: closing or quitting from the welcome counts too
+        rememberWelcomeShown() // before asking: closing or quitting from the welcome counts too
         if (!(await askForKey('first'))) log('[key] set up later: opening without an API key')
       } else if (!hasKey) {
         log(keystore.has() ? '[key] the stored key could not be decrypted: opening without one' : '[key] no API key: opening without one')
       }
-      if (hasKey) appState.set(WELCOME_SHOWN, true) // an install that already has a key is never welcomed
+      if (hasKey) rememberWelcomeShown() // an install that already has a key is never welcomed
     }
     showMainWindow()
     await startBackend()

@@ -24,6 +24,7 @@ from iris.llm import client as llm_client
 from iris.llm.usage import read_usage
 from iris.main import create_app
 from iris.models import (
+    UNREADABLE_LIVE_AUDIO,
     Alignment,
     BoardElement,
     FrameIndex,
@@ -43,9 +44,9 @@ from iris.models import (
 from iris.pipeline import PLAN, STAGES
 from iris.pipeline.context import StageContext
 from iris.pipeline.stages import render, select, synthesize
-from iris.store.layout import read_model, session_paths
+from iris.store.layout import SessionPaths, read_model, session_paths
 from tests.test_detect import slide
-from tests.test_live import post_audio, post_frame, start
+from tests.test_live import post_audio, post_frame, start, stop
 from tests.test_write import section
 
 RATE = 48_000
@@ -269,7 +270,7 @@ def test_a_live_session_is_finished_at_stop_with_only_the_open_work_left(
     assert any(e.type == "notes_updated" and e.data.get("live") for e in live)
     # Sections are written ahead of stop into the write stage's cache; no draft is made.
     assert not (root / "notes_draft.json").exists()
-    frozen = len(list((root / "notes_sections").glob("*.json")))
+    frozen = len(list(SessionPaths(root).notes_sections_dir.glob("*.json")))
     assert frozen >= 1
     before = calls(client, sid)
     windows_before, batches_before = windows(root), len(timeline.contents)
@@ -306,7 +307,7 @@ def test_a_live_session_is_finished_at_stop_with_only_the_open_work_left(
     assert read_model(root / "selection.json", Selection) == timeline.selection()
     items = read_model(root / "alignment.json", Alignment).items
     assert [i.moment for i in items] == timeline.moments
-    assert not (root / "transcript_chunks").exists()  # the transcribe stage never ran
+    assert not SessionPaths(root).transcript_chunks_dir.exists()  # the transcribe stage never ran
     # The UI resets its counts when processing starts, after the live windows' events: the
     # promoted transcribe step reports the whole transcript's size itself.
     finished = [
@@ -367,7 +368,7 @@ def test_an_audio_only_session_writes_its_notes_while_recording(app_client: Test
 
     assert timeline.horizon == timeline.transcribed_to > SECONDS / 2
     assert timeline.closed_to == timeline.selected_to == timeline.transcribed_to
-    frozen = len(list((root / "notes_sections").glob("*.json")))
+    frozen = len(list(SessionPaths(root).notes_sections_dir.glob("*.json")))
     assert frozen >= 1
     before = calls(client, sid)
     assert set(by_stage(before)) == {"transcribe", "write"}
@@ -490,9 +491,156 @@ def test_a_skipped_frame_promotes_the_transcript_and_runs_from_detect(
     # Transcription is paid once: after stop, only the window cut at stop.
     after = by_stage(calls(client, sid)[before:])
     assert after.get("transcribe", 0) == windows(root) - windows_before
-    assert not (root / "transcript_chunks").exists()
+    assert not SessionPaths(root).transcript_chunks_dir.exists()
     # Detect saw the late frame that the screen lane skipped.
     assert any(m.start <= 7.0 for m in read_model(root / "moments.json", Moments).moments)
+
+
+# --- Making notes after an engine restart -----------------------------------------------------
+
+
+def test_notes_made_after_a_restart_keep_the_live_work(tmp_path: Path, fake: FakeOpenAI, recording):
+    """The desktop app stops a recording at quit; the next engine has no processor for it. Making
+    notes starts fresh lanes that catch up from the captured files and their caches, so nothing
+    done before the restart is paid for again, and their work is promoted as at a normal stop."""
+    settings = live_settings(tmp_path)
+    with TestClient(create_app(settings)) as client:
+        sid = start(client)
+        before_restart: LiveTimeline = client.app.state.runner.live.get(sid).timeline  # type: ignore[attr-defined]
+        record_session(client, sid, recording)
+        wait_until_caught_up(client, sid, LIVE_EVENTS)
+        assert stop(client, sid) == 200
+        before = calls(client, sid)
+    root = settings.sessions_dir / sid
+    windows_before = windows(root)
+    batches_before = len(json.loads((root / "live/select_batches.json").read_text())["batches"])
+    frozen = len(list(SessionPaths(root).notes_sections_dir.glob("*.json")))
+    assert frozen >= 1
+
+    with TestClient(create_app(settings)) as client:
+        live = client.app.state.runner.live  # type: ignore[attr-defined]
+        assert live.get(sid) is None
+        r = client.post(f"/api/live/{sid}/end", json={"audio_chunks": len(recording)})
+        assert r.status_code == 200
+        session = wait_for_done(client, sid)
+        assert session["status"] == "done", session.get("error")
+        assert live.get(sid) is None  # finished and forgotten, as at a normal stop
+
+        stages = stage_events(client, sid, 0)
+        promoted = [s for kind, s, p in stages if p and kind == "stage_finished"]
+        assert promoted == ["transcribe", "detect", "align", "select"]
+        # The transcribe stage never ran.
+        assert not SessionPaths(root).transcript_chunks_dir.exists()
+        transcript = read_model(root / "transcript.json", Transcript)
+        assert transcript == read_model(root / "live/transcript.json", Transcript)
+        assert transcript.segments[: len(before_restart.segments)] == before_restart.segments
+        moments = read_model(root / "moments.json", Moments).moments
+        assert len(moments) == len(SCREENS)
+        notes = client.get(f"/api/sessions/{sid}/notes").json()
+        assert len(notes["visuals"]) == 4
+
+        # Only what was still open when recording stopped is new work, as at a normal stop.
+        after = calls(client, sid)[len(before) :]
+        visuals = read_model(root / "selection.json", Selection).visuals
+        new_figures = len(visuals) - len(before_restart.visuals)
+        batches = json.loads((root / "live/select_batches.json").read_text())["batches"]
+        parts = read_model(root / "notes_draft.json", NotesDraft).parts
+        assert parts is not None and parts > frozen
+        assert windows(root) - windows_before == 1 and new_figures == 1
+        assert by_stage(after) == {
+            "transcribe": 1,  # the window cut at stop
+            "select": len(batches) - batches_before,  # the moment closed at stop
+            "render": 2 * new_figures,
+            "write": parts - frozen,
+            "synthesize": 1,
+        }
+        total = by_stage(calls(client, sid))
+        assert total["transcribe"] == windows(root)
+        assert total["select"] == len(batches)
+
+        # A re-run with a chosen stage starts no lanes: it runs that stage and the rest.
+        n = len(events(client, sid))
+        r = client.post(f"/api/sessions/{sid}/run?from_stage=transcribe")
+        assert r.status_code == 200
+        assert wait_for_done(client, sid)["status"] == "done"
+        assert live.get(sid) is None
+        stages = stage_events(client, sid, n)
+        assert not any(p for _, _, p in stages)
+        assert stages[0] == ("stage_started", "transcribe", False)
+        assert SessionPaths(root).transcript_chunks_dir.exists()
+
+
+def test_notes_made_after_a_restart_with_live_processing_off_run_the_full_plan(
+    tmp_path: Path, fake: FakeOpenAI, recording
+):
+    settings = live_settings(tmp_path, live_processing=False)
+    with TestClient(create_app(settings)) as client:
+        sid = start(client)
+        record_session(client, sid, recording[:4])
+        assert stop(client, sid) == 200
+        assert calls(client, sid) == []
+    with TestClient(create_app(settings)) as client:
+        r = client.post(f"/api/live/{sid}/end", json={"audio_chunks": 4})
+        assert r.status_code == 200
+        assert client.app.state.runner.live.get(sid) is None  # type: ignore[attr-defined]
+        session = wait_for_done(client, sid)
+        assert session["status"] == "done", session.get("error")
+        stages = stage_events(client, sid, 0)
+        assert not any(p for _, _, p in stages)
+        ran = [s for kind, s, _ in stages if kind == "stage_finished"]
+        assert ran[0] == "ingest" and "transcribe" in ran
+        assert not (settings.sessions_dir / sid / "live/transcript_windows").exists()
+
+
+def test_notes_made_after_a_restart_without_the_first_chunk_fail_as_before(
+    tmp_path: Path, fake: FakeOpenAI, recording
+):
+    """Fresh lanes can't decode audio without its first chunk: they finish at once (no waiting
+    for it), promote nothing, and ingest fails with the message it gives without live work."""
+    settings = live_settings(tmp_path)
+    with TestClient(create_app(settings)) as client:
+        sid = start(client)
+        for seq, (_, data) in enumerate(recording[:4]):
+            if seq:
+                assert post_audio(client, sid, seq, data) == 204
+        assert stop(client, sid) == 200
+    with TestClient(create_app(settings)) as client:
+        r = client.post(f"/api/live/{sid}/end", json={"allow_gaps": True})
+        assert r.status_code == 200
+        session = wait_for_done(client, sid, timeout=10.0)
+        assert session["status"] == "failed"
+        assert session["failure_message"] == UNREADABLE_LIVE_AUDIO
+        assert session["failure_kind"] == "input"
+        stages = stage_events(client, sid, 0)
+        assert not any(p for _, _, p in stages)
+        assert calls(client, sid) == []
+
+
+@pytest.mark.parametrize("status", ["recording", "stopped"])
+def test_notes_asked_for_when_the_lanes_cannot_start_leave_the_session_as_it_was(
+    tmp_path: Path, fake: FakeOpenAI, recording, monkeypatch, status: str
+):
+    """Starting the lanes is the one step of making notes that can fail before the status
+    changes, so the recording can still be kept, or its notes asked for again."""
+    settings = live_settings(tmp_path)
+    with TestClient(create_app(settings)) as client:
+        sid = start(client)
+        for seq, (_, data) in enumerate(recording[:2]):
+            assert post_audio(client, sid, seq, data) == 204
+        if status == "stopped":
+            assert stop(client, sid) == 200
+    with TestClient(create_app(settings), raise_server_exceptions=False) as client:
+        runner = client.app.state.runner  # type: ignore[attr-defined]
+
+        def broken(session_id: str):
+            raise RuntimeError("the lanes could not start")
+
+        monkeypatch.setattr(runner.live, "ensure", broken)
+        r = client.post(f"/api/live/{sid}/end", json={"audio_chunks": 2})
+        assert r.status_code == 500
+        assert client.get(f"/api/sessions/{sid}").json()["status"] == status
+        assert not runner.is_running(sid)
+        assert stage_events(client, sid, 0) == []
 
 
 # --- Deciding what to promote -----------------------------------------------------------------

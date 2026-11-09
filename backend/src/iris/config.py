@@ -108,7 +108,7 @@ class Settings(BaseSettings):
     # Storage: data_dir/iris.db and data_dir/sessions/<id>/
     data_dir: Path = Path("data")
 
-    # OpenAI. Reads OPENAI_API_KEY as well as IRIS_OPENAI_API_KEY.
+    # OpenAI. Read as OPENAI_API_KEY only (no IRIS_ prefix): the alias replaces the prefixed name.
     openai_api_key: str | None = Field(default=None, validation_alias="OPENAI_API_KEY")
     transcribe_model: str = "whisper-1"  # the only OpenAI transcription model with timestamps
     # Spoken language (ISO-639-1, e.g. "en"), sent with every transcription request. Detection
@@ -118,7 +118,7 @@ class Settings(BaseSettings):
     vision_model: str = "gpt-5.5"  # reads the screen; checks rendered visuals
     notes_model: str = "gpt-5.5"
     diagram_model: str = "gpt-5.5"  # writes SVG for exact diagrams, charts and graphs
-    image_model: str = "gpt-image-2"  # redraws illustrations from the source crop
+    image_model: str = "gpt-image-2"  # redraws illustrations from the brief alone
     image_quality: Literal["low", "medium", "high"] = "high"
     reasoning_effort: Literal["low", "medium", "high"] = "medium"
 
@@ -135,7 +135,9 @@ class Settings(BaseSettings):
     # Ingest
     frame_fps: float = 1.0  # open question: 1 or 2 fps
     frame_max_width: int = 1280
-    audio_sample_rate: int = 16_000
+    # The speech models work at 16 kHz: a higher rate gains nothing and makes a long transcription
+    # chunk too big to upload.
+    audio_sample_rate: int = Field(default=16_000, ge=8_000, le=16_000)
 
     # Selection: bound images and transcript context per vision call.
     selection_batch_size: int = Field(default=6, ge=1, le=20)
@@ -151,7 +153,7 @@ class Settings(BaseSettings):
     synthesis_reasoning_effort: Effort | None = None  # section rewrites; unset: notes effort
 
     # Live processing while recording.
-    live_processing: bool = True  # off: a live session is processed after stop, like an upload
+    live_processing: bool = True  # off: processed only when notes are made, like an upload
     live_audio_gap_wait_s: float = Field(default=35.0, gt=0)  # wait for a missing chunk, then skip
     live_window_min_s: float = Field(default=5.0, gt=0)  # transcription windows are cut at the
     live_window_max_s: float = Field(default=15.0, gt=0)  # quietest point between these lengths

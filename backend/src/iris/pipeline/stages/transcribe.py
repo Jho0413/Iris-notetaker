@@ -310,15 +310,14 @@ async def run(
     search_s: float = SEARCH_S,
     concurrency: int = CONCURRENCY,
 ) -> None:
-    """Chunk lengths come from the arguments, else settings (``transcribe_target_chunk_s`` /
-    ``transcribe_max_chunk_s``, if defined), else ``chunk_lengths_for(model)``."""
+    """Chunk lengths come from the arguments, else ``chunk_lengths_for(model)``."""
     model = ctx.settings.transcribe_model
     requested = ctx.settings.transcribe_language
     default_target, default_max = chunk_lengths_for(model)
     if target_s is None:
-        target_s = getattr(ctx.settings, "transcribe_target_chunk_s", None) or default_target
+        target_s = default_target
     if max_s is None:
-        max_s = getattr(ctx.settings, "transcribe_max_chunk_s", None) or max(default_max, target_s)
+        max_s = max(default_max, target_s)
 
     samples, rate = read_wav(ctx.paths.audio)
     if rate != ctx.settings.audio_sample_rate:

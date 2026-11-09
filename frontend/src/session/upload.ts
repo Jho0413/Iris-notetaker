@@ -1,4 +1,5 @@
 import type { Session } from '../api/client'
+import { engineDidNotAnswer } from './request.ts'
 
 /** Why an upload failed. Its message is ours: never the backend's detail or the status code. */
 export class UploadError extends Error {
@@ -10,8 +11,8 @@ export class UploadError extends Error {
 }
 
 /**
- * Upload a recording with byte progress. Same request as `uploadRecording` in api/client.ts, over
- * XMLHttpRequest because fetch can't report upload progress and hour-long recordings are large.
+ * Upload a recording with byte progress: a multipart POST to /api/sessions, over XMLHttpRequest
+ * because fetch can't report upload progress and hour-long recordings are large.
  */
 export function uploadWithProgress(
   file: File,
@@ -30,11 +31,13 @@ export function uploadWithProgress(
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) onProgress(e.loaded / e.total)
     }
+    const lost = () => reject(new UploadError('network', 'The connection to Iris was lost'))
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300 && xhr.response) return resolve(xhr.response)
+      if (engineDidNotAnswer(xhr.status)) return lost()
       reject(new UploadError('rejected', 'Iris did not accept the recording'))
     }
-    xhr.onerror = () => reject(new UploadError('network', 'The connection to Iris was lost'))
+    xhr.onerror = lost
     xhr.onabort = () => reject(new UploadError('aborted', 'Upload cancelled'))
     signal?.addEventListener('abort', () => xhr.abort(), { once: true })
     xhr.send(form)

@@ -1,6 +1,7 @@
 // The OpenAI API key, encrypted with Electron's safeStorage (the macOS Keychain holds the
 // encryption key) in a file in userData. Never written in plain text, never logged, never sent
-// to a page: main.cjs passes it to the backend as OPENAI_API_KEY at launch.
+// to a page: main.cjs passes it to the backend on its stdin at each start, never in its
+// environment.
 
 const fs = require('node:fs')
 const path = require('node:path')
