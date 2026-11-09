@@ -4,7 +4,7 @@ Reads:  live/audio/<seq>.webm
 Writes: live/audio.pcm, live/transcript_windows/<i>_<start_ms>_<end_ms>.json, live/transcript.json
 Publishes: transcript segments and ``transcribed_to``; emits TRANSCRIPT_CHUNK per window.
 
-docs/architecture/live.md. Two halves:
+Two halves:
 
 **Decoding** (``LiveDecoder``, one worker thread). PyAV reads a file-like stream that follows the
 contiguous run of ``seq``: at the end of chunk n it blocks until chunk n+1 is stored, so the

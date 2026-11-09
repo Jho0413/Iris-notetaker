@@ -83,7 +83,7 @@ export interface paths {
         put?: never;
         /**
          * Rerun
-         * @description Re-run the pipeline, optionally from a given stage (never lose a session: principle 4).
+         * @description Re-run the pipeline, optionally from a given stage; finished stages are kept.
          */
         post: operations["rerun_api_sessions__session_id__run_post"];
         delete?: never;

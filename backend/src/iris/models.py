@@ -1,7 +1,7 @@
 """Shared data types: API models and the files that pipeline stages read and write.
 
 Every stage's output is one of these models serialised to JSON in the session folder, so stages
-can be run and tested on their own (docs/architecture/overview.md, principle 5).
+can be run and tested on their own.
 """
 
 from datetime import datetime
@@ -48,9 +48,9 @@ class SessionType(StrEnum):
     DEMO = "demo"
 
 
-# What the user is told when a session fails: only these messages, which we wrote
-# (docs/architecture/errors.md). Exception text, provider and model names, status codes and
-# model output never reach the API; the raw error is kept for developers (``iris show``).
+# What the user is told when a session fails: only these messages, which we wrote. Exception
+# text, provider and model names, status codes and model output never reach the API; the raw
+# error is kept for developers (``iris show``).
 GENERIC_FAILURE = "Iris couldn't finish making the notes. Try again; finished steps are kept."
 UNREADABLE_UPLOAD = "Iris couldn't read this file. Upload an audio or video recording."
 UPLOAD_WITHOUT_AUDIO = "This recording has no sound. Upload a recording with speech."
@@ -129,7 +129,7 @@ class TranscriptSegment(BaseModel):
     start: float
     end: float
     text: str
-    speaker: str | None = None  # open question: speaker labels (docs/architecture/overview.md)
+    speaker: str | None = None  # open question: speaker labels
 
 
 class Transcript(BaseModel):
@@ -213,7 +213,7 @@ class MomentContent(BaseModel):
 
 
 class Visual(BaseModel):
-    """A figure from the session, rebuilt as a professional visual (principle 1).
+    """A figure from the session, rebuilt as a professional visual.
 
     Select crops the source region (``source_path``); render produces ``path``.
     """

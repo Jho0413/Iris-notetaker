@@ -5,14 +5,14 @@ Writes: transcript_chunks/<i>_<start_ms>_<end_ms>.json (one per chunk, as each f
         transcript.json (Transcript)
 Emits:  TRANSCRIPT_CHUNK per finished chunk, so the UI can show text as it arrives.
 
-Steps (docs/architecture/pipeline.md, upload step 3):
+Steps:
   1. ``plan_chunks`` splits the audio into chunks, cutting at the quietest point near each target
      boundary so words are not cut in half. Chunk length depends on the model
      (``chunk_lengths_for``): ~5 min for whisper-1, which returns segment timestamps, and ~15 s
      for text-only models, where each chunk becomes one segment.
   2. Chunks are transcribed concurrently, each retried after a temporary API error
      (``retry_temporary``). Each finished chunk is cached on disk, so a crash or a re-run never
-     re-pays for it (principle 4). A cached chunk is reused only if its boundaries, audio and
+     re-pays for it. A cached chunk is reused only if its boundaries, audio and
      model match. A chunk that still fails fails the stage once the others have finished; a
      blocking error (``classify``) cancels them at once.
   3. Each chunk's timestamps are offset by its start time, then everything is merged and sorted.

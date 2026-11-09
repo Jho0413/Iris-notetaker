@@ -4,7 +4,7 @@
 // frames as JPEGs at a low fixed rate while the screen is on, timed on the audio's clock and
 // numbered by the share they belong to, so the backend finds where each share starts and ends from
 // the frames alone. Change detection happens in the backend, not here
-// (docs/architecture/live.md). Uploads are retried until they land (uploadQueue.ts), and
+// Uploads are retried until they land (uploadQueue.ts), and
 // ending the session waits for all of them, so a dropped request doesn't lose content.
 
 import { CaptureError, describeCaptureError, inDesktopApp, pickAudioMimeType } from './captureErrors.ts'

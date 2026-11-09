@@ -1,5 +1,5 @@
 // The app:// protocol: serves the built UI and forwards /api to the backend with the launch
-// token (docs/architecture/desktop.md). The page talks only to app://iris, so it never
+// token. The page talks only to app://iris, so it never
 // sees the backend's port or the token, and the UI still loads (and can say so) if the backend
 // is down. Routing decisions are pure functions in routes.cjs.
 

@@ -1,20 +1,34 @@
 # Iris
-[![CI](https://github.com/Jho0413/Iris-notetaker/actions/workflows/ci.yml/badge.svg)](https://github.com/Jho0413/Iris-notetaker/actions/workflows/ci.yml)
 
 **Notes that see what was shown.**
 
-Iris turns a session where someone shows things while talking (a meeting, a lecture, a demo) into
-Markdown notes that include what was on screen. The slide, the whiteboard sketch or the diagram
-being discussed is rebuilt as a clean visual and placed next to what was said about it.
+Iris turns a session where someone shows things while talking (a lecture, a meeting, a demo) into
+notes that keep what was on screen. The slide, the whiteboard sketch or the diagram being discussed
+is redrawn as a clean figure, checked against the original, and placed next to what was said about
+it. Upload a recording, or record live in the browser or the macOS app.
 
-Upload a recording or record live from the browser or the macOS app, with a screen or audio only. Iris transcribes the audio, finds what changed
-on screen, reads it (math, text, tables, code, figures), redraws each figure and checks it against
-the original, and writes step-by-step notes in a style suited to the session. Everything runs
-locally; model calls go to OpenAI.
+## Your data
+
+Everything Iris makes stays on your machine. Recordings, frames, transcripts, figures, notes and
+your edits are files on your disk; in the Mac app they all live in
+`~/Library/Application Support/Iris`, with your OpenAI key kept there encrypted. There is no Iris
+server, no account, no cloud storage, no analytics and no crash reporting.
+
+The one thing that leaves your machine is what OpenAI needs to make the notes, sent with your own
+key:
+
+- the audio, to transcribe it;
+- the screens worth reading (finding them happens on your machine), with what was said over them;
+- each figure's crop from the screen, to redraw it and to check the redraw against it;
+- the text of the notes, to write and polish them.
+
+The Mac app also checks a new key with OpenAI once, when you enter it. OpenAI says it doesn't use
+API data to train its models:
+[how OpenAI handles API data](https://developers.openai.com/api/docs/guides/your-data).
 
 ## Quick start
 
-Needs [uv](https://docs.astral.sh/uv/) and Node 22+.
+Needs [uv](https://docs.astral.sh/uv/) and Node 22.12 or later.
 
 ```sh
 make setup                              # install backend, frontend and desktop app deps
@@ -22,62 +36,31 @@ cp backend/.env.example backend/.env    # add OPENAI_API_KEY
 make dev                                # API on :8000, UI on http://localhost:5173
 ```
 
-### The macOS app
+### The macOS app (Apple Silicon)
 
 ```sh
-make setup && make desktop              # desktop/dist/Iris-<version>-arm64.dmg (Apple Silicon)
+make setup && make desktop              # desktop/dist/Iris-<version>-arm64.dmg
 ```
 
-Open the `.dmg`, drag Iris to Applications and open it. The first launch asks for your OpenAI API
-key (stored encrypted with the macOS Keychain), then shows Iris. **Record live** records your
-microphone with the Mac's sound (**Record audio**, for calls and talks), or any screen or window
-too (**Record audio + screen**), also from the menu bar icon. The screen can be shared and
-stopped at any time during a recording (**Share screen**); macOS asks for
-microphone, System Audio Recording or Screen Recording access the first time. No terminal, `uv` or
-repo is needed to run it.
+Open the `.dmg`, drag Iris to Applications and open it. The first launch asks for your OpenAI key;
+macOS asks for the microphone, System Audio Recording and Screen Recording the first time each is
+used. No terminal or repo is needed to run it.
 
-More commands, the `iris` CLI and troubleshooting: [`docs/development.md`](docs/development.md).
+## Learn more
 
-## CI
+- [`docs/overview.md`](docs/overview.md): what Iris is made of and the principles behind it. Start
+  here.
+- [`docs/development.md`](docs/development.md): setting up, running, the `iris` CLI, checks and
+  debugging.
 
-GitHub Actions (`.github/workflows/ci.yml`) runs on every pull request and on pushes to `main`, and
-must pass before merging:
-
-- **Backend:** `ruff check`, `ruff format --check` and `pytest`
-- **Frontend:** `npm run lint`, `typecheck`, `test` and `build`
-- **Desktop:** `npm test` (the app's main-process logic, in plain Node)
-
-Run the same checks locally with `make lint` and `make test`.
-
-## Project structure
+## Layout
 
 ```
-backend/src/iris/
-  api/            FastAPI routes: sessions, live input, progress events, usage, health
-  sources/        upload + browser live: turn input into audio.wav + frames/ in a session
-  pipeline/       stages (transcribe, detect, align, select, write, render, assemble,
-                  synthesize) and PLAN, the stage order
-  live/           processing a live session while it records
-  jobs/           runs a session's PLAN and publishes progress
-  store/          SQLite session index + session folder layout (layout.py lists every file)
-  llm/            OpenAI client, usage and cost recording, error handling
-  cli.py          the `iris` command
-  config.py       settings (IRIS_* environment variables)
-  user_settings.py  what the Settings page saved (settings.json), under IRIS_* and .env
-  models.py       shared types: API models and every stage's output
-frontend/src/
-  api/            typed client (generated from OpenAPI) + progress events
-  capture/        browser capture: the mic, plus a screen share or the Mac's sound
-  components/     notes view and editor (Markdown, KaTeX, figures), menus and progress
-  notes/          the notes format (boxes, steps, figures by id) and the editor's nodes,
-                  block actions and drag landing spots
-  session/        session state, progress stream, upload and cost hooks
-  pages/          library, upload, live, session, settings
-  settings/       the Settings page's language list and wording
-desktop/          the macOS app (Electron): app:// handler, backend lifecycle, key screen,
-                  packaging (scripts/, electron-builder.yml)
-docs/
-  roadmap.md      what is done, what is next
-  development.md  commands, cost tracking, troubleshooting
-  architecture/   overview, pipeline, live sessions, errors and retries, the desktop app
+backend/    the engine (Python, FastAPI): API, pipeline, live processing
+frontend/   the web UI (React, TypeScript)
+desktop/    the macOS app (Electron): shows the UI and runs the engine
+docs/       how it works
 ```
+
+CI (`.github/workflows/ci.yml`) runs the backend, frontend and desktop checks on every pull request
+and must pass before merging.
