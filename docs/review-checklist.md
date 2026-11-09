@@ -132,6 +132,8 @@ to every change; the reviewer says which ones it checked. Principles are those i
 - One source of truth: no copied constants, settings, file names or wording; tunable numbers are
   named constants or `Settings` fields, and new fields are listed in `backend/.env.example`.
 - Names and comments explain why; no dead code left behind.
+- A change in behaviour leaves nothing describing the old one: search for comments, docstrings,
+  UI wording and files that still say or do what the code used to.
 - No secrets in code or logs; no new dependency without a reason.
 
 ## 10. Docs
