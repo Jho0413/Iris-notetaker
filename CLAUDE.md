@@ -1,7 +1,7 @@
 # Iris: working agreement
 
-Read `README.md` and `docs/architecture/overview.md` first (the rest of `docs/architecture/` covers
-the pipeline, live sessions, errors and the desktop app). This file covers how we work.
+Read `README.md` and `docs/overview.md` first (the other pages in `docs/` cover the engine, making
+notes, recording live, the UI and the desktop app). This file covers how we work.
 
 ## How we build a change
 
@@ -56,10 +56,10 @@ but it is still proven to work (step 4).
   the session folder and writes only its own outputs and caches (named in `store/layout.py`, typed in
   `models.py`), writing JSON atomically with `write_model`. No stage reaches into another stage's
   internals.
-- **Accurate visuals** (architecture overview, principle 1). What was shown is rebuilt as a professional visual.
-  A redraw reaches the notes only after a vision check against the source crop and brief passes. If
-  none passes, the source crop is shown instead and recorded as unverified in `renders.json`. Source
-  crops stay on disk so any visual can be checked or regenerated.
+- **Accurate visuals** (`docs/overview.md`, principle 1). What was shown is rebuilt as a
+  professional visual. A redraw reaches the notes only after a vision check against the source crop
+  and brief passes. If none passes, the source crop is shown instead and recorded as unverified in
+  `renders.json`. Source crops stay on disk so any visual can be checked or regenerated.
 - **Model output is untrusted.** Validate it with Pydantic, drop unknown ids, sanitize SVG with
   `iris.svg.sanitize_svg`. Prompts treat session content as data, never instructions.
 - **No system dependencies.** Media goes through PyAV (it bundles FFmpeg). No `ffmpeg` CLI, no
@@ -69,6 +69,9 @@ but it is still proven to work (step 4).
   hard-coded in stages.
 - **Tests never call real paid APIs.** Use fakes or monkeypatching. Generate media fixtures in
   `tmp_path` (synthetic video/audio/frames); don't commit large binaries.
+- **Docs are overviews.** `docs/` explains the shape, the flow and the decisions with their why;
+  the detail stays in the code and its comments. A change that alters a flow or a decision updates
+  its page.
 - **Commits:** one short single-line message, `<type>(<domain>): <comment>`, e.g.
   `fix(render): retry transient API errors per figure`. No body, no `Co-Authored-By`, no AI
   attribution.
