@@ -46,11 +46,14 @@ rm -rf "$SMOKE"
 codesign --verify --deep --strict "$APP"
 # The hardened runtime is the point of the signature: fail if a config change dropped it, or let a
 # debugger in, for the app or its engine.
+# Captured first, not piped to grep -q: under pipefail, grep quitting early fails the pipeline.
 for bin in "$APP" "$APP/Contents/Resources/backend/python/bin/python3"; do
-  if ! codesign -dv "$bin" 2>&1 | grep -q 'flags=.*runtime'; then
+  signature="$(codesign -dv "$bin" 2>&1)"
+  entitlements="$(codesign -d --entitlements - "$bin" 2>/dev/null)"
+  if [[ "$signature" != *flags=*runtime* ]]; then
     echo "build-app.sh: $bin is not signed with the hardened runtime" >&2; exit 1
   fi
-  if codesign -d --entitlements - "$bin" 2>/dev/null | grep -q get-task-allow; then
+  if [[ "$entitlements" == *get-task-allow* ]]; then
     echo "build-app.sh: $bin lets a debugger attach (get-task-allow)" >&2; exit 1
   fi
 done
