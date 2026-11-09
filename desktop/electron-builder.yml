@@ -39,7 +39,13 @@ mac:
   category: public.app-category.productivity
   icon: build/icon.icns
   identity: "-"
-  hardenedRuntime: false
+  # The hardened runtime stops other programs attaching a debugger to Iris or injecting libraries
+  # into it at launch (DYLD_INSERT_LIBRARIES), ways round the fuses to the key Iris holds. The
+  # entitlements let back in only what Iris needs: one file for the app, one for its helpers and
+  # the bundled Python.
+  hardenedRuntime: true
+  entitlements: build-resources/entitlements.mac.plist
+  entitlementsInherit: build-resources/entitlements.mac.inherit.plist
   gatekeeperAssess: false
   extendInfo:
     NSMicrophoneUsageDescription: Iris records your voice, and what is on screen if you share it, to write your notes.
