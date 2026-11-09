@@ -55,7 +55,14 @@ find "$BUILD/python/bin" -type l ! -name 'python3*' -delete
 find "$BUILD/python" -name '__pycache__' -type d -prune -exec rm -rf {} +
 
 echo "==> Precompiling bytecode (the signed app must not write .pyc into itself)"
-"$PY" -I -m compileall -q -j 0 "$BUILD/python/lib" >/dev/null
+# Unchecked-hash: packaging doesn't keep the sources' timestamps, so timestamped .pyc would all
+# look stale in the app. The engine (started with -B, so it never writes) would then recompile
+# every module at each start, and the signed smoke test in build-app.sh, which runs without -B,
+# would write fresh ones into the app and break its seal. -B here: this process and its -j
+# workers would otherwise write timestamped .pyc for their own imports first, which compileall
+# then skips. Python never checks unchecked .pyc against their sources, so this stays the last
+# step to touch the bundle's .py files: an edit after it would run the old code.
+"$PY" -I -B -m compileall -q -j 0 --invalidation-mode unchecked-hash "$BUILD/python/lib"
 
 echo "==> Smoke test from a copy in a path with a space, with an empty environment"
 SMOKE="$BUILD/smoke test"
