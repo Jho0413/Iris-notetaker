@@ -114,15 +114,14 @@ class SessionStore:
         columns = set(row.keys())  # (``in row`` would test the values)
         fields = {k: row[k] for k in SESSION_FIELDS if k in columns}
         # A stored message no longer on the list (reworded since, or written by mistake) is served
-        # as the generic one, never as is, and never breaks reading the session list. ``get``:
-        # a store opened read-only is never migrated, so a newer column may not exist yet.
-        if fields.get("failure_message") is not None:
+        # as the generic one, never as is, and never breaks reading the session list.
+        if fields["failure_message"] is not None:
             if fields["failure_message"] not in FAILURE_MESSAGES:
                 fields["failure_message"] = GENERIC_FAILURE
                 fields["failure_kind"] = FailureKind.GENERAL
             elif fields["failure_kind"] not in FAILURE_KINDS:
                 fields["failure_kind"] = FailureKind.GENERAL
-        elif fields.get("failure_kind") is not None:
+        elif fields["failure_kind"] is not None:
             fields["failure_kind"] = None
         return Session(**fields)
 
