@@ -1,6 +1,9 @@
 """SessionStore is shared by FastAPI's threadpool and the job runner, so it must be thread-safe."""
 
+import sqlite3
 import threading
+
+import pytest
 
 from iris.models import SessionStatus, SourceKind
 from iris.store.db import SessionStore
@@ -55,3 +58,25 @@ def test_concurrent_reads_and_writes_return_correct_rows(tmp_path):
     assert {s.id for s in remaining} == set(ids)  # every temporary session was deleted
     assert all(s.status == SessionStatus.PROCESSING for s in remaining)
     store.close()
+
+
+# --- read-only (the MCP server) ---------------------------------------------------------------
+
+
+def test_the_read_only_store_reads_but_never_writes(tmp_path):
+    writer = SessionStore(tmp_path / "iris.db")
+    sid = writer.create("Physics", SourceKind.UPLOAD).id
+    reader = SessionStore(tmp_path / "iris.db", read_only=True)
+    try:
+        assert reader.get(sid).title == "Physics"
+        with pytest.raises(sqlite3.OperationalError, match="readonly"):
+            reader.update(sid, title="Changed")
+    finally:
+        reader.close()
+        writer.close()
+
+
+def test_the_read_only_store_never_creates_a_database(tmp_path):
+    with pytest.raises(sqlite3.OperationalError):
+        SessionStore(tmp_path / "missing" / "iris.db", read_only=True)
+    assert not (tmp_path / "missing").exists()

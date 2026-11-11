@@ -1,11 +1,13 @@
 """Saving, restoring and exporting the user's edited notes, and keeping them through re-runs."""
 
+from datetime import UTC, datetime
+
 import pytest
 from fastapi.testclient import TestClient
 
 from iris.main import create_app
 from iris.models import FrameRef, Notes, NotesEdits, NotesVisual, SessionType, SourceKind
-from iris.notes_edits import MAX_EDITED_CHARS, generated_hash
+from iris.notes_edits import MAX_EDITED_CHARS, generated_hash, newest
 from iris.store.layout import read_model, session_paths, write_model
 from tests.test_export import images
 
@@ -202,3 +204,34 @@ def test_after_a_rerun_renumbers_a_figure_keep_is_refused_until_the_edits_are_fi
     # Fixed in the editor (the missing figure removed, or the new one placed): saved, not stale.
     fixed = save(client, sid, EDITED.replace("#v1", "#v2"), got["generated_hash"]).json()
     assert fixed["edited"]["stale"] is False
+
+
+def test_edits_that_cant_be_opened_are_never_passed_over(settings):
+    """They may be intact (wrong permissions after a restore): serving the generated notes would
+    let the next save replace them, so reading fails instead."""
+    with TestClient(create_app(settings), raise_server_exceptions=False) as client:
+        sid, notes = make_notes(client, settings)
+        assert save(client, sid, EDITED, generated_hash(notes)).status_code == 200
+        path = session_paths(settings.sessions_dir, sid).notes_edits
+        path.unlink()
+        path.mkdir()  # can't be opened as a file, as with wrong permissions
+        assert client.get(f"/api/sessions/{sid}/notes").status_code == 500
+        assert client.get(f"/api/sessions/{sid}/export").status_code == 500
+
+
+def test_the_newest_version_is_the_edits_until_the_notes_are_made_again():
+    generated = Notes(
+        session_id="s1",
+        session_type=SessionType.LECTURE,
+        title="Loops",
+        markdown=GENERATED,
+        visuals=[],
+        format_version=2,
+    )
+    saved = datetime.now(UTC)
+    current = NotesEdits(markdown=EDITED, based_on=generated_hash(generated), saved_at=saved)
+    assert newest(generated, current).markdown == EDITED
+    stale = NotesEdits(markdown=EDITED, based_on="older notes", saved_at=saved)
+    assert newest(generated, stale).markdown == GENERATED
+    assert newest(generated, stale).edited is None
+    assert newest(generated, None).markdown == GENERATED

@@ -1,5 +1,4 @@
 import asyncio
-import logging
 import shutil
 import unicodedata
 from datetime import UTC, datetime
@@ -16,12 +15,10 @@ from iris.config import Settings
 from iris.export import export_markdown_embedded
 from iris.llm.usage import forget_total, with_cost
 from iris.models import Notes, NotesEdits, Session, SourceKind, Stage, Transcript
-from iris.notes_edits import MAX_EDITED_CHARS, as_read
+from iris.notes_edits import MAX_EDITED_CHARS, as_read, read_notes
 from iris.notes_format import validate
 from iris.sources.upload import save_upload
 from iris.store.layout import SessionPaths, read_model, session_paths, write_model
-
-log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
@@ -127,23 +124,12 @@ def get_transcript(paths: PathsDep) -> Transcript:
     return read_model(paths.transcript, Transcript)
 
 
-def _read_edits(paths: SessionPaths) -> NotesEdits | None:
-    try:
-        return read_model(paths.notes_edits, NotesEdits)
-    except FileNotFoundError:
-        return None
-    except ValueError:
-        # Written atomically, so this is damage from outside Iris. The session stays readable
-        # with its generated notes; the next save replaces the file.
-        log.error("ignoring unreadable %s", paths.notes_edits, exc_info=True)
-        return None
-
-
 def _notes(paths: SessionPaths) -> Notes:
     """The notes as a reader gets them: the user's edits when there are any (iris.notes_edits)."""
-    if not paths.notes.exists():
-        raise HTTPException(404, "notes not ready")
-    return as_read(read_model(paths.notes, Notes), _read_edits(paths))
+    try:
+        return read_notes(paths)
+    except FileNotFoundError:
+        raise HTTPException(404, "notes not ready") from None
 
 
 @router.get("/{session_id}/notes", response_model=Notes)

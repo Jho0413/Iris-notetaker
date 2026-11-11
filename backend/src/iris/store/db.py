@@ -72,11 +72,21 @@ class SessionStore:
     the connection therefore holds ``_lock``. Queries are tiny, so contention is negligible.
     """
 
-    def __init__(self, db_path: Path):
-        db_path.parent.mkdir(parents=True, exist_ok=True)
+    def __init__(self, db_path: Path, *, read_only: bool = False):
+        """``read_only`` opens an existing database for reading only (the MCP server, which runs
+        beside the app): no folder, table or column is made, and any write fails. A missing
+        database then raises ``sqlite3.OperationalError``. (SQLite may still add its own -wal and
+        -shm working files beside the database, to read it.)"""
         self._lock = threading.RLock()  # re-entrant, so a locked method may call another
-        self._conn = sqlite3.connect(db_path, check_same_thread=False)
+        if read_only:
+            target = f"{db_path.resolve().as_uri()}?mode=ro"
+        else:
+            db_path.parent.mkdir(parents=True, exist_ok=True)
+            target = str(db_path)
+        self._conn = sqlite3.connect(target, uri=read_only, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
+        if read_only:
+            return
         with self._lock:
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.executescript(SCHEMA)

@@ -53,7 +53,11 @@ uv run iris stage <session_id> detect       # one stage on its own
 uv run iris show <session_id>               # status and, for a failed run, the raw error
 uv run iris cost [<session_id>]             # model calls and cost (default: the newest session)
 uv run iris replay-live <file>...           # play recordings into a running engine's live API
+uv run iris mcp                             # the read-only MCP server, as an assistant starts it
 ```
+
+`mcp` speaks MCP on stdin and stdout, so it is for an assistant to start, not for typing at;
+connecting one is in [`assistants.md`](assistants.md#connecting).
 
 `replay-live` needs a running engine and makes real, paid model calls through it, so point that
 engine at a scratch data folder (`IRIS_DATA_DIR`).

@@ -305,3 +305,21 @@ def test_upgraded_only_changes_old_notes(version):
 def test_old_notes_json_without_a_version_reads_as_version_1():
     raw = '{"session_id":"s","session_type":"lecture","title":"T","markdown":"x","visuals":[]}'
     assert Notes.model_validate_json(raw).format_version == 1
+
+
+@pytest.mark.parametrize("odd_break", ["\r\n", "\r"])
+def test_split_sections_reads_other_line_breaks_as_lf(odd_break):
+    plain = "Intro\n# Setup\n:::box[Tip]{color=green}\nUse a clamp.\n:::\n# Next\nMore."
+    assert nf.split_sections(plain.replace("\n", odd_break)) == nf.split_sections(plain)
+
+
+def test_split_sections_keeps_a_line_separator_inside_its_line():
+    """U+2028 (from text pasted out of a PDF) is not a line break to the parser or to scan."""
+    markdown = (
+        "Copied\u2028from a PDF\n# Setup\n:::box[Tip]{color=green}\n# Inner\n:::\n# Next\nMore."
+    )
+    assert nf.split_sections(markdown) == [
+        "Copied\u2028from a PDF",
+        "# Setup\n:::box[Tip]{color=green}\n# Inner\n:::",
+        "# Next\nMore.",
+    ]

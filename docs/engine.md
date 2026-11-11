@@ -145,7 +145,8 @@ instead.
 
 The `iris` CLI builds its own store and job runner from the same code, in its own process, on
 the data folder, with no server (`serve` starts one; `replay-live` talks to a running one). The
-commands are in [`development.md`](development.md#the-cli).
+commands are in [`development.md`](development.md#the-cli). `mcp` is the exception: it opens the
+store read-only and never runs anything ([`assistants.md`](assistants.md)).
 
 ## Limits
 

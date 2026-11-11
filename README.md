@@ -26,6 +26,9 @@ The Mac app also checks a new key with OpenAI once, when you enter it. OpenAI sa
 API data to train its models:
 [how OpenAI handles API data](https://developers.openai.com/api/docs/guides/your-data).
 
+If you connect an AI assistant to your notes ([`docs/assistants.md`](docs/assistants.md)), what
+it reads goes to that assistant's provider, as anything else you give it does.
+
 ## Quick start
 
 Needs [uv](https://docs.astral.sh/uv/) and Node 22.12 or later.
@@ -52,6 +55,8 @@ used. No terminal or repo is needed to run it.
   here.
 - [`docs/development.md`](docs/development.md): setting up, running, the `iris` CLI, checks and
   debugging.
+- [`docs/assistants.md`](docs/assistants.md): reading and searching your notes, and looking at
+  their figures, from Claude, Cursor or another AI assistant (MCP).
 
 ## Layout
 
