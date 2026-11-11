@@ -10,20 +10,41 @@ behaviour choice in it) goes through these steps, in order:
 
 1. **Plan and brainstorm.** Read the issue and the code it touches, then work out the approach
    with the user: lay out the options and their trade-offs, and recommend one. Write a short
-   plan: what changes, where, and what's out of scope. For UI work, show 2–3 options as a
-   clickable HTML mockup (using the real `frontend/src/index.css`, served on a local port) and let
-   the user pick.
+   plan: what changes, where, and what's out of scope. Specify the behaviour (see "Specifying
+   behaviour" below) and agree it with the user. For UI work, show 2–3 options as a clickable
+   HTML mockup (using the real `frontend/src/index.css`, served on a local port) and let the user
+   pick.
 2. **Ask.** Put the decisions that are the user's to make (scope, behaviour, wording) to them as
    clarifying questions instead of guessing. Build only once the plan is agreed.
 3. **Implement** on the task's own branch, following the conventions below.
-4. **Prove it works.** Tests for the behaviour and its edge cases, and seeing it work for real:
-   drive the UI in a browser (desktop and mobile widths, light and dark), call the API or run the
-   CLI, and check the desktop app when it is affected. Report what was verified, how, and anything
-   that couldn't be.
+4. **Prove it works.** Tests for the behaviour and its edge cases (a test for every row of the
+   agreed behaviour tables), and seeing it work for real: drive the UI in a browser (desktop and
+   mobile widths, light and dark), call the API or run the CLI, and check the desktop app when it
+   is affected. Report what was verified, how, and anything that couldn't be.
 5. **Review** as in the Definition of done: the `code-reviewer` agent, fixes, re-verification.
 
 A **small fix** (a bug with an obvious fix, a typo, a one-line change) can go straight to step 3,
-but it is still proven to work (step 4).
+but it is still proven to work (step 4): a test for the case it fixes, no diagram needed.
+
+## Specifying behaviour
+
+We agree what should happen before building it, so "done" can be checked rather than felt. Use
+the form that fits the change; don't invent states where there are none.
+
+- **State machines where there is one:** a flow, a request, a lifecycle, anything that can be
+  rejected. Draw the states and the events that move between them, as Mermaid. Keep one small
+  machine per concern (a request, a session's notes, a recording), never one diagram of
+  everything.
+- **A table of every state and event.** Each cell is a transition, a rejection (with what the user
+  or caller is told), or "can't happen" with the reason. Rejections are rows too: missing,
+  damaged, unreadable, busy, not allowed.
+- **One test per row,** named after the row, transitions and rejections alike, so a missing test
+  shows. Keep the decision in a small pure function where it fits, and test it directly.
+- **Inputs, not states,** for parsers, search, text handling and other input-to-output code: a
+  table of the inputs that matter (empty, huge, odd line breaks, Unicode, malformed) with the
+  expected output, plus property-based tests (e.g. `hypothesis`, added when first needed) where
+  random input finds what examples miss.
+- **The diagram lives with the code:** in the feature's `docs/` page, updated in the same change.
 
 ## Engineering practices
 
@@ -102,12 +123,14 @@ If you change the API, run `make gen-api` with the backend running and commit `s
 A branch is ready to merge only when all of these hold:
 
 1. **Checks pass** locally and in CI.
-2. **Tests cover the behaviour and the edge cases** in `docs/review-checklist.md` that apply.
+2. **Tests cover every row** of the agreed state machines and input tables, transitions and
+   rejections alike, and the edge cases in `docs/review-checklist.md` that apply.
 3. **Shown working:** the change was exercised for real (browser, API, CLI or desktop app), and the
    PR says what was verified and how.
 4. **Independent review:** the `code-reviewer` agent (`.claude/agents/code-reviewer.md`) reviewed
-   the branch diff against `main` with fresh context, and every blocker and should-fix finding is
-   fixed or explicitly waived by the user.
+   the branch diff against `main` with fresh context, checking the code against the agreed tables
+   (a missing row, or behaviour that differs from its cell, is a should-fix), and every blocker
+   and should-fix finding is fixed or explicitly waived by the user.
 5. **Re-verified:** after fixes, the reviewer confirmed each finding is resolved.
 6. **Human merge:** a PR is opened with a summary, test results, what was verified and the review
    outcome. The user merges.
