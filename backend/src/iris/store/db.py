@@ -72,11 +72,21 @@ class SessionStore:
     the connection therefore holds ``_lock``. Queries are tiny, so contention is negligible.
     """
 
-    def __init__(self, db_path: Path):
-        db_path.parent.mkdir(parents=True, exist_ok=True)
+    def __init__(self, db_path: Path, *, read_only: bool = False):
+        """``read_only`` opens an existing database for reading only (the MCP server, which runs
+        beside the app): no folder, table or column is made, and any write fails. A missing
+        database then raises ``sqlite3.OperationalError``. (SQLite may still add its own -wal and
+        -shm working files beside the database, to read it.)"""
         self._lock = threading.RLock()  # re-entrant, so a locked method may call another
-        self._conn = sqlite3.connect(db_path, check_same_thread=False)
+        if read_only:
+            target = f"{db_path.resolve().as_uri()}?mode=ro"
+        else:
+            db_path.parent.mkdir(parents=True, exist_ok=True)
+            target = str(db_path)
+        self._conn = sqlite3.connect(target, uri=read_only, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
+        if read_only:
+            return
         with self._lock:
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.executescript(SCHEMA)
@@ -104,14 +114,15 @@ class SessionStore:
         columns = set(row.keys())  # (``in row`` would test the values)
         fields = {k: row[k] for k in SESSION_FIELDS if k in columns}
         # A stored message no longer on the list (reworded since, or written by mistake) is served
-        # as the generic one, never as is, and never breaks reading the session list.
-        if fields["failure_message"] is not None:
+        # as the generic one, never as is, and never breaks reading the session list. ``get``:
+        # a store opened read-only is never migrated, so a newer column may not exist yet.
+        if fields.get("failure_message") is not None:
             if fields["failure_message"] not in FAILURE_MESSAGES:
                 fields["failure_message"] = GENERIC_FAILURE
                 fields["failure_kind"] = FailureKind.GENERAL
             elif fields["failure_kind"] not in FAILURE_KINDS:
                 fields["failure_kind"] = FailureKind.GENERAL
-        elif fields["failure_kind"] is not None:
+        elif fields.get("failure_kind") is not None:
             fields["failure_kind"] = None
         return Session(**fields)
 

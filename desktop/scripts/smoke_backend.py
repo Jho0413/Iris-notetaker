@@ -4,9 +4,11 @@ Python, isolated, in an empty environment). Exits non-zero if any step fails.
 Checks that the native libraries load and do real work: PyAV decodes a generated video, OpenCV
 diffs frames and writes a JPEG, resvg rasterizes an SVG; then that the server starts as the app
 starts it (``python -I -m iris serve --secrets-from-stdin``, the key and token on stdin) and
-enforces the API token.
+enforces the API token; then that the MCP server answers over stdio as an assistant starts it
+(``python -I -B -m iris mcp``), reading the data the server made.
 """
 
+import asyncio
 import json
 import os
 import subprocess
@@ -31,6 +33,7 @@ def main(work: Path) -> None:
     import resvg_py
 
     import iris.main  # noqa: F401  (the whole app, as the server imports it)
+    import iris.mcp_server  # noqa: F401  (and the MCP server, which the app never imports)
 
     step(f"PyAV {av.__version__}: encode and decode a short video")
     video = work / "clip.mp4"
@@ -104,7 +107,22 @@ def main(work: Path) -> None:
     finally:
         server.terminate()
         server.wait(timeout=20)
+
+    step("MCP server: python -I -B -m iris mcp, over stdio")
+    asyncio.run(_mcp_lists_sessions(env))
     print("   smoke test passed", flush=True)
+
+
+async def _mcp_lists_sessions(env: dict[str, str]) -> None:
+    from mcp import Client, StdioServerParameters
+
+    command = StdioServerParameters(
+        command=sys.executable, args=["-I", "-B", "-m", "iris", "mcp"], env=env
+    )
+    async with Client(command) as client:
+        result = await client.call_tool("list_sessions", {})
+    assert not result.is_error, result.content
+    assert result.structured_content == {"result": []}, result.structured_content
 
 
 def _req(url, token):

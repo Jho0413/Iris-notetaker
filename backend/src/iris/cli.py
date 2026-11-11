@@ -8,6 +8,8 @@ iris run <session_id> [--from S]    re-run a session's pipeline, optionally from
 iris stage <session_id> <stage>     run one stage on its own (reads/writes session files)
 iris cost [<session_id>]            model usage and cost per stage, model and purpose
                                     (the most recent session if no id is given)
+iris mcp                            a read-only MCP server on stdin/stdout, for AI assistants
+                                    to list, read and search the notes (iris/mcp_server.py)
 iris show <session_id>              dev tool: a session's status and, if it failed, the stage,
                                     what the user was told and the raw error (never served by
                                     the API)
@@ -22,7 +24,7 @@ import asyncio
 import sys
 from pathlib import Path
 
-from iris.config import get_settings
+from iris.config import Settings, get_settings
 from iris.events import EventBus
 from iris.jobs.runner import JobRunner
 from iris.launch_secrets import SecretsError, read_secrets, settings_with_secrets
@@ -184,6 +186,14 @@ def _cost(session_id: str | None) -> int:
     return 0
 
 
+def _mcp() -> None:
+    from iris.mcp_server import create_server  # the MCP SDK loads only for this command
+
+    # No .env: the assistant starts this in whatever folder it likes (Claude Code and Cursor use
+    # the open project), whose .env is not Iris's. The config's environment alone applies.
+    create_server(Settings(_env_file=None)).run()  # stdio
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="iris")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -215,6 +225,8 @@ def main() -> None:
     show = sub.add_parser("show", help="a session's status and raw error (for developers)")
     show.add_argument("session_id")
 
+    sub.add_parser("mcp", help="a read-only MCP server on stdin/stdout, for AI assistants")
+
     replay = sub.add_parser("replay-live", help="play recordings into a running backend's live API")
     replay.add_argument("files", type=Path, nargs="+")
     replay.add_argument("--url", default="http://127.0.0.1:8000", help="the backend to replay into")
@@ -233,6 +245,8 @@ def main() -> None:
         sys.exit(_cost(args.session_id))
     elif args.cmd == "show":
         sys.exit(_show(args.session_id))
+    elif args.cmd == "mcp":
+        _mcp()
     elif args.cmd == "replay-live":
         from iris.live import replay as live_replay
 
