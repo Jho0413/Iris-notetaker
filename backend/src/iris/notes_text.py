@@ -1,19 +1,19 @@
 """The notes as plain text for an AI assistant, and a plain word search over them.
 
-Pure functions only. Figures become one line naming their caption, so no image reaches the
-assistant's context. Search splits the notes into passages (the text under each top-level
-heading), reads each as the user sees it (a box or step shows its title, never its command), and
-matches words, not meaning: a passage matches when every word of the query is in it or in the
-session's titles. Case and Unicode forms are folded, so "CAFÉ" finds "café" however either was
-typed. Notes are a few thousand characters per session, so reading them all on each search is
-fast; anything smarter waits until this falls short.
+Pure functions only. Figures become one line naming their id and caption, so no image reaches the
+assistant's context unless it asks for one by id. Search splits the notes into passages (the text
+under each top-level heading), reads each as the user sees it (a box or step shows its title,
+never its command), and matches words, not meaning: a passage matches when every word of the
+query is in it or in the session's titles. Case and Unicode forms are folded, so "CAFÉ" finds
+"café" however either was typed. Notes are a few thousand characters per session, so reading them
+all on each search is fast; anything smarter waits until this falls short.
 """
 
 import re
 import unicodedata
 from dataclasses import dataclass
 
-from iris.models import Notes
+from iris.models import Notes, NotesVisual
 from iris.notes_format import heading, scan, split_sections
 
 # Characters of a passage shown around its first match.
@@ -25,19 +25,35 @@ MAX_PASSAGES_PER_SESSION = 3
 MAX_QUERY_WORDS = 20
 
 
-def figure_line(caption: str) -> str:
-    caption = " ".join(caption.split())
-    return f"[Figure: {caption}]" if caption else "[Figure]"
+def figure_line(visual: NotesVisual | None) -> str:
+    """``[Figure <id>: caption]``, or ``[Figure]`` for a figure that isn't among the visuals
+    (removed in an edit), which has no image to ask for."""
+    if visual is None:
+        return "[Figure]"
+    caption = " ".join(visual.caption.split())
+    return f"[Figure {visual.id}: {caption}]" if caption else f"[Figure {visual.id}]"
+
+
+def figure_origin(visual: NotesVisual) -> str:
+    """What a figure's image is, so the assistant knows how far to trust its exact wording. Notes
+    from before ``verified`` was recorded are read as the app reads them: a redraw only reached
+    them after passing its check."""
+    if visual.render_as == "screenshot" and visual.verified is not False:
+        return "A crop of the screen, as it was shown."
+    if visual.verified is False:
+        return "A crop of the screen: no redraw of this figure passed Iris's check."
+    if visual.path == visual.source_path:
+        return "A crop of the screen: Iris didn't redraw this figure."
+    return "Iris's redraw, checked against the screen."
 
 
 def with_figures_as_text(notes: Notes) -> str:
-    """The notes' Markdown with each ``::figure{#<id>}`` line replaced by its caption. A figure
-    whose id isn't among the visuals (removed in an edit) is named without one."""
+    """The notes' Markdown with each ``::figure{#<id>}`` line replaced by its ``figure_line``."""
     layout = scan(notes.markdown)
-    captions = {v.id: v.caption for v in notes.visuals}
+    visuals = {v.id: v for v in notes.visuals}
     lines = list(layout.lines)
     for i, visual_id in layout.figures:
-        lines[i] = figure_line(captions.get(visual_id, ""))
+        lines[i] = figure_line(visuals.get(visual_id))
     return "\n".join(lines)
 
 

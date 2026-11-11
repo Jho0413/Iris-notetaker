@@ -1,6 +1,7 @@
 """The read-only MCP server (iris mcp): listing, reading and searching notes from the data
 folder, through the MCP protocol as an assistant calls it."""
 
+import base64
 import os
 import sqlite3
 import sys
@@ -8,12 +9,20 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
+import cv2
+import numpy as np
 import pytest
 from mcp import Client, StdioServerParameters
 
 from iris import mcp_server
 from iris.config import Settings
-from iris.mcp_server import MAX_SEARCH_RESULTS, create_server
+from iris.mcp_server import (
+    MAX_IMAGE_EDGE_PX,
+    MAX_IMAGE_PIXELS,
+    MAX_SEARCH_RESULTS,
+    create_server,
+    fitted_size,
+)
 from iris.models import (
     GENERIC_FAILURE,
     FailureKind,
@@ -119,7 +128,7 @@ async def search(settings: Settings, query: str) -> list[dict]:
 async def test_every_tool_is_read_only(settings, store):
     async with Client(create_server(settings)) as client:
         tools = (await client.list_tools()).tools
-    assert {t.name for t in tools} == {"list_sessions", "get_notes", "search"}
+    assert {t.name for t in tools} == {"list_sessions", "get_notes", "get_figure", "search"}
     for tool in tools:
         assert tool.annotations.read_only_hint is True
         assert tool.annotations.destructive_hint is False
@@ -171,7 +180,7 @@ async def test_notes_have_a_header_and_figures_as_captions(settings, store):
     header, body = text.split("\n\n", 2)[0:2], text.split("\n\n", 2)[2]
     assert header[0] == "# Loops and forces"
     assert header[1].startswith(f'Session "Physics" ({sid}) · lecture · added to Iris ')
-    assert body == "Intro.\n\n# Forces\nGravity pulls down.\n\n[Figure: Forces on a loop]"
+    assert body == "Intro.\n\n# Forces\nGravity pulls down.\n\n[Figure v1: Forces on a loop]"
     assert "edit" not in text
 
 
@@ -194,7 +203,7 @@ async def test_notes_are_the_users_edited_version(settings, store):
     save_edits(settings, sid, "My own notes.\n\n::figure{#v1}")
     text = await text_of(settings, "get_notes", session_id=sid)
     assert "These notes include the user's edits." in text
-    assert text.endswith("My own notes.\n\n[Figure: Forces on a loop]")
+    assert text.endswith("My own notes.\n\n[Figure v1: Forces on a loop]")
     assert "Gravity" not in text
 
 
@@ -275,6 +284,154 @@ async def test_an_unknown_id_is_refused_without_touching_files(settings, store, 
     add_session(store, settings)
     message = await error_of(settings, "get_notes", session_id=bad_id)
     assert "There is no session" in message and "list_sessions" in message
+
+
+# --- get_figure ------------------------------------------------------------------------------
+
+SVG = (
+    '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="20">'
+    '<rect width="40" height="20" fill="#4b44d6"/></svg>'
+)
+
+
+def set_figure(settings: Settings, sid: str, path: str, data: bytes | None) -> None:
+    """Point figure v1 at ``path`` and, unless ``data`` is None, write that file."""
+    paths = session_paths(settings.sessions_dir, sid)
+    notes = Notes.model_validate_json(paths.notes.read_text())
+    notes.visuals[0].path = path
+    if path.endswith(".svg"):  # as Iris records a redraw that passed its check
+        notes.visuals[0].render_as, notes.visuals[0].verified = "svg", True
+    write_model(paths.notes, notes)
+    if data is not None:
+        (paths.root / path).write_bytes(data)
+
+
+async def figure(settings: Settings, sid: str, figure_id: str = "v1"):
+    return await call(settings, "get_figure", session_id=sid, figure_id=figure_id)
+
+
+def encoded(width: int, height: int, ext: str) -> bytes:
+    """A real image of that size, as Iris's figure files are."""
+    ok, data = cv2.imencode(ext, np.full((height, width, 3), 120, np.uint8))
+    assert ok
+    return data.tobytes()
+
+
+def size_of(image) -> tuple[int, int]:
+    decoded = cv2.imdecode(np.frombuffer(base64.b64decode(image.data), np.uint8), cv2.IMREAD_COLOR)
+    return decoded.shape[1], decoded.shape[0]
+
+
+async def test_a_redrawn_figure_comes_as_a_png_after_its_caption(settings, store):
+    sid = add_session(store, settings)
+    set_figure(settings, sid, "visuals/v1.svg", SVG.encode())
+    result = await figure(settings, sid)
+    assert not result.is_error, result.content
+    caption, origin, image = result.content
+    assert caption.text == "[Figure v1: Forces on a loop]"
+    assert origin.text == "Iris's redraw, checked against the screen."
+    assert image.type == "image" and image.mime_type == "image/png"
+    width, height = size_of(image)  # drawn large, then fitted to Claude's limits
+    assert width <= MAX_IMAGE_EDGE_PX and width * height <= MAX_IMAGE_PIXELS
+    assert width > MAX_IMAGE_EDGE_PX * 0.8
+
+
+@pytest.mark.parametrize(
+    ("name", "mime"),
+    [("v1.jpg", "image/jpeg"), ("v1.png", "image/png"), ("v1.PNG", "image/png")],
+)
+async def test_an_image_that_fits_is_sent_unchanged(settings, store, name, mime):
+    sid = add_session(store, settings)
+    data = encoded(400, 300, ".png" if mime == "image/png" else ".jpg")
+    set_figure(settings, sid, f"visuals/{name}", data)
+    [_, _, image] = (await figure(settings, sid)).content
+    assert (image.mime_type, base64.b64decode(image.data)) == (mime, data)
+
+
+@pytest.mark.parametrize("ext", [".png", ".jpg"])
+async def test_a_large_image_is_scaled_down_to_claudes_limits(settings, store, ext):
+    sid = add_session(store, settings)
+    set_figure(settings, sid, f"visuals/v1{ext}", encoded(3000, 2000, ext))
+    [_, _, image] = (await figure(settings, sid)).content
+    width, height = size_of(image)
+    assert width <= MAX_IMAGE_EDGE_PX and width * height <= MAX_IMAGE_PIXELS
+    assert abs(width / height - 1.5) < 0.01  # same shape
+
+
+async def test_an_image_still_too_large_to_send_is_refused(settings, store, monkeypatch):
+    sid = add_session(store, settings)
+    set_figure(settings, sid, "visuals/v1.png", encoded(400, 300, ".png"))
+    monkeypatch.setattr(mcp_server, "MAX_IMAGE_BYTES", 10)
+    message = await error_of(settings, "get_figure", session_id=sid, figure_id="v1")
+    assert "too large to send" in message
+
+
+@pytest.mark.parametrize(
+    ("width", "height", "fitted"),
+    [
+        (1568, 700, None),  # fits both limits
+        (3136, 1000, (1568, 500)),  # long edge
+        (1500, 1500, (1072, 1072)),  # pixel count
+        (100, 20000, (7, 1568)),  # a tall figure fits its long edge too
+    ],
+)
+def test_fitted_size(width, height, fitted):
+    assert fitted_size(width, height) == fitted
+
+
+@pytest.mark.parametrize(
+    ("path", "data", "expected"),
+    [
+        ("visuals/v1.svg", None, "missing from the session's folder"),
+        ("../outside.png", b"secret", "can't be shown"),
+        ("visuals/v1.gif.exe", b"x", "can't be shown"),
+        ("visuals/v1.svg", b"<not svg", "couldn't be drawn"),
+        ("visuals/v1.png", b"not an image", "couldn't be read"),
+    ],
+)
+async def test_a_figure_image_that_cant_be_sent_says_why(settings, store, path, data, expected):
+    sid = add_session(store, settings)
+    if path.startswith(".."):
+        (settings.sessions_dir / "outside.png").write_bytes(data)
+        data = None
+    set_figure(settings, sid, path, data)
+    assert expected in await error_of(settings, "get_figure", session_id=sid, figure_id="v1")
+
+
+async def test_a_figure_image_linked_from_outside_the_session_is_refused(settings, store):
+    sid = add_session(store, settings)
+    outside = settings.sessions_dir / "outside.png"
+    outside.write_bytes(encoded(40, 20, ".png"))
+    set_figure(settings, sid, "visuals/v1.png", None)
+    (session_paths(settings.sessions_dir, sid).visuals_dir / "v1.png").symlink_to(outside)
+    assert "can't be shown" in await error_of(
+        settings, "get_figure", session_id=sid, figure_id="v1"
+    )
+
+
+async def test_a_figure_image_that_cant_be_opened_says_so(settings, store):
+    sid = add_session(store, settings)
+    set_figure(settings, sid, "visuals/v1.png", None)
+    (session_paths(settings.sessions_dir, sid).visuals_dir / "v1.png").mkdir()
+    assert "couldn't be opened" in await error_of(
+        settings, "get_figure", session_id=sid, figure_id="v1"
+    )
+
+
+async def test_an_unknown_figure_or_session_is_refused(settings, store):
+    sid = add_session(store, settings)
+    assert "no figure 'v9'" in await error_of(
+        settings, "get_figure", session_id=sid, figure_id="v9"
+    )
+    assert "There is no session" in await error_of(
+        settings, "get_figure", session_id="nope", figure_id="v1"
+    )
+
+
+async def test_a_figure_of_a_session_without_notes_says_why(settings, store):
+    sid = add_session(store, settings, status=SessionStatus.PROCESSING, markdown=None)
+    message = await error_of(settings, "get_figure", session_id=sid, figure_id="v1")
+    assert "aren't ready yet" in message
 
 
 # --- search ----------------------------------------------------------------------------------

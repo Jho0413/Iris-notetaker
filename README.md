@@ -55,8 +55,8 @@ used. No terminal or repo is needed to run it.
   here.
 - [`docs/development.md`](docs/development.md): setting up, running, the `iris` CLI, checks and
   debugging.
-- [`docs/assistants.md`](docs/assistants.md): reading and searching your notes from Claude,
-  Cursor or another AI assistant (MCP).
+- [`docs/assistants.md`](docs/assistants.md): reading and searching your notes, and looking at
+  their figures, from Claude, Cursor or another AI assistant (MCP).
 
 ## Layout
 

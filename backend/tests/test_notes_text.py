@@ -1,9 +1,12 @@
 """The notes as text for assistants, and the word search over them (iris.notes_text)."""
 
+import pytest
+
 from iris.models import FrameRef, Notes, NotesVisual, SessionType
 from iris.notes_text import (
     MAX_PASSAGES_PER_SESSION,
     SNIPPET_CHARS,
+    figure_origin,
     find_passages,
     passages,
     query_words,
@@ -32,9 +35,9 @@ def notes_with(markdown: str) -> Notes:
     )
 
 
-def test_figures_become_their_caption_on_one_line():
+def test_figures_become_their_id_and_caption_on_one_line():
     text = with_figures_as_text(notes_with("Before.\n\n::figure{#v1}\n\nAfter."))
-    assert text == "Before.\n\n[Figure: Forces on a loop]\n\nAfter."
+    assert text == "Before.\n\n[Figure v1: Forces on a loop]\n\nAfter."
 
 
 def test_a_figure_missing_from_the_visuals_is_named_without_a_caption():
@@ -135,3 +138,33 @@ def test_snippet_finds_its_place_when_case_folding_changes_lengths():
 def test_snippet_finds_a_match_that_case_folding_lengthens():
     text = "filler " * 100 + "Hauptstraße 5"
     assert "Hauptstraße 5" in snippet(text, query_words("hauptstrasse"))
+
+
+@pytest.mark.parametrize(
+    ("render_as", "verified", "says"),
+    [
+        ("svg", True, "Iris's redraw, checked against the screen."),
+        ("image", True, "Iris's redraw, checked against the screen."),
+        ("screenshot", True, "A crop of the screen, as it was shown."),
+        ("screenshot", False, "no redraw of this figure passed Iris's check"),
+        ("svg", None, "Iris's redraw, checked against the screen."),  # older notes, as the app
+        ("screenshot", None, "A crop of the screen, as it was shown."),
+    ],
+)
+def test_a_figure_says_whether_it_is_a_redraw_or_the_screen(render_as, verified, says):
+    visual = (
+        notes_with("").visuals[0].model_copy(update={"render_as": render_as, "verified": verified})
+    )
+    assert says in figure_origin(visual)
+
+
+def test_a_figure_that_was_never_redrawn_is_its_screen_crop():
+    crop = "visuals/v1.source.jpg"
+    visual = (
+        notes_with("")
+        .visuals[0]
+        .model_copy(
+            update={"render_as": "svg", "verified": None, "path": crop, "source_path": crop}
+        )
+    )
+    assert figure_origin(visual) == "A crop of the screen: Iris didn't redraw this figure."

@@ -41,8 +41,8 @@ A session's life:
    what belongs in the notes, writes them and redraws each figure. A live session does most of
    this while it records, so only the rest runs when notes are asked for.
 3. **Out:** the notes are read and edited in the UI and exported as a PDF ([`ui.md`](ui.md));
-   other clients get Markdown from the API, and AI assistants read and search them through a
-   local MCP server ([`assistants.md`](assistants.md)).
+   other clients get Markdown from the API, and AI assistants read and search them, and look at
+   their figures, through a local MCP server ([`assistants.md`](assistants.md)).
 
 ## Principles
 

@@ -10,7 +10,7 @@ assistant access to the notes; it adds no new data.
 
 - **MCP:** the Model Context Protocol, the common way assistants call outside tools. A local MCP
   server is a program the assistant starts and talks to over its stdin and stdout.
-- **Tool:** one thing the server lets the assistant do. Iris has three, all read-only.
+- **Tool:** one thing the server lets the assistant do. Iris has four, all read-only.
 - **Passage:** the text under one top-level heading of the notes; search finds passages.
 
 ## The shape
@@ -43,9 +43,15 @@ Iris writes every file whole (to a temporary file, then renamed) and the store i
 - **Get notes:** one session's notes, always the newest version: your edited version, unless
   Iris made the notes again after you edited them, then those new notes. (The app instead shows
   your edits and asks which to keep; an assistant can't ask, and your edits stay in Iris either
-  way.) Each figure becomes one
-  line with its caption, so no image fills the assistant's context. A session with no notes yet,
-  or a failed one, gets a sentence saying why.
+  way.) Each figure becomes one line with its id and caption, so no image fills the assistant's
+  context. A session with no notes yet, or a failed one, gets a sentence saying why.
+- **Get figure:** one figure as an image, for a question about what it shows. It is the image the
+  notes show, Iris's redraw or a crop of the screen, with a line saying which, so the assistant
+  knows how far to trust its exact wording. A redraw that is an SVG, which assistants can't read,
+  is drawn as a PNG first, and an image bigger than Claude uses (about 1,568 pixels on the long
+  edge) is scaled down, so no detail it could see is lost and none is sent for nothing. Each image
+  takes much more of the assistant's context than text, which is why figures come one at a time,
+  when asked for, rather than inside the notes.
 - **Search:** passages from every session that contain all the words searched for, in the passage or
   the session's titles, best first and a few per session so results span sessions. Notes are split
   where synthesis splits them, so a box or step is never cut in two, and read as the user sees them:
@@ -117,8 +123,8 @@ claude mcp add iris --scope user -- uv run --directory /path/to/Iris-notetaker/b
 
 ## Limits
 
-- Notes only: no transcript, figure images or live session yet. They come if real use shows a
-  need.
+- Notes and figures only: no transcript or live session yet, nor the screen crop behind a
+  checked redraw. They come if real use shows a need.
 - Local assistants only. Claude in a browser or on a phone would need Iris hosted or tunnelled,
   with sign-in.
 - Search matches words, so a question phrased differently from the notes can miss; the assistant
