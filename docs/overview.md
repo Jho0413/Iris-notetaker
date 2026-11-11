@@ -29,6 +29,8 @@ flowchart LR
   Pipeline -->|a few model calls| OpenAI
   App["Desktop app (Electron)"] -->|shows| UI
   App -->|starts| Engine
+  Assistant["AI assistant"] -->|MCP| MCP["iris mcp (read-only)"]
+  MCP -->|reads| Folder
 ```
 
 A session's life:
@@ -39,7 +41,8 @@ A session's life:
    what belongs in the notes, writes them and redraws each figure. A live session does most of
    this while it records, so only the rest runs when notes are asked for.
 3. **Out:** the notes are read and edited in the UI and exported as a PDF ([`ui.md`](ui.md));
-   other clients get Markdown from the API.
+   other clients get Markdown from the API, and AI assistants read and search them through a
+   local MCP server ([`assistants.md`](assistants.md)).
 
 ## Principles
 
@@ -69,6 +72,7 @@ How it works, in reading order:
 | [`recording-live.md`](recording-live.md) | Recording live, and processing while it records |
 | [`ui.md`](ui.md) | The web UI and how it talks to the engine |
 | [`desktop.md`](desktop.md) | The macOS app: the window, the key, the engine's lifecycle |
+| [`assistants.md`](assistants.md) | AI assistants reading the notes over MCP, and connecting one |
 
 Reference:
 
