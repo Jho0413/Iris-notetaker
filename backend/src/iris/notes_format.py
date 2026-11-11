@@ -49,6 +49,7 @@ FIGURE = re.compile(r"^::figure\{#(?P<id>[A-Za-z0-9_-]+)\}[ \t]*$")
 DIRECTIVE = re.compile(r"^::+[A-Za-z]")  # anything else that looks like a command
 FENCE = re.compile(r"^ {0,3}(?P<fence>`{3,}|~{3,})")
 COLOR = re.compile(r"(?:^|\s)color=(\"?)(?P<color>[^\s\"}]*)\1(?=\s|$)")
+_PARSER = MarkdownIt()
 
 
 @dataclass(frozen=True)
@@ -198,6 +199,38 @@ def validate(markdown: str, visual_ids: set[str]) -> list[Problem]:
     _inline_lines(tokens)
     _check_tokens(tokens, problems)
     return sorted(problems, key=lambda p: p.line)
+
+
+def split_sections(markdown: str) -> list[str]:
+    """Split notes at their top-level (# and ##) headings; text before the first is its own.
+
+    A heading inside a box or step is part of it, so it never splits the block. Line breaks
+    are made uniform first (CRLF and a lone CR become LF, as the parser treats them), then lines
+    are cut only at LF, as ``scan`` cuts them: the parser's line numbers, ``scan``'s and the
+    slices must agree, or a stray CR or U+2028 in edited notes would shift them."""
+    markdown = re.sub(r"\r\n?", "\n", markdown)
+    lines = markdown.split("\n")
+    open_at = scan(markdown).open_at
+    starts = sorted(
+        {
+            t.map[0]
+            for t in _PARSER.parse(markdown)
+            if t.type == "heading_open"
+            and t.tag in {"h1", "h2"}
+            and t.level == 0
+            and t.map
+            and not open_at[t.map[0]]
+        }
+    )
+    bounds = [0, *(s for s in starts if s > 0), len(lines)]
+    sections = ["\n".join(lines[a:b]).strip() for a, b in zip(bounds, bounds[1:], strict=False)]
+    return [s for s in sections if s]
+
+
+def heading(section: str) -> str:
+    """The text of the heading a section starts with, or "" if it starts without one."""
+    first = section.lstrip().split("\n", 1)[0]
+    return first.lstrip("#").strip() if first.startswith("#") else ""
 
 
 def open_line(command: str, title: str | None, color: str) -> str:

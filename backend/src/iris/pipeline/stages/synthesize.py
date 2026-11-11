@@ -284,28 +284,6 @@ def kept_moments(moments: list[Moment], selection: Selection) -> list[Moment]:
 # --- Sections and markdown checks -----------------------------------------------------------------
 
 
-def split_sections(markdown: str) -> list[str]:
-    """Split notes at their top-level (# and ##) headings; text before the first is its own.
-
-    A heading inside a box or step is part of it, so it never splits the block."""
-    lines = markdown.splitlines(keepends=True)
-    open_at = notes_format.scan(markdown).open_at
-    starts = sorted(
-        {
-            t.map[0]
-            for t in MarkdownIt().parse(markdown)
-            if t.type == "heading_open"
-            and t.tag in {"h1", "h2"}
-            and t.level == 0
-            and t.map
-            and not open_at[t.map[0]]
-        }
-    )
-    bounds = [0, *(s for s in starts if s > 0), len(lines)]
-    sections = ["".join(lines[a:b]).strip() for a, b in zip(bounds, bounds[1:], strict=False)]
-    return [s for s in sections if s]
-
-
 def join_sections(sections: list[str]) -> str:
     return "\n\n".join(s for s in sections if s.strip())
 
@@ -321,11 +299,6 @@ def placements(sections: list[str]) -> dict[str, int]:
         for vid in markers(section):
             where.setdefault(vid, i)
     return where
-
-
-def heading(section: str) -> str:
-    first = section.lstrip().split("\n", 1)[0]
-    return first.lstrip("#").strip() if first.startswith("#") else ""
 
 
 def _math(markdown: str) -> set[str]:
@@ -685,7 +658,7 @@ async def synthesize(ctx: StageContext) -> tuple[SynthesisReport, SynthesizedDra
     repeats = await asyncio.to_thread(
         sweep, ctx.paths.root, kept_moments(moments, selection), selection.visuals
     )
-    sections = split_sections(draft.markdown)
+    sections = notes_format.split_sections(draft.markdown)
     report = SynthesisReport(status="unchanged", repeats=repeats, sections=len(sections))
     # Written in one pass, the notes have nothing to merge or reconcile. A draft that doesn't say
     # (an older version) counts as one part only if it has a single section.
@@ -701,7 +674,7 @@ async def synthesize(ctx: StageContext) -> tuple[SynthesisReport, SynthesizedDra
 
     where = placements(sections)
     outline = [
-        {"index": i, "heading": heading(s), "visual_ids": markers(s)}
+        {"index": i, "heading": notes_format.heading(s), "visual_ids": markers(s)}
         for i, s in enumerate(sections)
     ]
     plan_payload = _json(

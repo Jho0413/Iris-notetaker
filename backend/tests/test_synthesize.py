@@ -9,6 +9,7 @@ import cv2
 import numpy as np
 import pytest
 
+from iris import notes_format
 from iris.config import Settings
 from iris.events import EventBus
 from iris.jobs.runner import JobRunner
@@ -356,16 +357,16 @@ def test_kept_moments_ignore_rejected_ones():
 
 def test_sections_split_at_top_level_headings_only():
     md = "Intro\n\n## One\n\ntext\n\n```\n## not a heading\n```\n\n### Sub\n\nmore\n\n# Two\n\nend"
-    sections = synthesize.split_sections(md)
+    sections = notes_format.split_sections(md)
     assert sections == [
         "Intro",
         "## One\n\ntext\n\n```\n## not a heading\n```\n\n### Sub\n\nmore",
         "# Two\n\nend",
     ]
-    assert synthesize.split_sections("") == []
+    assert notes_format.split_sections("") == []
     # A heading inside a box or step belongs to it and never splits it.
     boxed = "## One\n\n:::box[Key idea]{color=blue}\n## Inside\ntext\n:::\n\n## Two\n\nend"
-    assert synthesize.split_sections(boxed) == [
+    assert notes_format.split_sections(boxed) == [
         "## One\n\n:::box[Key idea]{color=blue}\n## Inside\ntext\n:::",
         "## Two\n\nend",
     ]
@@ -373,7 +374,7 @@ def test_sections_split_at_top_level_headings_only():
 
 
 def test_plan_validation_drops_unknown_ids_and_bad_edits():
-    sections = synthesize.split_sections(NOTES)
+    sections = notes_format.split_sections(NOTES)
     known = {"v1", "v2", "v3"}
     plan = synthesize.EditPlan.model_validate(
         {
@@ -442,10 +443,10 @@ async def test_only_touched_sections_are_rewritten_and_markers_resolve(ctx, monk
     rewrite_payload = fake.calls[1][1]
     assert [s["index"] for s in rewrite_payload["sections"]] == [1, 2]
 
-    original = synthesize.split_sections(draft.markdown)
+    original = notes_format.split_sections(draft.markdown)
     synthesized = read_model(ctx.paths.notes_synthesis, SynthesizedDraft)
     assert synthesized.based_on == draft
-    assert synthesize.split_sections(synthesized.draft.markdown) == [
+    assert notes_format.split_sections(synthesized.draft.markdown) == [
         original[0],
         MERGED,
         original[3],
@@ -461,7 +462,7 @@ async def test_only_touched_sections_are_rewritten_and_markers_resolve(ctx, monk
 
 async def test_a_duplicate_figure_is_dropped_locally_without_a_rewrite(ctx, monkeypatch):
     setup_session(ctx, NOTES)
-    original = synthesize.split_sections(NOTES)
+    original = notes_format.split_sections(NOTES)
     fake = use(monkeypatch, FakeModel([edit("dedupe_figure", [0], keep="v1", drops=["v3"])]))
     notes = await finish(ctx)
     assert [name for name, _ in fake.calls] == ["EditPlan"]
@@ -472,7 +473,7 @@ async def test_a_duplicate_figure_is_dropped_locally_without_a_rewrite(ctx, monk
     result = report(ctx)
     assert result.edits[0].drop_visual_ids == ["v3"] and result.rewritten_sections == [3]
     synthesized = read_model(ctx.paths.notes_synthesis, SynthesizedDraft).draft.markdown
-    assert synthesize.split_sections(synthesized)[3] == original[3].replace("\n\n[visual:v3]", "")
+    assert notes_format.split_sections(synthesized)[3] == original[3].replace("\n\n[visual:v3]", "")
 
 
 async def test_a_wholly_repeated_section_can_be_dropped(ctx, monkeypatch):
@@ -516,7 +517,7 @@ async def test_a_wholly_repeated_section_can_be_dropped(ctx, monkeypatch):
 )
 async def test_an_invalid_rewrite_leaves_the_assembled_notes(ctx, monkeypatch, damage):
     setup_session(ctx, NOTES)
-    original = synthesize.split_sections(NOTES)
+    original = notes_format.split_sections(NOTES)
     good = original[3].replace("as shown before", "as on the first slide")
 
     def rewrite(payload):
@@ -561,7 +562,7 @@ async def test_an_invalid_rewrite_leaves_the_assembled_notes(ctx, monkeypatch, d
 
 async def test_a_rewrite_dropping_math_found_nowhere_else_is_rejected(ctx, monkeypatch):
     setup_session(ctx, NOTES)
-    original = synthesize.split_sections(NOTES)
+    original = notes_format.split_sections(NOTES)
 
     def rewrite(payload):
         text = original[0].replace("$r = \\frac{a}{b}$", "the ratio")
@@ -576,7 +577,7 @@ async def test_a_rewrite_dropping_math_found_nowhere_else_is_rejected(ctx, monke
 async def test_math_dropped_by_two_groups_relying_on_each_other_is_kept(ctx, monkeypatch):
     md = "## A\n\nFirst $$x = 1$$ here.\n\n## B\n\nMiddle text.\n\n## C\n\nAgain $$x = 1$$ there."
     setup_session(ctx, md)
-    sections = synthesize.split_sections(md)
+    sections = notes_format.split_sections(md)
 
     def rewrite(payload):
         (section,) = payload["sections"]
@@ -910,7 +911,7 @@ def test_two_repeats_cannot_each_rely_on_the_other():
     )
     repeats = [Repeat(kind="figure", ids=["v1", "v3"])]
     edits = synthesize.validate_plan(
-        plan, synthesize.split_sections(NOTES), {"v1", "v2", "v3"}, repeats
+        plan, notes_format.split_sections(NOTES), {"v1", "v2", "v3"}, repeats
     )
     assert [(e.kind, e.sections) for e in edits] == [
         ("drop_repeat", [3]),
