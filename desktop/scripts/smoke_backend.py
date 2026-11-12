@@ -2,7 +2,7 @@
 Python, isolated, in an empty environment). Exits non-zero if any step fails.
 
 Checks that the native libraries load and do real work: PyAV decodes a generated video, OpenCV
-diffs frames and writes a JPEG, resvg rasterizes an SVG; then that the server starts as the app
+diffs frames and writes a JPEG, resvg rasterizes an SVG, Silero VAD scores audio; then that the server starts as the app
 starts it (``python -I -m iris serve --secrets-from-stdin``, the key and token on stdin) and
 enforces the API token; then that the MCP server answers over stdio as an assistant starts it
 (``python -I -B -m iris mcp``), reading the data the server made.
@@ -60,6 +60,13 @@ def main(work: Path) -> None:
     svg = '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="20"><rect width="40" height="20" fill="#4b44d6"/></svg>'
     png = bytes(resvg_py.svg_to_bytes(svg_string=svg))
     assert png.startswith(b"\x89PNG"), "resvg did not return a PNG"
+
+    step("Silero VAD: score a second of audio and find no speech in silence")
+    from iris import speech
+
+    silence = np.zeros(16_000, np.int16)
+    assert len(speech.voice_probabilities(silence, 16_000)) == 31, "Silero scored no slices"
+    assert speech.find_speech(silence, 16_000) == [], "Silero heard speech in silence"
 
     step("server: python -I -m iris serve --secrets-from-stdin, with and without the token")
     token = "smoke-token-0123456789"

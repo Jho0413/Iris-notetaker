@@ -65,8 +65,8 @@ are written once and never ask where a recording came from (principle 2).
 2. Only the speech in each chunk is sent. A small voice detector bundled with Iris (Silero VAD)
    finds the stretches where someone is talking, and each stretch is sent on its own; a chunk
    with no speech isn't sent at all.
-3. The chunks go to the speech model in parallel. Each finished chunk is cached, so a re-run never
-   pays for it again.
+3. The stretches go to the speech model in parallel. Each finished chunk is cached, so a re-run
+   never pays for it again.
 4. Each line's times are moved by where its stretch starts, onto the session's clock, and
    everything is merged into one transcript, in order.
 
@@ -240,7 +240,7 @@ data, never as instructions.
 - `backend/src/iris/sources/`: the sources and their ingest (`upload.py`, `browser_live.py`)
 - `backend/src/iris/pipeline/__init__.py`: `PLAN`, the stage order
 - `backend/src/iris/pipeline/stages/`: one module per stage; its docstring goes deeper
-- `backend/src/iris/speech.py`: finding the speech to send, and mapping times back
+- `backend/src/iris/speech.py`: finding the speech to send
 - `backend/src/iris/models.py`: every stage's output type
 - `backend/src/iris/notes_format.py`: the notes format, its checks and repair (the UI reads it with
   `frontend/src/notes/format.ts`)

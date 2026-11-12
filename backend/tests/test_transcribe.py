@@ -8,6 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
+import openai
 import pytest
 
 from iris.config import Settings
@@ -16,6 +17,7 @@ from iris.pipeline.context import StageContext
 from iris.pipeline.stages import transcribe
 from iris.pipeline.stages.transcribe import encode_wav, plan_chunks, transcribe_chunk
 from iris.store.layout import SessionPaths, read_model
+from tests.api_errors import status_error
 
 RATE = 16_000
 SMALL = {"target_s": 3.0, "max_s": 5.0, "search_s": 1.0}  # small chunks so tests run fast
@@ -428,6 +430,45 @@ async def test_failing_chunk_fails_stage_but_keeps_others_cached(ctx, monkeypatc
     await transcribe.run(ctx, **SMALL)
     assert len(client.audio.transcriptions.calls) == 1  # only the failed chunk is re-sent
     assert ctx.paths.transcript.exists()
+
+
+async def test_a_chunk_with_one_failing_stretch_is_not_cached_and_both_are_resent(ctx, monkeypatch):
+    # One chunk, two speech stretches (more than 2 s apart); the second call fails for good.
+    write_wav(ctx.paths.audio, make_audio([("tone", 2.0), ("silence", 6.0), ("tone", 2.0)]))
+    use_client(monkeypatch, fake_client(fail_on_call=2))
+    with pytest.raises(transcribe.TranscribeError, match="1 of 1 transcription chunks") as caught:
+        await transcribe.run(ctx)
+    assert isinstance(caught.value.__cause__, RuntimeError)  # the stretch's own error
+    assert list(ctx.paths.transcript_chunks_dir.glob("*.json")) == []  # no half a chunk cached
+
+    client = fake_client()
+    use_client(monkeypatch, client)
+    await transcribe.run(ctx)
+    assert len(client.audio.transcriptions.calls) == 2
+    assert len(read_model(ctx.paths.transcript, Transcript).segments) == 2
+
+
+async def test_a_blocking_error_in_one_stretch_cancels_the_chunks_other_stretch(ctx, monkeypatch):
+    write_wav(ctx.paths.audio, make_audio([("tone", 2.0), ("silence", 6.0), ("tone", 2.0)]))
+    started, cancelled = [], []
+
+    async def fake_chunk(_client, _model, _wav, _duration, prompt=None, language=None):
+        n = len(started)
+        started.append(n)
+        if n == 0:
+            await asyncio.sleep(0.01)
+            raise status_error(403, message="rejected key")
+        try:
+            await asyncio.sleep(60)
+        except asyncio.CancelledError:
+            cancelled.append(n)
+            raise
+
+    monkeypatch.setattr(transcribe, "transcribe_chunk", fake_chunk)
+    use_client(monkeypatch, object())
+    with pytest.raises(openai.PermissionDeniedError):
+        await asyncio.wait_for(transcribe.run(ctx), 5)
+    assert started == [0, 1] and cancelled == [1]
 
 
 # --- Only speech is sent (the stand-in detector in conftest hears the tones as speech) -----------

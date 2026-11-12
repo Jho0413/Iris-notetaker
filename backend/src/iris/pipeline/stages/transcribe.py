@@ -368,6 +368,9 @@ async def run(
     else:
         client = get_openai(ctx.settings)
         sem = asyncio.Semaphore(concurrency)
+        # The detector doesn't run in parallel: one chunk at a time lets the first chunk's calls
+        # start while later chunks are still being checked.
+        detecting = asyncio.Semaphore(1)
 
         async def stretch(i: int, a: int, b: int) -> ChunkTranscript:
             """Transcribe the speech stretch ``samples[a:b]`` of chunk ``i`` (times from ``a``)."""
@@ -383,7 +386,8 @@ async def run(
             return result
 
         async def one(i: int, s: int, e: int, digest: str) -> None:
-            spoken = await asyncio.to_thread(speech.find_speech, samples[s:e], rate)
+            async with detecting:
+                spoken = await asyncio.to_thread(speech.find_speech, samples[s:e], rate)
             outcomes = await gather_units(stretch(i, s + a, s + b) for a, b in spoken)
             if failed := next((o for o in outcomes if isinstance(o, Exception)), None):
                 raise failed
