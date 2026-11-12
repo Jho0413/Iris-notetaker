@@ -233,6 +233,8 @@ data, never as instructions.
   moment.
 - Speech the voice detector doesn't hear as speaking, such as singing over music, isn't
   transcribed.
+- With the language set to detect itself ("auto"), each stretch of speech is detected on its own,
+  so a short remark between long pauses can come back in the wrong language.
 - The notes' text isn't checked against the transcript, the way figures are against the screen.
 
 ## Where to look
