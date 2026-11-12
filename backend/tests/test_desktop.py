@@ -16,6 +16,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import iris.cli
+import iris.main
 import iris.parent
 from iris.config import Settings
 from iris.launch_secrets import MAX_LINE_BYTES, SecretsError, read_secrets, settings_with_secrets
@@ -285,10 +286,19 @@ def test_watch_parent_keeps_waiting_while_the_parent_lives():
     gone: list[bool] = []
 
     async def run() -> None:
+        checks: list[int] = []
+        checked_often = asyncio.Event()
+
+        def is_alive(pid: int) -> bool:
+            checks.append(pid)
+            if len(checks) == 3:
+                checked_often.set()
+            return True
+
         task = asyncio.create_task(
-            watch_parent(1, 0.001, is_alive=lambda _: True, on_gone=lambda: gone.append(True))
+            watch_parent(1, 0.001, is_alive=is_alive, on_gone=lambda: gone.append(True))
         )
-        await asyncio.sleep(0.05)
+        await asyncio.wait_for(checked_often.wait(), 5)
         assert not task.done()
         task.cancel()
 
@@ -322,22 +332,32 @@ def _wait_for(predicate, timeout_s: float = 2.0) -> bool:
 
 def test_server_shuts_down_when_the_parent_disappears(monkeypatch, tmp_path):
     alive = {"value": True}
+    polls: list[int] = []
     shutdowns: list[bool] = []
-    monkeypatch.setattr(iris.parent, "pid_alive", lambda pid: pid == 4242 and alive["value"])
+
+    def pid_alive_now(pid: int) -> bool:
+        polls.append(pid)
+        return pid == 4242 and alive["value"]
+
+    monkeypatch.setattr(iris.parent, "pid_alive", pid_alive_now)
     monkeypatch.setattr(iris.parent, "request_shutdown", lambda: shutdowns.append(True))
     with _client(tmp_path, parent_pid=4242, parent_poll_s=0.01) as c:
         assert c.get("/api/health").status_code == 200
-        time.sleep(0.05)
-        assert shutdowns == []  # parent still there
+        assert _wait_for(lambda: len(polls) >= 3)
+        assert shutdowns == []  # parent still there, however often it is checked
         alive["value"] = False
         assert _wait_for(lambda: shutdowns == [True])
     assert shutdowns == [True]  # once, not on every poll
 
 
 def test_no_parent_pid_means_no_watcher(monkeypatch, tmp_path):
-    calls: list[int] = []
-    monkeypatch.setattr(iris.parent, "pid_alive", lambda pid: calls.append(pid) or True)
+    started: list[int | None] = []
+
+    def watching(pid, _poll_s):
+        started.append(pid)
+        return asyncio.sleep(0)
+
+    monkeypatch.setattr(iris.main, "watch_parent", watching)
     with _client(tmp_path, parent_poll_s=0.01) as c:
         c.get("/api/health")
-        time.sleep(0.05)
-    assert calls == []
+    assert started == []
