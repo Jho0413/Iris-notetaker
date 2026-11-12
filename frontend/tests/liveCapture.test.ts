@@ -1010,7 +1010,10 @@ test('stop pauses the recording and releases every source; continue carries on i
 
   clock.advance(10_000) // stopped for 10 s
   const display2 = new FakeTrack('video')
-  t.env.mediaDevices.getDisplayMedia = async () => stream(display2)
+  t.env.mediaDevices.getDisplayMedia = async () => {
+    clock.advance(3000) // choosing a window in the picker is still stopped time
+    return stream(display2)
+  }
   const again = await live.resume()
   assert.equal(again.screen?.getVideoTracks()[0], display2)
   assert.equal(recorder.state, 'recording')
