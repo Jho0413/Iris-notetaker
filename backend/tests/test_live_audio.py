@@ -380,15 +380,31 @@ async def test_transcript_commits_while_recording_and_stop_flushes_the_rest(
     chunks = split(webm, 2000)
     half = len(chunks) // 2
     decoded_half = decoder_waiting_for(monkeypatch, half)
+    decisions: list[tuple[int, int | None]] = []  # (decoded samples, the cut decided or None)
+    next_cut = AudioLane._next_cut
+
+    async def watched(lane, cut_at, decoded, final):
+        cut = await next_cut(lane, cut_at, decoded, final)
+        decisions.append((decoded, cut))
+        return cut
+
+    monkeypatch.setattr(AudioLane, "_next_cut", watched)
     run = Run(paths, settings(tmp_path), FakeTranscriber(), monkeypatch)
     run.store(chunks, range(half))
     await run.until(lambda: run.timeline.transcribed_to > 0)  # before stop
     await reached(decoded_half)
-    decoded = len(live_pcm(paths)) / RATE
-    # The lane cuts everything it can from these chunks: a cut needs the whole range up to the
-    # maximum window, plus CONFIRM_S, decoded, so less than that is left waiting for more audio.
-    await run.until(lambda: decoded - run.timeline.transcribed_to < 2.5 + CONFIRM_S)
+    samples = len(live_pcm(paths))
+    decoded = samples / RATE
+    # The lane has cut everything it can from these chunks, and committed it.
+    async with asyncio.timeout(10):
+        while (samples, None) not in decisions:
+            await asyncio.sleep(0.01)
+    last_cut = max(cut for _, cut in decisions if cut is not None)
+    await run.until(lambda: run.timeline.transcribed_to >= last_cut / RATE - 1e-6)
     early = run.timeline.transcribed_to
+    # The rest waits for more audio: a cut needs the whole range up to the maximum window, plus
+    # CONFIRM_S, decoded.
+    assert decoded - early < 2.5 + CONFIRM_S
     assert run.chunk_events()
     # Nothing is cut in the last moments of what has been decoded.
     assert early <= decoded - CONFIRM_S + 1e-3
