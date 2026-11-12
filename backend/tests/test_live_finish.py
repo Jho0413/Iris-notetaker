@@ -192,7 +192,11 @@ def record_session(
 
 def wait_until_caught_up(client: TestClient, sid: str, kinds: set[str], timeout: float = 30.0):
     """Until the live lanes have caught up: ``kinds`` of event have arrived and no model call
-    has been made for a while."""
+    has been made for a while.
+
+    A quiet second is a heuristic: the lanes have no "idle" signal to wait on, and this runs
+    them for real (threads, decoding, OpenCV), so a fake clock can't reach them. A second is far
+    longer than any pause between their calls with the fake client."""
     deadline = time.monotonic() + timeout
     last, quiet_since = -1, time.monotonic()
     while True:
