@@ -988,17 +988,16 @@ test('stop pauses the recording and releases every source; continue carries on i
   t.env.page.dispatchEvent(new Event('pagehide')) // stopped, not finished: leaving stops it, no notes
   assert.deepEqual(t.beacons.map((b) => b.url), ['/api/live/s1/stop'])
 
-  const stoppedFor = 60
+  const stoppedFor = 600 // longer than the 0.5 s allowed below, so counting it would fail
   await new Promise((r) => setTimeout(r, stoppedFor))
   const display2 = new FakeTrack('video')
   t.env.mediaDevices.getDisplayMedia = async () => stream(display2)
-  const resumedAt = performance.now()
   const again = await live.resume()
   assert.equal(again.screen?.getVideoTracks()[0], display2)
   assert.equal(recorder.state, 'recording')
   assert.equal(FakeRecorder.created.length, 1, 'still one recorder, so one audio stream')
   assert.deepEqual(sources(t), [t.mics[1]])
-  t.frame(resumedAt)
+  t.frame(performance.now()) // frames are grabbed once the recording has carried on
   const sentT = Number(new URL(t.posted('/frame')[0].url, 'http://x').searchParams.get('t'))
   // Timed on the recording's clock: the stopped time is left out.
   assert.ok(sentT < 0.5 && sentT >= 0, `frame at ${sentT} s`)
