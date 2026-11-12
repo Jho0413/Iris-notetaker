@@ -196,7 +196,9 @@ def shuffled(n: int, skip: set[int] = frozenset(), seed: int = 0) -> list[int]:
 
 def decoder_waiting_for(monkeypatch, seq: int) -> threading.Event:
     """Set once the decoder has decoded everything before chunk ``seq`` and waits for it (it
-    isn't stored yet), with what it decoded flushed to ``live/audio.pcm``."""
+    isn't stored yet), with what it decoded flushed to ``live/audio.pcm``. The helper flushes it
+    itself, so the PCM is final when the event is seen, rather than racing the decoder's own
+    flush just after."""
     waiting = threading.Event()
     wait_chunk = audio_lane.LiveDecoder.wait_chunk
 
@@ -266,6 +268,8 @@ async def test_a_chunk_arriving_within_the_wait_is_used(
     run = Run(paths, settings(tmp_path, live_audio_gap_wait_s=30), FakeTranscriber(), monkeypatch)
     run.store(chunks, shuffled(len(chunks), skip={7}))
     await reached(waiting)
+    # Time passes while it waits, well inside the 30 s wait: one that gives up early skips it.
+    await asyncio.sleep(0.3)
     run.store(chunks, [7])
     await run.stop()
     assert Lane.AUDIO not in run.timeline.skipped_input

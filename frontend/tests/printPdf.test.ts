@@ -90,9 +90,10 @@ test('the browser print resolves on afterprint, not when print() returns', async
   t.mock.timers.enable({ apis: ['setTimeout'] })
   const win = fakeWindow()
   let resolved = false
-  const printing = browserPrint(win as unknown as Window).then(() => { resolved = true })
+  const fallbackMs = 1000
+  const printing = browserPrint(win as unknown as Window, fallbackMs).then(() => { resolved = true })
   assert.equal(win.printed, 1)
-  t.mock.timers.tick(59_999) // just short of the minute's fallback
+  t.mock.timers.tick(fallbackMs - 1) // just short of the fallback
   await new Promise((r) => setImmediate(r)) // setImmediate isn't faked
   assert.equal(resolved, false)
   win.afterprint()
