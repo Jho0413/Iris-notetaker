@@ -17,6 +17,7 @@ dependencies = [
     "mdformat>=0.7",
     "resvg-py>=0.5.0",
     "mcp>=2.3",
+    "pysilero-vad>=3.4",
 ]
 
 [project.optional-dependencies]

@@ -10,12 +10,15 @@ Steps:
      boundary so words are not cut in half. Chunk length depends on the model
      (``chunk_lengths_for``): ~5 min for whisper-1, which returns segment timestamps, and ~15 s
      for text-only models, where each chunk becomes one segment.
-  2. Chunks are transcribed concurrently, each retried after a temporary API error
+  2. Only each chunk's speech is sent (``iris.speech``): Whisper makes up text over silence, noise
+     and clicks. Each speech stretch is sent on its own; a chunk without speech is not sent and
+     has no segments.
+  3. Stretches are transcribed concurrently, each retried after a temporary API error
      (``retry_temporary``). Each finished chunk is cached on disk, so a crash or a re-run never
      re-pays for it. A cached chunk is reused only if its boundaries, audio and
-     model match. A chunk that still fails fails the stage once the others have finished; a
-     blocking error (``classify``) cancels them at once.
-  3. Each chunk's timestamps are offset by its start time, then everything is merged and sorted.
+     model match. A chunk with a stretch that still fails fails the stage once the others have
+     finished; a blocking error (``classify``) cancels them at once.
+  4. Each segment's times are offset by its stretch's start, then everything is merged and sorted.
 
 Model-specific request and response handling lives in ``transcribe_chunk`` and
 ``chunk_lengths_for``.
@@ -34,6 +37,7 @@ from typing import Any
 import numpy as np
 from pydantic import BaseModel
 
+from iris import speech
 from iris.llm.client import get_openai
 from iris.llm.errors import gather_units, retry_temporary
 from iris.models import EventType, Transcript, TranscriptSegment
@@ -227,8 +231,9 @@ async def transcribe_chunk(
     """Transcribe one chunk. Timestamps in the result are relative to the chunk start.
 
     Request: ``whisper-1`` gets ``verbose_json`` with segment timestamps; ``*-diarize`` models get
-    ``diarized_json`` (segments with per-chunk speaker labels ``A``, ``B``...); every other model
-    (``gpt-transcribe``, ``gpt-4o-transcribe``, ``gpt-4o-mini-transcribe``...) gets ``json``.
+    ``diarized_json`` (segments with per-request speaker labels ``A``, ``B``..., so per speech
+    stretch); every other model (``gpt-transcribe``, ``gpt-4o-transcribe``,
+    ``gpt-4o-mini-transcribe``...) gets ``json``.
 
     Response, parsed by what comes back rather than by model name: if it has ``segments`` they are
     used; otherwise its ``text`` becomes one segment spanning the whole chunk. A plain string
@@ -364,30 +369,45 @@ async def run(
     else:
         client = get_openai(ctx.settings)
         sem = asyncio.Semaphore(concurrency)
+        # The detector doesn't run in parallel: one chunk at a time lets the first chunk's calls
+        # start while later chunks are still being checked.
+        detecting = asyncio.Semaphore(1)
 
-        async def one(i: int, s: int, e: int, digest: str) -> None:
+        async def stretch(i: int, a: int, b: int) -> ChunkTranscript:
+            """Transcribe the speech stretch ``samples[a:b]`` of chunk ``i`` (times from ``a``)."""
             async with sem:
-                offset = s / rate
-                wav = encode_wav(samples[s:e], rate)
+                wav = encode_wav(samples[a:b], rate)
                 result = await retry_temporary(
                     lambda: transcribe_chunk(
-                        client, model, wav, (e - s) / rate, language=requested
+                        client, model, wav, (b - a) / rate, language=requested
                     ),
                     ctx.settings.api_retry_delays_s,
-                    what=f"session {ctx.session_id}: transcription chunk {i}",
+                    what=f"session {ctx.session_id}: transcription chunk {i} at {a / rate:.1f}s",
                 )
+            return result
+
+        async def one(i: int, s: int, e: int, digest: str) -> None:
+            async with detecting:
+                spoken = await asyncio.to_thread(speech.find_speech, samples[s:e], rate)
+            outcomes = await gather_units(stretch(i, s + a, s + b) for a, b in spoken)
+            if failed := next((o for o in outcomes if isinstance(o, Exception)), None):
+                raise failed
+            segments = [
+                seg.model_copy(
+                    update={"start": seg.start + (s + a) / rate, "end": seg.end + (s + a) / rate}
+                )
+                for (a, _), result in zip(spoken, outcomes, strict=True)
+                for seg in result.segments
+            ]
             chunk = CachedChunk(
                 index=i,
-                start=offset,
+                start=s / rate,
                 end=e / rate,
                 audio_sha1=digest,
                 model=model,
                 requested_language=requested,
-                language=result.language,
-                segments=[
-                    seg.model_copy(update={"start": seg.start + offset, "end": seg.end + offset})
-                    for seg in result.segments
-                ],
+                language=next((r.language for r in outcomes if r.language), None),
+                segments=segments,
             )
             write_model(cache_path(i, s, e), chunk)
             finish(chunk)

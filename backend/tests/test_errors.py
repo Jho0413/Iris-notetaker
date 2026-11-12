@@ -399,10 +399,10 @@ async def test_a_blocking_error_cancels_the_stage_running_beside_it(tmp_path, mo
 
 async def test_a_blocking_error_in_one_chunk_cancels_the_others(tmp_path, monkeypatch):
     from iris.pipeline.stages import transcribe
-    from tests.test_transcribe import write_wav
+    from tests.test_transcribe import make_audio, write_wav
 
     runner, sid, ctx = runner_session(tmp_path)
-    write_wav(ctx.paths.audio, np.zeros(16_000 * 60, np.int16))
+    write_wav(ctx.paths.audio, make_audio([("tone", 60.0)]))  # speech in every chunk
     started, cancelled = [], []
 
     async def fake_chunk(_client, _model, _wav, _duration, prompt=None, language=None):
