@@ -171,6 +171,16 @@ function capture(env: object, options = {}) {
   return new LiveCapture(createSession, { ...fast, ...options }, env as never)
 }
 
+/**
+ * `performance.now()`, which the recording's clock reads, moved by hand: times are exact, so a
+ * slow machine can't change what a test sees.
+ */
+function fakeClock(tc: import('node:test').TestContext) {
+  let ms = 0
+  tc.mock.method(performance, 'now', () => ms)
+  return { now: () => ms, advance: (by: number) => void (ms += by) }
+}
+
 test('records, then stop uploads the last chunk and ends with the chunk count', async () => {
   const t = setup()
   const live = capture(t.env)
@@ -260,8 +270,7 @@ test('without an onEnded handler, capture finishes itself when the mic goes away
   const live = capture(t.env)
   await live.start('audio')
   t.mic.end()
-  await new Promise((r) => setTimeout(r, 20))
-  assert.equal(t.posted('/end').length, 1)
+  await until(() => t.posted('/end').length === 1)
 })
 
 test('leaving the page while recording stops the session without making notes', async () => {
@@ -573,6 +582,15 @@ function within<T>(p: Promise<T>, ms = 200): Promise<T> {
 
 const tick = () => new Promise((r) => setTimeout(r, 0))
 
+/** Waits until `ready()` holds, checking every tick; fails instead of hanging after `ms`. */
+async function until(ready: () => boolean, ms = 1000) {
+  const deadline = Date.now() + ms
+  while (!ready()) {
+    assert.ok(Date.now() < deadline, `not ready after ${ms} ms`)
+    await tick()
+  }
+}
+
 /** The share number of each frame posted, in order. */
 function frameShares(t: ReturnType<typeof setup>): number[] {
   return t.posted('/frame').map((c) => Number(new URL(c.url, 'http://x').searchParams.get('share')))
@@ -768,11 +786,11 @@ test('the recorder failing mid-recording ends only after its last chunk', async 
   // As browsers do: inactive when 'error' fires, then the last chunk, then 'stop'.
   recorder.state = 'inactive'
   recorder.onerror?.()
-  setTimeout(() => {
-    recorder.emit('last')
-    recorder.dispatchEvent(new Event('stop'))
-  }, 10)
-  await new Promise((r) => setTimeout(r, 50))
+  await tick()
+  assert.equal(t.posted('/end').length, 0, 'still waiting for the last chunk')
+  recorder.emit('last')
+  recorder.dispatchEvent(new Event('stop'))
+  await until(() => t.posted('/end').length === 1)
   const order = t.calls.filter((c) => c.method === 'POST').map((c) => c.url.replace('/api/live/s1/', ''))
   assert.deepEqual(order, ['audio?seq=0', 'audio?seq=1', 'end'])
   assert.deepEqual(JSON.parse(t.posted('/end')[0].body as string), { audio_chunks: 2, allow_gaps: false })
@@ -973,35 +991,38 @@ function resumableSetup(mac = false) {
   return { ...t, mics }
 }
 
-test('stop pauses the recording and releases every source; continue carries on in it', async () => {
+test('stop pauses the recording and releases every source; continue carries on in it', async (tc) => {
+  const clock = fakeClock(tc)
   const t = resumableSetup()
   const live = capture(t.env)
   await live.start('screen')
   const recorder = FakeRecorder.created[0]
   recorder.emit('a')
+  clock.advance(1000)
   live.pause()
   assert.equal(recorder.state, 'paused')
   assert.ok(t.display.stopped && t.mics[0].stopped, 'the screen and the mic are let go')
   assert.deepEqual(t.mixed[0].live, [])
-  t.frame(performance.now()) // a frame grabbed as it stopped is not sent
+  t.frame(clock.now()) // a frame grabbed as it stopped is not sent
   assert.equal(t.posted('/frame').length, 0)
   t.env.page.dispatchEvent(new Event('pagehide')) // stopped, not finished: leaving stops it, no notes
   assert.deepEqual(t.beacons.map((b) => b.url), ['/api/live/s1/stop'])
 
-  const stoppedFor = 60
-  await new Promise((r) => setTimeout(r, stoppedFor))
+  clock.advance(10_000) // stopped for 10 s
   const display2 = new FakeTrack('video')
-  t.env.mediaDevices.getDisplayMedia = async () => stream(display2)
-  const resumedAt = performance.now()
+  t.env.mediaDevices.getDisplayMedia = async () => {
+    clock.advance(3000) // choosing a window in the picker is still stopped time
+    return stream(display2)
+  }
   const again = await live.resume()
   assert.equal(again.screen?.getVideoTracks()[0], display2)
   assert.equal(recorder.state, 'recording')
   assert.equal(FakeRecorder.created.length, 1, 'still one recorder, so one audio stream')
   assert.deepEqual(sources(t), [t.mics[1]])
-  t.frame(resumedAt)
-  const sentT = Number(new URL(t.posted('/frame')[0].url, 'http://x').searchParams.get('t'))
-  // Timed on the recording's clock: the stopped time is left out.
-  assert.ok(sentT < 0.5 && sentT >= 0, `frame at ${sentT} s`)
+  clock.advance(250)
+  t.frame(clock.now())
+  // Timed on the recording's clock: 1 s before Stop and 0.25 s after; the stopped time is left out.
+  assert.deepEqual(frameTimes(t), [1.25])
   recorder.emit('b')
   await live.stop()
   // 'a', the chunk flushed at Stop, 'b', and the last one: one stream.
@@ -1542,21 +1563,22 @@ test('the screen can be shared only while recording, one picker at a time', asyn
   await live.stop()
 })
 
-test('Continue after Stop shares the screen again as a new share, on the recording\'s clock', async () => {
+test('Continue after Stop shares the screen again as a new share, on the recording\'s clock', async (tc) => {
+  const clock = fakeClock(tc)
   const t = shareSetup()
   const live = capture(t.env)
   await live.start('screen')
-  await new Promise((r) => setTimeout(r, 30))
-  t.frame(performance.now())
+  clock.advance(500)
+  t.frame(clock.now())
   live.pause()
-  await new Promise((r) => setTimeout(r, 60))
+  clock.advance(10_000) // stopped for 10 s
   const again = await live.resume()
   assert.equal(again.screen?.getVideoTracks()[0], t.shares[1].video, 'the picker opened again')
-  t.frame(performance.now())
+  clock.advance(250)
+  t.frame(clock.now())
   await tick()
   assert.deepEqual(frameShares(t), [1, 2])
-  const [before, after] = frameTimes(t)
-  assert.ok(before >= 0.02 && after - before < 0.03, `${before} s, ${after} s: the stopped time is left out`)
+  assert.deepEqual(frameTimes(t), [0.5, 0.75], 'the stopped time is left out')
   // With the screen off at Stop, Continue doesn't ask for one.
   live.stopScreen()
   live.pause()

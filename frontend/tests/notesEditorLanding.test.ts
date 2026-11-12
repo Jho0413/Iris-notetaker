@@ -48,7 +48,7 @@ test('an empty layout has one spot at the top', () => {
   assert.deepEqual(landingSpots([], COLUMN, () => true).map((s) => s.target), [{ parent: null, index: 0 }])
 })
 
-test('picking a spot stays cheap for long notes', () => {
+test('picking a spot looks at each spot once, so it stays cheap for long notes', () => {
   const many: Measured[] = Array.from({ length: 400 }, (_, i) => ({
     pos: i * 10,
     top: i * 50,
@@ -56,8 +56,14 @@ test('picking a spot stays cheap for long notes', () => {
     body: i % 4 ? undefined : { left: 136, right: 700, bottom: i * 50 + 40, children: [{ pos: i * 10 + 1, top: i * 50 + 5, bottom: i * 50 + 35 }] },
   }))
   const spots = landingSpots(many, COLUMN, () => true)
-  const start = performance.now()
-  for (let k = 0; k < 1000; k++) nearestSpot(spots, 300, (k * 37) % 20000)
-  const perFrame = (performance.now() - start) / 1000
-  assert.ok(perFrame < 1, `${perFrame} ms per frame`)
+  // Counted, not timed: one pass over the spots per pointer move, on any machine.
+  const looks = spots.map(() => 0)
+  const counted = new Proxy(spots, {
+    get(target, key, receiver) {
+      if (typeof key === 'string' && /^\d+$/.test(key)) looks[Number(key)]++
+      return Reflect.get(target, key, receiver)
+    },
+  })
+  assert.ok(nearestSpot(counted, 300, 12_345))
+  assert.deepEqual(looks, spots.map(() => 1))
 })

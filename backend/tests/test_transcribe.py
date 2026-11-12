@@ -451,13 +451,15 @@ async def test_a_chunk_with_one_failing_stretch_is_not_cached_and_both_are_resen
 async def test_a_blocking_error_in_one_stretch_cancels_the_chunks_other_stretch(ctx, monkeypatch):
     write_wav(ctx.paths.audio, make_audio([("tone", 2.0), ("silence", 6.0), ("tone", 2.0)]))
     started, cancelled = [], []
+    both_started = asyncio.Event()
 
     async def fake_chunk(_client, _model, _wav, _duration, prompt=None, language=None):
         n = len(started)
         started.append(n)
         if n == 0:
-            await asyncio.sleep(0.01)
+            await both_started.wait()  # fails while the other stretch is in flight
             raise status_error(403, message="rejected key")
+        both_started.set()
         try:
             await asyncio.sleep(60)
         except asyncio.CancelledError:

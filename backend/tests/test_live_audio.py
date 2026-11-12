@@ -10,6 +10,7 @@ import hashlib
 import io
 import json
 import random
+import threading
 import wave
 from pathlib import Path
 from types import SimpleNamespace
@@ -193,6 +194,28 @@ def shuffled(n: int, skip: set[int] = frozenset(), seed: int = 0) -> list[int]:
     return order
 
 
+def decoder_waiting_for(monkeypatch, seq: int) -> threading.Event:
+    """Set once the decoder has decoded everything before chunk ``seq`` and waits for it (it
+    isn't stored yet), with what it decoded flushed to ``live/audio.pcm``. The helper flushes it
+    itself, so the PCM is final when the event is seen, rather than racing the decoder's own
+    flush just after."""
+    waiting = threading.Event()
+    wait_chunk = audio_lane.LiveDecoder.wait_chunk
+
+    def watched(decoder, n):
+        if n == seq:
+            decoder._report()  # what wait_chunk reports before it blocks, so the PCM is final
+            waiting.set()
+        return wait_chunk(decoder, n)
+
+    monkeypatch.setattr(audio_lane.LiveDecoder, "wait_chunk", watched)
+    return waiting
+
+
+async def reached(waiting: threading.Event) -> None:
+    assert await asyncio.to_thread(waiting.wait, 10), "the decoder never got there"
+
+
 def live_pcm(paths: SessionPaths) -> np.ndarray:
     return np.fromfile(paths.live_pcm, dtype="<i2")
 
@@ -241,9 +264,12 @@ async def test_a_chunk_arriving_within_the_wait_is_used(
     tmp_path: Path, paths: SessionPaths, webm: bytes, monkeypatch
 ):
     chunks = split(webm, 2000)
+    waiting = decoder_waiting_for(monkeypatch, 7)
     run = Run(paths, settings(tmp_path, live_audio_gap_wait_s=30), FakeTranscriber(), monkeypatch)
     run.store(chunks, shuffled(len(chunks), skip={7}))
-    await asyncio.sleep(0.3)  # the decoder is now waiting for chunk 7
+    await reached(waiting)
+    # Time passes while it waits, well inside the 30 s wait: one that gives up early skips it.
+    await asyncio.sleep(0.3)
     run.store(chunks, [7])
     await run.stop()
     assert Lane.AUDIO not in run.timeline.skipped_input
@@ -352,18 +378,36 @@ async def test_transcript_commits_while_recording_and_stop_flushes_the_rest(
     tmp_path: Path, paths: SessionPaths, webm: bytes, monkeypatch
 ):
     chunks = split(webm, 2000)
-    run = Run(paths, settings(tmp_path), FakeTranscriber(), monkeypatch)
     half = len(chunks) // 2
+    decoded_half = decoder_waiting_for(monkeypatch, half)
+    decisions: list[tuple[int, int | None]] = []  # (decoded samples, the cut decided or None)
+    next_cut = AudioLane._next_cut
+
+    async def watched(lane, cut_at, decoded, final):
+        cut = await next_cut(lane, cut_at, decoded, final)
+        decisions.append((decoded, cut))
+        return cut
+
+    monkeypatch.setattr(AudioLane, "_next_cut", watched)
+    run = Run(paths, settings(tmp_path), FakeTranscriber(), monkeypatch)
     run.store(chunks, range(half))
     await run.until(lambda: run.timeline.transcribed_to > 0)  # before stop
-    await asyncio.sleep(0.3)  # let the lane cut everything it can from these chunks
+    await reached(decoded_half)
+    samples = len(live_pcm(paths))
+    decoded = samples / RATE
+    # The lane has cut everything it can from these chunks, and committed it.
+    async with asyncio.timeout(10):
+        while (samples, None) not in decisions:
+            await asyncio.sleep(0.01)
+    last_cut = max(cut for _, cut in decisions if cut is not None)
+    await run.until(lambda: run.timeline.transcribed_to >= last_cut / RATE - 1e-6)
     early = run.timeline.transcribed_to
-    assert run.chunk_events()
-    # Nothing is cut in the last moments of what has been decoded, and the rest waits for more
-    # audio: a cut needs the whole range up to the maximum window, plus CONFIRM_S, decoded.
-    decoded = len(live_pcm(paths)) / RATE
-    assert early <= decoded - CONFIRM_S + 1e-3
+    # The rest waits for more audio: a cut needs the whole range up to the maximum window, plus
+    # CONFIRM_S, decoded.
     assert decoded - early < 2.5 + CONFIRM_S
+    assert run.chunk_events()
+    # Nothing is cut in the last moments of what has been decoded.
+    assert early <= decoded - CONFIRM_S + 1e-3
 
     run.store(chunks, range(half, len(chunks)))
     await run.stop()
@@ -538,11 +582,6 @@ async def test_a_window_transcribed_at_stop_is_still_retried(
     timeline = await processor.finish()
     assert failed_at_stop  # a call after stop did fail once
     assert Lane.AUDIO in timeline.finished and Lane.AUDIO not in timeline.failed
-
-
-async def _until(predicate) -> None:
-    while not predicate():
-        await asyncio.sleep(0.01)
 
 
 async def test_a_restarted_lane_reuses_every_cached_window(

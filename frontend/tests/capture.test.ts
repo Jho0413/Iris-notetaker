@@ -30,7 +30,9 @@ test('failed uploads are retried until they land; rejected ones are reported, no
   assert.equal(queue.pending, 0)
 })
 
-test('a closed queue sends nothing more: neither what waits, nor retries, nor new items', async () => {
+test('a closed queue sends nothing more: neither what waits, nor retries, nor new items', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const settle = () => new Promise((r) => setImmediate(r)) // setImmediate isn't faked
   const sent: string[] = []
   const queue = new UploadQueue(async (path) => {
     sent.push(path)
@@ -40,8 +42,11 @@ test('a closed queue sends nothing more: neither what waits, nor retries, nor ne
   queue.add('audio', 'audio?seq=1', blob) // waits behind the first, which is in flight
   queue.close()
   queue.add('audio', 'audio?seq=2', blob)
-  await new Promise((r) => setTimeout(r, 30))
+  await settle() // the first attempt fails, so its retry is scheduled
+  t.mock.timers.tick(fast.maxDelayMs) // past the retry delay
+  await settle()
   assert.deepEqual(sent, ['audio?seq=0'])
+  assert.equal(queue.pending, 0, 'the retry came due and was dropped')
 })
 
 test('drain gives up after its timeout but keeps items, so a later drain still uploads them', async () => {

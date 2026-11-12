@@ -118,6 +118,13 @@ to every change; the reviewer says which ones it checked. Principles are those i
 
 - Each behaviour the change adds or alters has a test, including its failure paths.
 - Tests are deterministic and fast, and assert behaviour, not implementation detail.
+- Real time may decide how long a test takes, never whether it passes. Time the code works with
+  (the recording's clock, retry delays, fallbacks) is faked in the frontend (`mock.timers`,
+  `performance.now`); waiting for work to happen waits for the event or condition with a
+  deadline, not a fixed sleep followed by an assert; "nothing happened" waits for something
+  countable (a few polls) or checks directly. Real time is fine for deadlines on waits, sleeps
+  inside fakes standing in for slow work, integration tests that run the real lanes, and letting
+  time pass well inside a configured wait.
 - No real paid API calls and no network; model responses are faked.
 - Media fixtures are generated in a temporary folder, not committed.
 
