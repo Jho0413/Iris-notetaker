@@ -91,7 +91,7 @@ test('the browser print resolves on afterprint, not when print() returns', async
   let resolved = false
   const printing = browserPrint(win as unknown as Window).then(() => { resolved = true })
   assert.equal(win.printed, 1)
-  await new Promise((r) => setTimeout(r, 5))
+  await new Promise((r) => setTimeout(r, 0)) // anything print() set off has run
   assert.equal(resolved, false)
   win.afterprint()
   await printing
