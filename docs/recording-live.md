@@ -98,9 +98,9 @@ flowchart LR
   into transcript windows at quiet points, and transcribes them, each with the text before it as
   context. Only a window's speech is sent, exactly as for an upload
   ([`making-notes.md`](making-notes.md#sending-only-speech)); a window with none isn't sent, but
-  still moves "transcribed to" on, so a silence never holds the notes back. A window right after
-  one with no text gets no context, so a sentence from before a silence can't be repeated over
-  the next one. A cut depends only on the audio, never on how much had arrived, so a lane restarted
+  still moves "transcribed to" on, so a silence never holds the notes back. When the last window
+  finished has no text, the next one sent gets no context, so a sentence from before a silence
+  can't be repeated over it. A cut depends only on the audio, never on how much had arrived, so a lane restarted
   after an engine restart makes the same cuts and reuses its cached windows.
 - **Screen lane:** puts frames in time order, samples and sizes them exactly as ingest will, and
   feeds them to the same moment detector as the detect stage. A change of share closes the open

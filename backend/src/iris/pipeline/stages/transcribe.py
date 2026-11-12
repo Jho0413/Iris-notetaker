@@ -231,8 +231,9 @@ async def transcribe_chunk(
     """Transcribe one chunk. Timestamps in the result are relative to the chunk start.
 
     Request: ``whisper-1`` gets ``verbose_json`` with segment timestamps; ``*-diarize`` models get
-    ``diarized_json`` (segments with per-chunk speaker labels ``A``, ``B``...); every other model
-    (``gpt-transcribe``, ``gpt-4o-transcribe``, ``gpt-4o-mini-transcribe``...) gets ``json``.
+    ``diarized_json`` (segments with per-request speaker labels ``A``, ``B``..., so per speech
+    stretch); every other model (``gpt-transcribe``, ``gpt-4o-transcribe``,
+    ``gpt-4o-mini-transcribe``...) gets ``json``.
 
     Response, parsed by what comes back rather than by model name: if it has ``segments`` they are
     used; otherwise its ``text`` becomes one segment spanning the whole chunk. A plain string
