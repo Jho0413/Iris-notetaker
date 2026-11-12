@@ -430,13 +430,105 @@ async def test_failing_chunk_fails_stage_but_keeps_others_cached(ctx, monkeypatc
     assert ctx.paths.transcript.exists()
 
 
-async def test_stage_on_silent_short_audio(ctx, monkeypatch):
-    write_wav(ctx.paths.audio, make_audio([("silence", 1.0)]))
+# --- Only speech is sent (the stand-in detector in conftest hears the tones as speech) -----------
+
+
+def sent_seconds(call: dict) -> float:
+    with wave.open(io.BytesIO(call["file"][1])) as w:
+        return w.getnframes() / w.getframerate()
+
+
+async def test_a_chunk_without_speech_is_not_sent_and_is_cached_empty(ctx, monkeypatch):
+    write_wav(ctx.paths.audio, make_audio([("silence", 20.0)]))
     client = fake_client()
     use_client(monkeypatch, client)
     await transcribe.run(ctx)
-    assert len(client.audio.transcriptions.calls) == 1
+    assert client.audio.transcriptions.calls == []
     assert read_model(ctx.paths.transcript, Transcript).segments == []
+    [path] = ctx.paths.transcript_chunks_dir.glob("*.json")
+    cached = read_model(path, transcribe.CachedChunk)
+    assert cached.segments == [] and cached.language is None
+
+    def no_client(_settings):
+        raise AssertionError("a cached chunk without speech is not looked at again")
+
+    monkeypatch.setattr(transcribe, "get_openai", no_client)
+    monkeypatch.setattr(transcribe.speech, "find_speech", no_client)
+    await transcribe.run(ctx)
+
+
+async def test_each_speech_stretch_is_sent_on_its_own_and_placed_at_its_start(ctx, monkeypatch):
+    pattern = [("tone", 2.0), ("silence", 6.0), ("tone", 2.0), ("silence", 3.0)]
+    write_wav(ctx.paths.audio, make_audio(pattern))
+    client = fake_client()
+    use_client(monkeypatch, client)
+    await transcribe.run(ctx)
+
+    # 0-2 s and 8-10 s, each padded by 0.4 s (and by up to a 32 ms slice at its end), each its
+    # own call; the 6 s between and the 3 s after are neither sent nor billed.
+    sent = sorted(sent_seconds(c) for c in client.audio.transcriptions.calls)
+    assert sent == [pytest.approx(2.4, abs=0.07), pytest.approx(2.8, abs=0.07)]
+    transcript = read_model(ctx.paths.transcript, Transcript)
+    assert [(s.start, s.end) for s in transcript.segments] == [
+        pytest.approx((a, b), abs=0.02) for a, b in burst_times(pattern)
+    ]
+
+
+async def test_a_quiet_tail_is_not_sent(ctx, monkeypatch):
+    write_wav(ctx.paths.audio, make_audio([("tone", 3.0), ("silence", 30.0)]))
+    client = fake_client()
+    use_client(monkeypatch, client)
+    await transcribe.run(ctx)
+    [call] = client.audio.transcriptions.calls
+    assert sent_seconds(call) == pytest.approx(3.4, abs=0.07)
+
+
+async def test_speech_whisper_returns_no_text_for_is_saved_empty(ctx, monkeypatch):
+    write_wav(ctx.paths.audio, make_audio([("tone", 3.0)]))
+    client = Recorder({"language": "english", "segments": []})
+    use_client(monkeypatch, client)
+    await transcribe.run(ctx)
+    assert client.kwargs  # it was sent
+    assert read_model(ctx.paths.transcript, Transcript).segments == []
+
+
+async def test_a_chunk_without_speech_never_sets_the_language(ctx, monkeypatch):
+    write_wav(ctx.paths.audio, make_audio([("silence", 4.0), *bursts_pattern(6)]))
+    client = fake_client()
+    use_client(monkeypatch, client)
+    await transcribe.run(ctx, **SMALL)
+    chunks = sorted(
+        (read_model(p, transcribe.CachedChunk) for p in ctx.paths.transcript_chunks_dir.iterdir()),
+        key=lambda c: c.index,
+    )
+    assert chunks[0].segments == [] and chunks[0].language is None
+    assert len(client.audio.transcriptions.calls) == len(chunks) - 1
+    assert read_model(ctx.paths.transcript, Transcript).language == "english"
+
+
+async def test_a_text_only_models_line_runs_from_the_first_speech_to_the_last(ctx, monkeypatch):
+    ctx.settings.transcribe_model = "gpt-transcribe"
+    write_wav(ctx.paths.audio, make_audio([("silence", 2.0), ("tone", 3.0), ("silence", 2.0)]))
+    fake = TextOnlyTranscriptions()
+    use_client(monkeypatch, SimpleNamespace(audio=SimpleNamespace(transcriptions=fake)))
+    await transcribe.run(ctx)
+    [seg] = read_model(ctx.paths.transcript, Transcript).segments
+    assert (seg.start, seg.end) == pytest.approx((1.6, 5.4), abs=0.07)
+
+
+async def test_8_khz_audio_is_sent_at_its_own_rate(ctx, monkeypatch):
+    rate = 8_000
+    t = np.arange(3 * rate) / rate
+    tone = np.concatenate([np.zeros(rate), 8000 * np.sin(2 * np.pi * 440 * t), np.zeros(5 * rate)])
+    ctx.paths.audio.write_bytes(encode_wav(tone.astype(np.int16), rate))
+    client = fake_client()
+    use_client(monkeypatch, client)
+    await transcribe.run(ctx)
+    [call] = client.audio.transcriptions.calls
+    with wave.open(io.BytesIO(call["file"][1])) as w:
+        assert w.getframerate() == rate
+    [seg] = read_model(ctx.paths.transcript, Transcript).segments
+    assert (seg.start, seg.end) == pytest.approx((1.0, 4.0), abs=0.02)
 
 
 # --- Text-only models (no timestamps) ----------------------------------------------------------

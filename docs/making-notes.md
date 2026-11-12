@@ -62,12 +62,52 @@ are written once and never ask where a recording came from (principle 2).
    should fall, so no word is split in half. How long a chunk is depends on the speech model
    in the settings: `whisper-1`, which times each line, gets long chunks; the others get short
    chunks, so the times stay close even where a model times a chunk's text as one span.
-2. The chunks go to the speech model in parallel. Each finished chunk is cached, so a re-run never
+2. Only the speech in each chunk is sent. A small voice detector bundled with Iris (Silero VAD)
+   finds the stretches where someone is talking, and each stretch is sent on its own; a chunk
+   with no speech isn't sent at all.
+3. The chunks go to the speech model in parallel. Each finished chunk is cached, so a re-run never
    pays for it again.
-3. Each chunk's times are moved to the session's clock, and everything is merged into one
-   transcript, in order.
+4. Each line's times are moved by where its stretch starts, onto the session's clock, and
+   everything is merged into one transcript, in order.
 
 *Why:* chunks keep each call bounded and let a failure cost one chunk, not the whole recording.
+
+### Sending only speech
+
+The speech model makes up text over audio with no speech in it: over silence, room noise or
+clicks it writes lines like "Thank you for watching", or repeats the sentence before. Its own
+"was this speech?" scores don't catch these lines, because it writes them confidently. So the
+silence never reaches it, which is also how faster-whisper, whisper.cpp and WhisperX handle it.
+
+```mermaid
+stateDiagram-v2
+  [*] --> Checking: a chunk (or a live window) is cut
+  Checking --> Empty: no speech stretch
+  Checking --> Sending: one or more speech stretches
+  Sending: each stretch sent on its own
+  Sending --> Failed: API error after retries
+  Sending --> Placing: the model replies
+  Placing: each line moved by where its stretch starts
+  Empty --> Saved: no lines, no call, nothing billed
+  Placing --> Saved
+  Saved --> [*]: cached
+```
+
+Two questions decide what is sent, and each follows a tool's published defaults rather than a
+number tuned here:
+
+- **Is this speech?** The detector scores every 32 ms. Speech starts at a score of one half and
+  ends once the score stays low for a tenth of a second; anything a quarter of a second long or
+  less is dropped (Silero's own rule). A click can fool it for a moment, never that long.
+- **What is cut out?** Only gaps of two seconds or more between speech, and each stretch keeps 0.4 s
+  either side (faster-whisper's settings), so the speech keeps its natural pauses and no word
+  loses its edges.
+
+Each stretch is sent on its own rather than joined into one clip. The model's line times are
+loose (a line often ends where the next begins), and in a joined clip a loose end could slide over
+a join into speech said much later, attaching the line to whatever was on screen then. On its own,
+a stretch's lines can only be placed within it: a line 2 s into a stretch that starts at 70 s is
+at 72 s. Quiet stretches aren't billed either.
 
 ## Detect: what was shown
 
@@ -191,7 +231,8 @@ data, never as instructions.
 
 - Only what settles on screen is seen: an animation or a screen shown very briefly never becomes a
   moment.
-- Silence sent to the speech model can come back as made-up lines (issue #45).
+- Speech the voice detector doesn't hear as speaking, such as singing over music, isn't
+  transcribed.
 - The notes' text isn't checked against the transcript, the way figures are against the screen.
 
 ## Where to look
@@ -199,6 +240,7 @@ data, never as instructions.
 - `backend/src/iris/sources/`: the sources and their ingest (`upload.py`, `browser_live.py`)
 - `backend/src/iris/pipeline/__init__.py`: `PLAN`, the stage order
 - `backend/src/iris/pipeline/stages/`: one module per stage; its docstring goes deeper
+- `backend/src/iris/speech.py`: finding the speech to send, and mapping times back
 - `backend/src/iris/models.py`: every stage's output type
 - `backend/src/iris/notes_format.py`: the notes format, its checks and repair (the UI reads it with
   `frontend/src/notes/format.ts`)

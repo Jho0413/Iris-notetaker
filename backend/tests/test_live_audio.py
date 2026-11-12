@@ -837,3 +837,142 @@ async def test_a_cached_window_just_past_its_bounds_still_commits(
     assert again.calls == []
     starts = [seg.start for seg in rerun.timeline.segments]
     assert starts == sorted(starts)
+
+
+# --- Only speech is sent (the stand-in detector in conftest hears the tones as speech) -----------
+
+# Speech, then 5.9 s of quiet, then speech: the windows in between have no speech.
+GAP_WORDS = [(0.2, 0.9), (1.4, 2.3), (8.2, 8.8), (9.3, 10.4), (10.9, 11.6)]
+
+
+@pytest.fixture(scope="module")
+def gap_webm() -> bytes:
+    return speech_webm(GAP_WORDS)
+
+
+def cached_windows(paths: SessionPaths) -> list[audio_lane.CachedWindow]:
+    windows = (
+        read_model(p, audio_lane.CachedWindow) for p in paths.live_transcript_windows_dir.iterdir()
+    )
+    return sorted(windows, key=lambda w: w.index)
+
+
+def has_speech(window: audio_lane.CachedWindow) -> bool:
+    return any(a < window.end and window.start < b for a, b in GAP_WORDS)
+
+
+async def test_a_window_without_speech_is_not_sent_and_the_transcript_still_moves_on(
+    tmp_path: Path, paths: SessionPaths, gap_webm: bytes, monkeypatch
+):
+    fake = FakeTranscriber()
+    run = Run(paths, settings(tmp_path), fake, monkeypatch)
+    chunks = split(gap_webm, 2000)
+    run.store(chunks, range(len(chunks)))
+    await run.until(lambda: run.timeline.transcribed_to >= 7.0)  # past the quiet, while recording
+    assert not run.timeline.ending
+    await run.stop()
+
+    windows = cached_windows(paths)
+    silent = [w for w in windows if not has_speech(w)]
+    assert len(silent) >= 2
+    assert all(w.segments == [] and w.language is None for w in silent)
+    assert len(fake.calls) == len(windows) - len(silent)
+    assert run.chunk_events() == list(range(len(windows)))  # every window commits, in order
+    assert run.timeline.transcribed_to == pytest.approx(len(live_pcm(paths)) / RATE)
+
+
+async def test_after_a_window_without_text_the_next_is_sent_without_a_prompt(
+    tmp_path: Path, paths: SessionPaths, gap_webm: bytes, monkeypatch
+):
+    fake = FakeTranscriber()
+    run = Run(paths, settings(tmp_path), fake, monkeypatch)
+    chunks = split(gap_webm, 2000)
+    run.store(chunks, range(len(chunks)))
+    await run.stop()
+
+    windows = cached_windows(paths)
+    after_silence = 0
+    for w in windows[1:]:
+        if not has_speech(w):
+            continue
+        before = windows[w.index - 1]
+        assert w.prompt_through == w.index - 1  # one window at a time: the previous one
+        assert (w.prompt == "") == (before.segments == [])
+        after_silence += before.segments == []
+    assert after_silence == 1
+    assert [c["prompt"] is None for c in fake.calls].count(True) == 2  # the first, and after
+
+
+async def test_after_a_window_whisper_found_no_text_in_the_next_has_no_prompt(
+    tmp_path: Path, paths: SessionPaths, webm: bytes, monkeypatch
+):
+    fake = FakeTranscriber(text=lambda n, _sha1: "" if n == 1 else f"call{n}")
+    run = Run(paths, settings(tmp_path), fake, monkeypatch)
+    chunks = split(webm, 2000)
+    run.store(chunks, range(len(chunks)))
+    await run.stop()
+    # Only the window right after the empty one goes without; then the tail of all text resumes.
+    assert [c["prompt"] for c in fake.calls[:4]] == [None, "call0", None, "call0 call2"]
+
+
+async def test_a_restarted_lane_reuses_windows_without_speech_too(
+    tmp_path: Path, paths: SessionPaths, gap_webm: bytes, monkeypatch
+):
+    s = settings(tmp_path)
+    run = Run(paths, s, FakeTranscriber(), monkeypatch)
+    chunks = split(gap_webm, 2000)
+    run.store(chunks, range(len(chunks)))
+    await run.stop()
+
+    again = FakeTranscriber()
+    rerun = Run(paths, s, again, monkeypatch)
+    await rerun.stop()
+    assert again.calls == []
+    assert rerun.timeline.segments == run.timeline.segments
+    assert rerun.chunk_events() == run.chunk_events()
+
+
+async def test_only_a_windows_speech_is_sent_and_billed(
+    tmp_path: Path, paths: SessionPaths, gap_webm: bytes, monkeypatch
+):
+    fake = FakeTranscriber()
+    s = settings(tmp_path, live_window_min_s=4.0, live_window_max_s=9.0)
+    run = Run(paths, s, fake, monkeypatch, metered=True)
+    chunks = split(gap_webm, 2000)
+    run.store(chunks, range(len(chunks)))
+    await run.stop()
+
+    first = cached_windows(paths)[0]
+    assert first.end > 7.0  # the window runs well into the quiet...
+    # ...but only its speech (0.2-2.3 s, padded by 0.4 s and up to a 32 ms slice) was sent, and
+    # the one line the fake returns for the whole of it is placed where that speech was.
+    assert fake.calls[0]["seconds"] == pytest.approx(2.7, abs=0.07)
+    [seg] = first.segments
+    assert (seg.start, seg.end) == pytest.approx((0.0, 2.7), abs=0.07)
+    records = usage.read_usage(paths.usage_log).records
+    assert [r.audio_seconds for r in records] == [
+        usage.billed_seconds(c["seconds"]) for c in fake.calls
+    ]
+
+
+async def test_each_speech_stretch_in_a_window_is_sent_on_its_own_and_placed_at_its_start(
+    tmp_path: Path, paths: SessionPaths, gap_webm: bytes, monkeypatch
+):
+    fake = FakeTranscriber()
+    s = settings(tmp_path, live_window_min_s=4.0, live_window_max_s=14.0)  # one 12 s window
+    run = Run(paths, s, fake, monkeypatch)
+    chunks = split(gap_webm, 2000)
+    run.store(chunks, range(len(chunks)))
+    await run.stop()
+
+    [window] = cached_windows(paths)
+    # 0.2-2.3 s and 8.2-11.6 s, more than 2 s apart: two calls, both with the window's prompt.
+    assert [c["seconds"] for c in fake.calls] == [
+        pytest.approx(2.7, abs=0.07),
+        pytest.approx(12.0 - 7.8, abs=0.07),
+    ]
+    assert [c["prompt"] for c in fake.calls] == [None, None]
+    assert [(seg.start, seg.end) for seg in window.segments] == [
+        pytest.approx((0.0, 2.7), abs=0.07),
+        pytest.approx((7.8, 12.0), abs=0.07),
+    ]

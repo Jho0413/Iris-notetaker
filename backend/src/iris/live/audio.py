@@ -26,19 +26,22 @@ reuses its cached windows. Cuts are made in decoded audio, so a chunk edge is ne
 notes are asked for, the rest of the audio is cut the same way and the last window ends where the
 audio ends (stretched by up to ``CONFIRM_S`` rather than leave a tail shorter than ``MIN_TAIL_S``).
 
-Windows are transcribed with ``transcribe.transcribe_chunk``, at most
+Only a window's speech is sent (``iris.speech``, as for uploads), each speech stretch on its own
+with the window's prompt: a window without speech is not sent and commits empty, which still moves
+``transcribed_to`` on. Windows are transcribed with ``transcribe.transcribe_chunk``, at most
 ``live_transcribe_concurrency`` at once (a window starts only while fewer than that many are
-uncommitted), each retried after a temporary API error (``retry_temporary``, with
-``api_retry_delays_s``) before the lane fails; other errors fail it at once. Each window is
-prompted with the tail of the text *committed when it is sent*: normally that is the previous
-window (windows end ~10 s apart and take a few seconds to transcribe), while a backlog (a slow API,
-or making notes) is worked through concurrently with slightly older context. The cache entry
-records the prompt and which window it was taken from, and is reused only if its audio, model and
-prompt match the text now committed there; a damaged entry is regenerated. Every window is sent
-the configured ``transcribe_language`` (the cache records it too), so a misdetected first window
-can't carry the wrong language into the rest through the prompt. Windows commit strictly in
-order. The transcript's language is that of the first window with speech (the timeline keeps the
-first language published, and silent windows are often misdetected), in the timeline and
+uncommitted), each stretch retried after a temporary API error (``retry_temporary``, with
+``api_retry_delays_s``) before the lane fails; other errors fail it at once. Each window is prompted
+with the tail of the text *committed when it is sent*: normally that is the previous window (windows
+end ~10 s apart and take a few seconds to transcribe), while a backlog (a slow API, or making notes)
+is worked through concurrently with slightly older context. If the last window committed has no
+text, there is no prompt: after a silence, Whisper given the text from before it tends to repeat it.
+The cache entry records the prompt and which window it was taken from, and is reused only if its
+audio, model and prompt match the text now committed there; a damaged entry is regenerated. Every
+window is sent the configured ``transcribe_language`` (the cache records it too), so a misdetected
+first window can't carry the wrong language into the rest through the prompt. Windows commit
+strictly in order. The transcript's language is that of the first window with speech (the timeline
+keeps the first language published, and silent windows are often misdetected), in the timeline and
 ``live/transcript.json`` alike. Memory stays bounded: window samples are read back from
 ``live/audio.pcm``.
 """
@@ -59,6 +62,7 @@ import av
 import numpy as np
 from pydantic import BaseModel
 
+from iris import speech
 from iris.live.lane import LiveLane
 from iris.live.timeline import Lane, LiveTimeline
 from iris.llm import usage
@@ -81,7 +85,6 @@ log = logging.getLogger(__name__)
 
 CONFIRM_S = 1.0  # decoded audio needed past a window's search range before it is cut
 PROMPT_CHARS = 500  # tail of the committed transcript sent as a window's prompt (~120 tokens)
-MIN_API_S = 0.1  # the API rejects shorter audio; a shorter final window is committed empty
 MIN_TAIL_S = 1.0  # at the end, a shorter last window joins the one before (whisper hallucinates)
 PROGRESS_S = 5.0  # while catching up, the decoder reports progress at least this often
 
@@ -512,22 +515,19 @@ class AudioLane(LiveLane):
 
         through = self._committed - 1
         prompt = self._prompt(through)
-        offset, duration = start / self.rate, (end - start) / self.rate
         language, segments = None, []
-        if duration >= MIN_API_S:
-            result = await self._transcribe(i, samples, offset, duration, prompt)
-            language = result.language
-            segments = _within(
-                [
-                    seg.model_copy(update={"start": seg.start + offset, "end": seg.end + offset})
-                    for seg in result.segments
-                ],
-                offset,
-                end / self.rate,
-            )
+        for a, b in await asyncio.to_thread(speech.find_speech, samples, self.rate):
+            at = (start + a) / self.rate
+            result = await self._transcribe(i, samples[a:b], at, prompt)
+            language = language or result.language
+            segments += [
+                seg.model_copy(update={"start": seg.start + at, "end": seg.end + at})
+                for seg in result.segments
+            ]
+        segments = _within(segments, start / self.rate, end / self.rate)
         window = CachedWindow(
             index=i,
-            start=offset,
+            start=start / self.rate,
             end=end / self.rate,
             audio_sha1=digest,
             model=self.model,
@@ -541,7 +541,7 @@ class AudioLane(LiveLane):
         return window
 
     async def _transcribe(
-        self, i: int, samples: np.ndarray, offset: float, duration: float, prompt: str
+        self, i: int, samples: np.ndarray, offset: float, prompt: str
     ) -> transcribe.ChunkTranscript:
         if self._client is None:
             self._client = get_openai(self.ctx.settings)
@@ -552,7 +552,12 @@ class AudioLane(LiveLane):
         async def call() -> transcribe.ChunkTranscript:
             with usage.recording(self.ctx, Stage.TRANSCRIBE):
                 return await transcribe.transcribe_chunk(
-                    client, self.model, wav, duration, prompt or None, language=self.language
+                    client,
+                    self.model,
+                    wav,
+                    len(samples) / self.rate,
+                    prompt or None,
+                    language=self.language,
                 )
 
         try:
@@ -565,8 +570,12 @@ class AudioLane(LiveLane):
             await self._commits.wait_for(lambda: self._committed >= n)
 
     def _prompt(self, through: int) -> str:
-        """The tail of the text of windows ``0..through``, for the next window's prompt."""
+        """The tail of the text of windows ``0..through``, for the next window's prompt; none if
+        window ``through`` has no text, so a line from before a silence can't be repeated."""
         if through < 0 or not transcribe.supports_prompt(self.model):
+            return ""
+        before = self._segment_counts[through - 1] if through > 0 else 0
+        if self._segment_counts[through] == before:
             return ""
         segments = self.timeline.segments
         parts: list[str] = []
