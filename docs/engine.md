@@ -56,6 +56,19 @@ they do as events that clients follow as it happens.
    and, apart from it, the raw error for developers (`iris show`).
 5. The user's edits sit beside the generated notes, written only by the API. A re-run makes new
    notes and leaves the edits alone ([`ui.md`](ui.md#reading-and-editing-notes)).
+6. The notes or the transcript, asked for before they are made, answer "not ready". When they
+   are there but damaged, or the file can't be opened, the full error is logged and the answer
+   is a plain "couldn't be read", never a raw error. Damaged edits are passed over and the
+   generated notes shown; edits that can't be opened are refused, since they may be intact.
+7. Deleting a session removes its row first, so live input or a request for notes arriving
+   meanwhile is refused instead of starting work on it again; then its live processing stops,
+   and only then does its folder go.
+8. A session's name is the user's: the pipeline never sets it, so it stays through re-runs. The
+   engine and the UI's name field share one length limit. A Markdown export is named after it:
+   the download carries an ASCII version of the name, for clients that only read that, and the
+   full name, which browsers prefer, both cleaned of anything that could act as a path or reorder
+   the text. Folding the name to ASCII can turn full-width slashes and quotes into real ones, so
+   the folded name is cleaned again.
 
 *Why:* files are the source of truth and the store is only an index, so any stage can be run,
 checked or re-run from its files alone, and a session survives a crash (principle 4).

@@ -31,14 +31,13 @@ def test_upload_creates_session_and_runs_pipeline(client: TestClient):
     sid = r.json()["id"]
     assert r.json()["title"] == "talk"
 
-    # The upload is not a real video, so the pipeline should fail cleanly at ingest.
     session = wait_for_status(client, sid, {"done", "failed"})
     assert session["status"] == "failed"
     assert session["current_stage"] == "ingest"
     assert session["failure_kind"] == "input"
     assert session["failure_message"] == UNREADABLE_UPLOAD
     assert "error" not in session and "error_detail" not in session
-    detail = client.app.state.store.failure_detail(sid)  # the raw error, for developers only
+    detail = client.app.state.store.failure_detail(sid)
     assert detail.error.startswith("ingest failed: UserFacingError: source.mp4 is not a readable")
 
     assert [s["id"] for s in client.get("/api/sessions").json()] == [sid]
@@ -47,18 +46,36 @@ def test_upload_creates_session_and_runs_pipeline(client: TestClient):
 
 def test_live_session_accepts_chunks(client: TestClient):
     sid = client.post("/api/live", json={"title": "standup"}).json()["id"]
-    webm, jpeg = b"\x1a\x45\xdf\xa3webm", b"\xff\xd8\xffjpeg"  # right magic, junk content
+    webm, jpeg = b"\x1a\x45\xdf\xa3webm", b"\xff\xd8\xffjpeg"
     assert client.post(f"/api/live/{sid}/audio?seq=0", content=webm).status_code == 204
     assert client.post(f"/api/live/{sid}/frame?t=1.5&share=1", content=jpeg).status_code == 204
     assert client.post(f"/api/live/{sid}/end").status_code == 200
     wait_for_status(client, sid, {"done", "failed"})
-    # No more input once recording has ended
     assert client.post(f"/api/live/{sid}/audio?seq=1", content=b"x").status_code == 409
 
 
 def test_file_serving_rejects_other_dirs(client: TestClient):
     sid = client.post("/api/live", json={}).json()["id"]
     assert client.get(f"/api/sessions/{sid}/files/live/x.webm").status_code == 404
+
+
+def test_a_transcript_not_made_yet_is_not_ready(client: TestClient, settings: Settings):
+    sid = client.app.state.store.create("Loops", SourceKind.UPLOAD).id
+    session_paths(settings.sessions_dir, sid).ensure()
+    r = client.get(f"/api/sessions/{sid}/transcript")
+    assert r.status_code == 404
+    assert r.json()["detail"] == "transcript not ready"
+
+
+def test_a_damaged_transcript_is_refused_in_plain_words_and_logged(
+    client: TestClient, settings: Settings, caplog
+):
+    sid = client.app.state.store.create("Loops", SourceKind.UPLOAD).id
+    session_paths(settings.sessions_dir, sid).ensure().transcript.write_text("{not json")
+    r = client.get(f"/api/sessions/{sid}/transcript")
+    assert r.status_code == 500
+    assert r.json()["detail"] == "the transcript couldn't be read"
+    assert f"can't read the transcript of session {sid}" in caplog.text
 
 
 def make_session_with_notes(client: TestClient, settings: Settings, title: str) -> str:
@@ -80,12 +97,12 @@ def make_session_with_notes(client: TestClient, settings: Settings, title: str) 
     [
         ("Plain title", "Plain title.md"),
         ("Café résumé", "Cafe resume.md"),
-        ("会议记录", None),  # nothing ASCII left: falls back to the session id
+        ("会议记录", None),
         ("Demo 🎉 day", "Demo day.md"),
         ('Say "hi"', "Say _hi_.md"),
         ("a/b\\c", "a_b_c.md"),
         ("line\nbreak\tend", "line break end.md"),
-        ("Q1／Q2 review", "Q1_Q2 review.md"),  # full-width slash folds to "/" under NFKD
+        ("Q1／Q2 review", "Q1_Q2 review.md"),
         ("a＼b ＂c＂", "a_b _c_.md"),
     ],
 )
@@ -99,7 +116,7 @@ def test_export_filename_keeps_title(
     assert "Body text." in r.text
 
     header = r.headers["content-disposition"]
-    header.encode("ascii")  # header values must be pure ASCII
+    header.encode("ascii")
     disposition, plain, extended = (part.strip() for part in header.split(";"))
     assert disposition == "attachment"
     assert plain == f'filename="{ascii_name or sid + ".md"}"'

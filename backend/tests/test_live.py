@@ -1,17 +1,13 @@
-"""Browser live capture: storing chunks, finalizing them, and ending a session through the API.
-
-Recordings are synthetic: a WebM/Opus stream encoded with PyAV and cut into byte ranges like
-MediaRecorder timeslice chunks, and solid-colour JPEG frames.
-"""
-
 import json
 import random
 import time
 import wave
 from datetime import UTC, datetime
+from fractions import Fraction
 from pathlib import Path
 from types import SimpleNamespace
 
+import av
 import cv2
 import numpy as np
 import pytest
@@ -53,21 +49,17 @@ from tests.test_ingest import make_media
 
 RATE = 48_000
 SECONDS = 6
-# Tone only in even seconds, so where a second's audio lands in audio.wav is checkable.
 TONE_SECONDS = {0, 2, 4}
 COLOURS = [(0, 0, 255), (0, 255, 0), (255, 0, 0), (0, 255, 255), (255, 0, 255), (255, 255, 0)]
 
 
 def make_webm(seconds: int = SECONDS) -> bytes:
-    """A mono Opus WebM: a 440 Hz tone during ``TONE_SECONDS``, silence otherwise (short clusters,
-    as in MediaRecorder output)."""
     t = np.arange(seconds * RATE) / RATE
     loud = np.isin(t.astype(int), list(TONE_SECONDS))
     return encode_webm([(0.3 * loud * np.sin(2 * np.pi * 440 * t)).astype(np.float32)]).data
 
 
 def split(data: bytes, size: int = 4000) -> list[bytes]:
-    """Byte ranges like MediaRecorder timeslice chunks: only the first has the header."""
     return [data[i : i + size] for i in range(0, len(data), size)]
 
 
@@ -96,18 +88,14 @@ def read_wav(path: Path) -> np.ndarray:
 
 
 def loud(samples: np.ndarray, second: int, rate: int = 16_000) -> bool:
-    """Whether the middle of ``second`` has the tone (edges skipped for codec smearing)."""
     window = samples[second * rate + rate // 5 : (second + 1) * rate - rate // 5]
     return bool(np.abs(window).max() > 3000)
-
-
-# --- Storing chunks ---------------------------------------------------------------------------
 
 
 def test_chunks_out_of_order_and_repeated_are_stored_once(paths: SessionPaths):
     assert store_audio_chunk(paths, 2, b"c")
     assert store_audio_chunk(paths, 0, b"a")
-    assert not store_audio_chunk(paths, 2, b"c")  # a retry of the same chunk
+    assert not store_audio_chunk(paths, 2, b"c")
     assert [seq for seq, _ in audio_chunks(paths)] == [0, 2]
     assert missing_audio_chunks(paths, 4) == [1, 3]
     assert missing_audio_chunks(paths, 0) == []
@@ -123,9 +111,6 @@ def test_conflicting_repeat_is_rejected_not_overwritten(paths: SessionPaths):
     assert not store_frame(paths, 1.5, 1, b"x")
     with pytest.raises(ChunkConflict):
         store_frame(paths, 1.5, 1, b"y")
-
-
-# --- Audio ------------------------------------------------------------------------------------
 
 
 def write_chunks(paths: SessionPaths, chunks: list[bytes], skip: set[int] = frozenset()) -> None:
@@ -160,32 +145,25 @@ def test_missing_chunks_become_silence_and_keep_later_audio_in_place(
     duration = finalize_audio(audio_chunks(lossy_paths), lossy_paths.audio, 16_000)
     lossy = read_wav(lossy_paths.audio)
 
-    # Same length, and audio is lost only around each missing chunk: elsewhere the loudness
-    # envelope matches the full recording (nothing is pulled earlier by the missing bytes).
     assert duration == pytest.approx(SECONDS, abs=0.1)
     differs = np.abs(envelope(full) - envelope(lossy)) > 3000
-    assert np.count_nonzero(differs) * 0.01 < 1.2 * len(lost)  # the chunk, rest of its cluster
+    assert np.count_nonzero(differs) * 0.01 < 1.2 * len(lost)
     assert loud(lossy, 0) and loud(lossy, 4) and not loud(lossy, 5)
-    # The tone starting at 4 s, after the gaps, is within a few milliseconds of where it was.
     assert abs(onset(lossy, 3.8) - onset(full, 3.8)) <= 160
 
 
 def envelope(samples: np.ndarray, window: int = 160) -> np.ndarray:
-    """Peak level per 10 ms."""
     n = len(samples) // window * window
     return np.abs(samples[:n].astype(np.int32)).reshape(-1, window).max(axis=1)
 
 
 def onset(samples: np.ndarray, after_s: float) -> int:
-    """Index of the first loud sample after ``after_s`` seconds."""
     start = round(after_s * 16_000)
     return start + int(np.argmax(np.abs(samples[start:]) > 3000))
 
 
 @pytest.mark.parametrize("partial_id", [0, 2])
 def test_header_only_first_chunk_then_a_gap(paths: SessionPaths, webm: bytes, partial_id: int):
-    # MediaRecorder's first chunk can be the header alone (possibly ending with part of the next
-    # Cluster ID); losing chunk 1 must not lose the rest of the recording.
     header_end = webm.find(CLUSTER_ID) + partial_id
     chunks = [webm[:header_end], *split(webm[header_end:], 2000)]
     write_chunks(paths, chunks, skip={1})
@@ -205,7 +183,7 @@ def test_runs_split_at_missing_chunks(tmp_path: Path):
 @pytest.mark.parametrize("cut", range(len(CLUSTER_ID) + 1))
 def test_cluster_found_across_file_boundaries(tmp_path: Path, cut: int):
     stream = b"header-bytes" + CLUSTER_ID + b"cluster"
-    at = len(b"header-bytes") + cut  # cut the stream inside (or next to) the cluster ID
+    at = len(b"header-bytes") + cut
     a, b = tmp_path / "a", tmp_path / "b"
     a.write_bytes(stream[:at])
     b.write_bytes(stream[at:])
@@ -236,15 +214,11 @@ async def test_ingest_requires_audio_and_its_first_chunk(tmp_path: Path, webm: b
     assert raised.value.message == UNREADABLE_LIVE_AUDIO
 
 
-# --- Frames -----------------------------------------------------------------------------------
-
-
 def mean_bgr(path: Path) -> np.ndarray:
     return cv2.imread(str(path)).reshape(-1, 3).mean(axis=0)
 
 
 def test_frames_sampled_on_the_grid_by_timestamp(paths: SessionPaths):
-    # Uneven browser timing: two frames in second 1, none in second 3, out of posting order.
     captured = {0.0: 0, 1.02: 1, 1.6: 1, 2.05: 2, 4.3: 4, 5.0: 5}
     for t in reversed(list(captured)):
         store_frame(paths, t, 1, jpeg(COLOURS[captured[t]]))
@@ -260,34 +234,31 @@ def test_frames_sampled_on_the_grid_by_timestamp(paths: SessionPaths):
 
 def test_frames_downscaled_and_letterboxed_to_one_size(paths: SessionPaths):
     store_frame(paths, 0.0, 1, jpeg(COLOURS[0], (640, 480)))
-    store_frame(paths, 1.0, 1, jpeg(COLOURS[1], (640, 240)))  # the shared window got wider
-    store_frame(paths, 2.0, 1, b"\xff\xd8\xff truncated")  # unreadable: skipped
+    store_frame(paths, 1.0, 1, jpeg(COLOURS[1], (640, 240)))
+    store_frame(paths, 2.0, 1, b"\xff\xd8\xff truncated")
     index = finalize_frames(paths, fps=1.0, max_width=320)
     assert (index.width, index.height) == (320, 240)
     assert [f.t for f in index.frames] == [0.0, 1.0]
     wide = cv2.imread(str(paths.root / index.frames[1].path))
     assert wide.shape == (240, 320, 3)
-    assert wide[:50].mean() < 10 and wide[100:140].mean() > 50  # black bars above and below
+    assert wide[:50].mean() < 10 and wide[100:140].mean() > 50
 
 
 def test_each_share_is_sized_from_its_own_first_frame(paths: SessionPaths):
-    """A small window shared first doesn't shrink the entire screen shared after it."""
-    store_frame(paths, 0.0, 1, jpeg(COLOURS[0], (160, 120)))  # a small window
-    store_frame(paths, 1.0, 1, jpeg(COLOURS[1], (320, 120)))  # the window got wider: letterboxed
-    store_frame(paths, 9.2, 2, b"\xff\xd8\xff truncated")  # unreadable: the next frame sizes it
-    store_frame(paths, 10.0, 2, jpeg(COLOURS[2], (1280, 800)))  # the entire screen
+    store_frame(paths, 0.0, 1, jpeg(COLOURS[0], (160, 120)))
+    store_frame(paths, 1.0, 1, jpeg(COLOURS[1], (320, 120)))
+    store_frame(paths, 9.2, 2, b"\xff\xd8\xff truncated")
+    store_frame(paths, 10.0, 2, jpeg(COLOURS[2], (1280, 800)))
     store_frame(paths, 11.0, 2, jpeg(COLOURS[3], (640, 400)))
     index = finalize_frames(paths, fps=1.0, max_width=640)
-    assert index.share_starts == [10.0]  # the second share's first readable frame
-    assert (index.width, index.height) == (160, 120)  # the first share's
+    assert index.share_starts == [10.0]
+    assert (index.width, index.height) == (160, 120)
     sizes = [cv2.imread(str(paths.root / f.path)).shape[:2] for f in index.frames]
     assert [f.t for f in index.frames] == [0.0, 1.0, 10.0, 11.0]
     assert sizes == [(120, 160), (120, 160), (400, 640), (400, 640)]
 
 
 def test_shares_come_from_the_frames_share_numbers(paths: SessionPaths):
-    # Share 2 is unreadable throughout: left out. Share 4 starts in share 3's last grid cell, so
-    # its first frame isn't sampled (as for any two frames in one cell) and it starts a frame on.
     for t, share, data in [
         (0.0, 1, jpeg(COLOURS[0])),
         (1.0, 1, jpeg(COLOURS[0])),
@@ -318,7 +289,6 @@ def test_frames_split_into_shares_where_the_share_number_changes():
 
 
 def test_frames_of_two_shares_at_the_same_time_are_both_kept(paths: SessionPaths):
-    """Stop then Continue at the same recorded time: the two shares' frames don't collide."""
     assert store_frame(paths, 10.0, 1, b"a")
     assert store_frame(paths, 10.0, 2, b"b")
     assert [(f.t, f.share) for f in captured_frames(paths)] == [(10.0, 1), (10.0, 2)]
@@ -340,7 +310,7 @@ def test_finalize_frames_is_repeatable_and_removes_stale_frames(paths: SessionPa
     assert not stale.exists()
     assert finalize_frames(paths, fps=1.0, max_width=1280) == first
     assert len(list(paths.frames_dir.glob("*.jpg"))) == 1
-    assert (paths.live_frames_dir / "000000500-0001.jpg").exists()  # captured data is kept
+    assert (paths.live_frames_dir / "000000500-0001.jpg").exists()
 
 
 def test_no_frames_gives_an_empty_index(paths: SessionPaths):
@@ -354,9 +324,6 @@ def test_fit_keeps_aspect():
     out = fit(tall, (100, 100))
     assert out.shape == (100, 100, 3)
     assert out[:, :30].max() == 0 and out[:, 40:60].min() == 255
-
-
-# --- API --------------------------------------------------------------------------------------
 
 
 def start(client: TestClient) -> str:
@@ -390,7 +357,7 @@ def test_frames_need_their_share(client: TestClient, settings: Settings):
     for share in ("0", "-1", "10000", "x"):
         assert post_frame(client, sid, 1.0, jpeg(COLOURS[0]), share) == 422  # type: ignore[arg-type]
     url = f"/api/live/{sid}/frame?t=1"
-    assert client.post(url, content=jpeg(COLOURS[0])).status_code == 422  # share is required
+    assert client.post(url, content=jpeg(COLOURS[0])).status_code == 422
     assert post_frame(client, sid, 1.0, jpeg(COLOURS[0]), share=2) == 204
     paths = session_paths(settings.sessions_dir, sid)
     assert [(f.t, f.share) for f in captured_frames(paths)] == [(1.0, 2)]
@@ -400,7 +367,7 @@ def test_repeated_chunk_with_other_content_conflicts(client: TestClient, webm: b
     sid = start(client)
     chunks = split(webm)
     assert post_audio(client, sid, 1, chunks[1]) == 204
-    assert post_audio(client, sid, 1, chunks[1]) == 204  # retry: no-op
+    assert post_audio(client, sid, 1, chunks[1]) == 204
     assert post_audio(client, sid, 1, chunks[2]) == 409
 
 
@@ -414,11 +381,10 @@ def test_end_waits_for_missing_chunks_then_processes(client: TestClient, webm: b
     assert r.json()["detail"]["missing_audio_chunks"] == [0]
     assert client.get(f"/api/sessions/{sid}").json()["status"] == "recording"
 
-    assert post_audio(client, sid, 0, chunks[0]) == 204  # the browser resends it
+    assert post_audio(client, sid, 0, chunks[0]) == 204
     r = client.post(f"/api/live/{sid}/end", json={"audio_chunks": len(chunks)})
     assert r.status_code == 200
     assert r.json()["status"] == "processing"
-    # Recording has ended: no more input, and ending again is refused.
     assert post_audio(client, sid, len(chunks), b"x") == 409
     assert client.post(f"/api/live/{sid}/end").status_code == 409
     wait_for_status(client, sid, {"done", "failed"})
@@ -430,7 +396,6 @@ def test_end_with_allowed_gaps(client: TestClient, webm: bytes, settings: Settin
     for seq in range(len(chunks)):
         if seq != 3:
             post_audio(client, sid, seq, chunks[seq])
-    # A call made while recording (live transcription): ending returns the cost so far.
     log = settings.sessions_dir / sid / "usage_calls.jsonl"
     record = UsageRecord(
         at=datetime.now(UTC), purpose="x", operation="op", model="m", latency_s=0, cost_usd=0.01
@@ -457,15 +422,13 @@ def test_stop_keeps_the_recording_without_making_notes(client: TestClient, webm:
     assert r.status_code == 200
     assert r.json()["status"] == "stopped"
     runner = client.app.state.runner  # type: ignore[attr-defined]
-    assert not runner.is_running(sid)  # no notes are made
-    # Nothing more is accepted: a chunk or frame still on its way after the page went away.
+    assert not runner.is_running(sid)
     assert post_audio(client, sid, 1, chunks[1]) == 409
     assert post_frame(client, sid, 1.0, jpeg(COLOURS[0])) == 409
     assert client.get(f"/api/sessions/{sid}").json()["status"] == "stopped"
 
 
 def test_stopping_again_is_a_no_op(client: TestClient):
-    # The page's unload request and the desktop app's quit can both send it.
     sid = start(client)
     assert stop(client, sid) == 200
     r = client.post(f"/api/live/{sid}/stop")
@@ -490,7 +453,7 @@ def test_make_notes_from_a_stopped_recording(client: TestClient, webm: bytes, se
     r = client.post(f"/api/live/{sid}/end", json={"allow_gaps": True})
     assert r.status_code == 200
     assert r.json()["status"] == "processing"
-    assert stop(client, sid) == 409  # making notes: too late to stop
+    assert stop(client, sid) == 409
     wait_for_status(client, sid, {"done", "failed"})
     audio = settings.sessions_dir / sid / "audio.wav"
     assert len(read_wav(audio)) / 16_000 == pytest.approx(SECONDS, abs=0.1)
@@ -509,18 +472,17 @@ def test_only_a_live_recording_can_be_stopped(client: TestClient):
     assert stop(client, "nope") == 404
     upload = client.post("/api/sessions", files={"file": ("talk.mp4", b"not really a video")})
     sid = upload.json()["id"]
-    assert stop(client, sid) == 409  # an upload never records
+    assert stop(client, sid) == 409
     wait_for_status(client, sid, {"failed"})
     assert stop(client, sid) == 409
     live = start(client)
     client.post(f"/api/live/{live}/end")
-    assert stop(client, live) == 409  # making notes, then finished or failed
+    assert stop(client, live) == 409
     wait_for_status(client, live, {"done", "failed"})
     assert stop(client, live) == 409
 
 
 def test_stop_keeps_live_processing_for_making_notes(client: TestClient):
-    # What arrived is still processed, so making notes later reuses that work.
     sid = start(client)
     live = client.app.state.runner.live  # type: ignore[attr-defined]
     processor = live.get(sid)
@@ -530,8 +492,6 @@ def test_stop_keeps_live_processing_for_making_notes(client: TestClient):
 
 
 def test_make_notes_after_an_engine_restart(settings: Settings, webm: bytes):
-    # The desktop app stops a recording at quit; the next launch's engine has no live processor,
-    # and the recording waits, stopped, until notes are asked for.
     with TestClient(create_app(settings)) as client:
         sid = start(client)
         for seq, chunk in enumerate(split(webm)):
@@ -557,7 +517,6 @@ def wait_until_idle(client: TestClient, sid: str, timeout: float = 10.0) -> None
 
 
 def fake_openai(monkeypatch) -> None:
-    """Fake every model call the pipeline makes (no network, no cost)."""
     from iris.live import audio
     from iris.pipeline.stages import render, select, transcribe, write
     from tests.test_write import section
@@ -611,7 +570,7 @@ def test_live_session_produces_notes_like_an_upload(
     chunks = split(webm)
     order = list(range(len(chunks)))
     random.Random(1).shuffle(order)
-    for seq in order + order[:3]:  # out of order, and some sent twice
+    for seq in order + order[:3]:
         assert post_audio(client, sid, seq, chunks[seq]) == 204
     frame_times = [0.0, 1.01, 2.0, 3.02, 4.0, 5.0]
     for i in [3, 0, 5, 1, 4, 2, 0, 5]:
@@ -630,10 +589,9 @@ def test_live_session_produces_notes_like_an_upload(
     assert all((root / f.path).exists() for f in index.frames)
     notes = client.get(f"/api/sessions/{sid}/notes").json()
     assert "Ship the prototype" in notes["markdown"]
-    assert notes["visuals"]  # two screens (red, then yellow) gave moments and figures
-    assert len(list((root / "live" / "audio").glob("*.webm"))) == len(chunks)  # kept for retries
+    assert notes["visuals"]
+    assert len(list((root / "live" / "audio").glob("*.webm"))) == len(chunks)
 
-    # A retry re-ingests from the kept capture and gives the same result.
     assert client.post(f"/api/sessions/{sid}/run").status_code == 200
     wait_until_idle(client, sid)
     assert client.get(f"/api/sessions/{sid}").json()["status"] == "done"
@@ -641,6 +599,30 @@ def test_live_session_produces_notes_like_an_upload(
 
 
 def test_replay_records_a_file_without_video_as_audio_only(tmp_path: Path):
-    """``iris replay-live`` sends frames for a file with video, and none (Record audio) without."""
     assert list(file_frames(make_media(tmp_path / "talk.mp4", video=True, seconds=2)))
     assert list(file_frames(make_media(tmp_path / "call.wav", video=False, seconds=2))) == []
+
+
+def make_audio_with_cover_art(path: Path) -> Path:
+    rate = 48_000
+    with av.open(str(path), "w", format="mp4") as out:
+        audio = out.add_stream("aac", rate=rate)
+        audio.layout = "mono"
+        cover = out.add_stream("mjpeg", rate=1)
+        cover.width, cover.height, cover.pix_fmt = 64, 64, "yuvj420p"
+        cover.disposition = av.stream.Disposition.attached_pic
+        art = av.VideoFrame.from_ndarray(np.full((64, 64, 3), 200, np.uint8), format="bgr24")
+        art = art.reformat(format="yuvj420p")
+        art.pts, art.time_base = 0, Fraction(1, 1)
+        out.mux(cover.encode(art))
+        out.mux(cover.encode())
+        tone = np.zeros((1, rate * 2), np.float32)
+        frame = av.AudioFrame.from_ndarray(tone, format="fltp", layout="mono")
+        frame.sample_rate, frame.pts = rate, 0
+        out.mux(audio.encode(frame))
+        out.mux(audio.encode())
+    return path
+
+
+def test_replay_records_an_audio_file_with_cover_art_as_audio_only(tmp_path: Path):
+    assert list(file_frames(make_audio_with_cover_art(tmp_path / "podcast.m4a"))) == []

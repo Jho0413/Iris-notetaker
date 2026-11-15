@@ -1,28 +1,3 @@
-"""Replay a recording into a running backend's live API, as the browser would (a dev tool).
-
-``iris replay-live <file>`` (``cli.py``) plays a recorded file into ``/api/live``:
-
-- **Audio** is re-encoded with PyAV into one WebM/Opus stream (48 kHz mono, short clusters, as
-  MediaRecorder writes it) and posted as consecutive byte ranges of about ``CHUNK_S`` of audio
-  each, with ``seq`` from 0. Only the first carries the header, as with MediaRecorder timeslices.
-- **Screen frames** are sampled about once a second (at each second, the latest video frame shown
-  by then, as the browser's frame ticker captures it), scaled to at most ``FRAME_MAX_WIDTH`` wide
-  like the browser does, and posted as JPEG with ``t`` (seconds since start, the audio's clock)
-  and ``share=1``: the file is one screen share from start to end.
-- A file with **no video** is replayed as an audio-only recording: no frames, as the Live page's
-  "Record audio" sends none until the screen is shared.
-- Everything is **paced in real time** (``speed`` > 1 plays faster: the session clock stays the
-  file's), then ``POST /end`` is sent with the chunk count.
-
-It follows the session's events and reports when the first transcript, moment, figure and notes
-section arrived, how many notes sections were written before ``/end``, how long making notes
-took to reach ``done``, whether it promoted the live work, and the model cost (total and after
-``/end``) from ``/api/sessions/{id}/usage``.
-
-The encoding helpers (``encode_webm``, ``chunk_webm``) are shared with the tests, which build
-synthetic recordings with them. PyAV only: no ``ffmpeg`` CLI.
-"""
-
 import asyncio
 import io
 import json
@@ -39,21 +14,20 @@ import av
 import cv2
 import numpy as np
 
+from iris.sources.upload import first_video_stream
+
 OPUS_RATE = 48_000
-OPUS_FRAME = 960  # 20 ms
-CHUNK_S = 5.0  # the browser's MediaRecorder timeslice
-FRAME_INTERVAL_S = 1.0  # the browser's frame ticker
-FRAME_MAX_WIDTH = 1920  # the browser scales frames to at most this width
+OPUS_FRAME = 960
+CHUNK_S = 5.0
+FRAME_INTERVAL_S = 1.0
+FRAME_MAX_WIDTH = 1920
 JPEG_QUALITY = 80
-
-
-# --- Encoding (shared with the tests) ---------------------------------------------------------
+MUX_BUFFER_BYTES = 4096
 
 
 @dataclass
 class EncodedWebm:
     data: bytes
-    # (t, n): the first n bytes hold the stream up to t seconds of audio, in increasing order.
     marks: list[tuple[float, int]]
 
     @property
@@ -64,18 +38,16 @@ class EncodedWebm:
 def encode_webm(
     blocks: Iterable[np.ndarray], rate: int = OPUS_RATE, cluster_ms: int = 500
 ) -> EncodedWebm:
-    """Encode mono float32 samples (in blocks of any length) as one WebM/Opus stream.
-
-    Clusters are short, as in MediaRecorder output (FFmpeg's default is a few seconds), so a
-    stream cut into byte ranges can be resumed at a cluster near any cut.
-    """
     buf = io.BytesIO()
     marks: list[tuple[float, int]] = []
     pending = np.zeros(0, np.float32)
     k = 0
-    # A small I/O buffer, so the bytes written track the audio muxed (for ``marks``).
     with av.open(
-        buf, "w", format="webm", options={"cluster_time_limit": str(cluster_ms)}, buffer_size=4096
+        buf,
+        "w",
+        format="webm",
+        options={"cluster_time_limit": str(cluster_ms)},
+        buffer_size=MUX_BUFFER_BYTES,
     ) as out:
         stream = out.add_stream("libopus", rate=rate)
         stream.layout = "mono"
@@ -106,13 +78,11 @@ def encode_webm(
             encode(np.pad(pending, (0, OPUS_FRAME - len(pending))))
         encode(None)
     data = buf.getvalue()
-    marks.append((k * OPUS_FRAME / rate, len(data)))  # the trailer
+    marks.append((k * OPUS_FRAME / rate, len(data)))
     return EncodedWebm(data, marks)
 
 
 def chunk_webm(webm: EncodedWebm, chunk_s: float = CHUNK_S) -> list[tuple[float, bytes]]:
-    """Consecutive byte ranges holding about ``chunk_s`` of audio each, as ``(t, bytes)``: a range
-    can be posted once ``t`` seconds have been recorded. Joined, they are the whole stream."""
     chunks: list[tuple[float, bytes]] = []
     marks, end_t = webm.marks, webm.duration_s
     start = upto = j = 0
@@ -121,7 +91,7 @@ def chunk_webm(webm: EncodedWebm, chunk_s: float = CHUNK_S) -> list[tuple[float,
         while j < len(marks) and marks[j][0] <= boundary + 1e-9:
             upto = max(upto, marks[j][1])
             j += 1
-        if upto > start:  # nothing written yet: this range joins the next
+        if upto > start:
             chunks.append((boundary, webm.data[start:upto]))
             start = upto
         boundary += chunk_s
@@ -131,8 +101,6 @@ def chunk_webm(webm: EncodedWebm, chunk_s: float = CHUNK_S) -> list[tuple[float,
 
 
 def file_audio(path: Path, rate: int = OPUS_RATE) -> Iterator[np.ndarray]:
-    """The file's first audio stream as mono float32 blocks at ``rate``, placed by timestamp
-    from 0 (leading silence kept)."""
     resampler = av.AudioResampler(format="flt", layout="mono", rate=rate)
     with av.open(str(path)) as container:
         if not container.streams.audio:
@@ -144,7 +112,7 @@ def file_audio(path: Path, rate: int = OPUS_RATE) -> Iterator[np.ndarray]:
                 samples = out.to_ndarray().reshape(-1)
                 if out.pts is not None and out.time_base is not None:
                     at = round(float(out.pts * out.time_base) * rate)
-                    if at > written:  # a gap (or a late start): silence
+                    if at > written:
                         yield np.zeros(at - written, np.float32)
                         written = at
                 yield samples
@@ -167,24 +135,17 @@ def encode_jpeg(image: np.ndarray, max_width: int = FRAME_MAX_WIDTH) -> bytes:
 def file_frames(
     path: Path, interval_s: float = FRAME_INTERVAL_S, until: float | None = None
 ) -> Iterator[tuple[float, bytes]]:
-    """What the browser's frame ticker captures: at each ``k * interval_s`` (up to ``until``,
-    else the last frame), the latest video frame shown by then, as ``(t, JPEG)``.
-
-    Screen recordings often store a frame only when the screen changes; the browser still sends
-    one every tick, so a frame is repeated until the next one is shown. Ticks start at the first
-    frame shown: nothing is sent for a time before the video has a picture.
-    """
     with av.open(str(path)) as container:
-        if not container.streams.video:
+        stream = first_video_stream(container)
+        if stream is None:
             return
-        stream = container.streams.video[0]
         stream.thread_type = "AUTO"
         due, last_t = 0.0, 0.0
         latest: bytes | None = None
         for frame in container.decode(stream):
             if frame.pts is None:
                 continue
-            t = float(frame.pts * stream.time_base)  # the audio's clock (``file_audio``)
+            t = float(frame.pts * stream.time_base)
             if t < 0:
                 continue
             while latest is not None and due + 1e-6 < t and (until is None or due <= until):
@@ -193,15 +154,12 @@ def file_frames(
             if until is not None and t > until:
                 break
             if latest is None:
-                due = math.ceil(t / interval_s - 1e-6) * interval_s  # the first tick showing it
+                due = math.ceil(t / interval_s - 1e-6) * interval_s
             latest, last_t = encode_jpeg(frame.to_ndarray(format="bgr24")), t
         end = last_t if until is None else until
         while latest is not None and due <= end + 1e-6:
             yield due, latest
             due += interval_s
-
-
-# --- Replay -----------------------------------------------------------------------------------
 
 
 @dataclass
@@ -212,16 +170,14 @@ class ReplayReport:
     frames: int
     status: str = "unknown"
     error: str | None = None
-    # Seconds after recording started that each event type first arrived (wall clock, scaled
-    # back to session time when sped up).
     first: dict[str, float] = field(default_factory=dict)
-    sections_live: int = 0  # notes sections written before /end (live notes_updated)
+    sections_live: int = 0
     promoted: list[str] = field(default_factory=list)
     notes_to_done_s: float | None = None
     cost_usd: float | None = None
     cost_after_notes_usd: float | None = None
     calls: int = 0
-    calls_after_notes: dict[str, int] = field(default_factory=dict)  # by stage
+    calls_after_notes: dict[str, int] = field(default_factory=dict)
 
     def lines(self) -> list[str]:
         def at(kind: str) -> str:
@@ -257,9 +213,8 @@ async def replay(
     timeout_s: float = 1800.0,
     log=print,
 ) -> ReplayReport:
-    """Play ``file`` into the live API at ``base_url`` and follow it until done or failed."""
     try:
-        import httpx  # a dev dependency: this is a dev tool, and the encoding helpers don't need it
+        import httpx
     except ImportError as exc:
         raise RuntimeError(
             "iris replay-live needs the dev dependencies: run it with `uv run`"
@@ -279,7 +234,7 @@ async def replay(
         loop = asyncio.get_running_loop()
         t0 = loop.time()
 
-        def now() -> float:  # session seconds since recording started
+        def session_seconds() -> float:
             return (loop.time() - t0) * speed
 
         async def until(t: float) -> None:
@@ -303,9 +258,11 @@ async def replay(
                 await post(f"audio?seq={seq}", data)
 
         async def send_frames() -> None:
-            with ThreadPoolExecutor(1) as pool:  # one thread: the decoder is not shared
-                frames = file_frames(file, until=webm.duration_s)  # stops with the audio
-                while (item := await loop.run_in_executor(pool, next, frames, None)) is not None:
+            with ThreadPoolExecutor(1) as frame_decoder_thread:
+                frames = file_frames(file, until=webm.duration_s)
+                while (
+                    item := await loop.run_in_executor(frame_decoder_thread, next, frames, None)
+                ) is not None:
                     t, jpeg = item
                     await until(t)
                     await post(f"frame?t={t:.3f}&share=1", jpeg)
@@ -321,7 +278,7 @@ async def replay(
                         continue
                     event = json.loads(line[5:])
                     kind, data = event["type"], event.get("data") or {}
-                    report.first.setdefault(kind, now())
+                    report.first.setdefault(kind, session_seconds())
                     if kind == "notes_updated" and data.get("live") and not notes_at:
                         report.sections_live = data.get("completed_parts", report.sections_live)
                     if kind == "stage_finished" and data.get("promoted"):
@@ -337,7 +294,7 @@ async def replay(
             await until(webm.duration_s)
             notes_wall = datetime.now(UTC)
             notes_at.append(loop.time())
-            log(f"  make notes at {now():.1f} s")
+            log(f"  make notes at {session_seconds():.1f} s")
             r = await client.post(f"{api}/live/{sid}/end", json={"audio_chunks": len(chunks)})
             r.raise_for_status()
             await asyncio.wait_for(done.wait(), timeout_s)
@@ -347,7 +304,6 @@ async def replay(
             await asyncio.gather(follower, return_exceptions=True)
 
         session = (await client.get(f"{api}/sessions/{sid}")).json()
-        # Only our own message: the raw error is in the backend log and `iris show <id>`.
         report.error = session.get("failure_message")
         usage = (await client.get(f"{api}/sessions/{sid}/usage")).json()
         records = usage.get("records", [])
