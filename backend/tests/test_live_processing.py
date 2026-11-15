@@ -12,7 +12,8 @@ from iris.live import Lane, LiveProcessor, LiveRegistry, LiveTimeline
 from iris.live.lane import LiveLane
 from iris.main import create_app
 from iris.models import FrameRef, Moment, MomentContent, TranscriptSegment
-from tests.builders import post_audio, post_frame, stage_ctx, start
+from tests.builders import stage_ctx
+from tests.live_api import post_audio, post_frame, start_recording
 from tests.media import make_webm, solid_jpeg, split
 from tests.waiting import settle, wait_for_status
 
@@ -370,7 +371,7 @@ def registry(client: TestClient) -> LiveRegistry:
 def test_recording_wakes_lanes_and_stop_flushes_them_before_processing(
     client: TestClient, lanes: dict[Lane, FakeLane], recording: bytes
 ):
-    sid = start(client)
+    sid = start_recording(client)
     processor = registry(client).get(sid)
     assert processor is not None
     chunks = split(recording)
@@ -394,7 +395,7 @@ def test_recording_wakes_lanes_and_stop_flushes_them_before_processing(
 def test_first_chunk_after_a_restart_starts_a_processor(
     client: TestClient, lanes: dict[Lane, FakeLane]
 ):
-    sid = start(client)
+    sid = start_recording(client)
     old = registry(client).get(sid)
     assert old is not None
     registry(client)._processors.clear()
@@ -407,7 +408,7 @@ def test_first_chunk_after_a_restart_starts_a_processor(
 def test_deleting_a_recording_session_stops_its_processor(
     client: TestClient, lanes: dict[Lane, FakeLane]
 ):
-    sid = start(client)
+    sid = start_recording(client)
     processor = registry(client).get(sid)
     assert processor is not None
     assert client.delete(f"/api/sessions/{sid}").status_code == 204
@@ -418,7 +419,7 @@ def test_deleting_a_recording_session_stops_its_processor(
 def test_delete_refuses_live_input_before_stopping_processing(
     client: TestClient, lanes: dict[Lane, FakeLane], monkeypatch
 ):
-    sid = start(client)
+    sid = start_recording(client)
     live = registry(client)
     store = client.app.state.store  # type: ignore[attr-defined]
     rows_while_cancelling: list[object] = []
@@ -439,7 +440,7 @@ def test_delete_refuses_live_input_before_stopping_processing(
 def test_live_processing_can_be_turned_off(tmp_path: Path, recording: bytes):
     settings = Settings(data_dir=tmp_path / "data", openai_api_key=None, live_processing=False)
     with TestClient(create_app(settings)) as client:
-        sid = start(client)
+        sid = start_recording(client)
         assert registry(client).get(sid) is None
         assert post_audio(client, sid, 0, split(recording)[0]) == 204
         assert registry(client).get(sid) is None

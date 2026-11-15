@@ -7,10 +7,9 @@ from openai import AsyncOpenAI
 
 from iris.llm import client as llm_client
 from iris.pipeline.stages import render, select, synthesize
-from tests.builders import section
+from tests.builders import SPOKEN, section
 
 SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 10"><rect width="20"/></svg>'
-SPOKEN = "Ship the prototype. Alex will test it."
 
 
 def parsed_response(result, refusal: str | None = None) -> SimpleNamespace:

@@ -33,12 +33,14 @@ from iris.models import (
 from iris.pipeline import PLAN, STAGES
 from iris.pipeline.context import StageContext
 from iris.store.layout import SessionPaths, read_model, session_paths
-from tests.builders import post_audio, post_frame, stage_ctx, start, stop
+from tests.builders import stage_ctx
 from tests.fakes import PipelineOpenAI, install_client
+from tests.live_api import post_audio, post_frame, start_recording, stop_recording
 from tests.media import WEBM_RATE, image_bytes, slide, tone, wav_seconds
 from tests.waiting import wait_for_done
 
 SECONDS = 120
+LANES_QUIET_S = 1.0
 SCREENS = [
     (0, "Agenda", "rect"),
     (30, "Results", "circle"),
@@ -141,7 +143,7 @@ def wait_until_caught_up(client: TestClient, sid: str, kinds: set[str], timeout:
         assert time.monotonic() < deadline, f"the live lanes did not catch up: {seen}, {n} calls"
         if n != last:
             last, quiet_since = n, time.monotonic()
-        if kinds <= seen and time.monotonic() - quiet_since > 1.0:
+        if kinds <= seen and time.monotonic() - quiet_since > LANES_QUIET_S:
             return
         time.sleep(0.05)
 
@@ -184,7 +186,7 @@ def test_a_live_session_is_finished_at_stop_with_only_the_open_work_left(
 ):
     client = app_client
     draft_at_promotion = draft_seen_at(monkeypatch, Stage.TRANSCRIBE)
-    sid = start(client)
+    sid = start_recording(client)
     processor = client.app.state.runner.live.get(sid)  # type: ignore[attr-defined]
     timeline: LiveTimeline = processor.timeline
     root = client.app.state.settings.sessions_dir / sid  # type: ignore[attr-defined]
@@ -308,7 +310,7 @@ def test_a_screen_shared_for_part_of_a_recording_is_placed_only_there(
     app_client: TestClient, recording
 ):
     client = app_client
-    sid = start(client)
+    sid = start_recording(client)
     timeline: LiveTimeline = client.app.state.runner.live.get(sid).timeline  # type: ignore[attr-defined]
     root = client.app.state.settings.sessions_dir / sid  # type: ignore[attr-defined]
     queue = [(t, 1, "audio", seq, data) for seq, (t, data) in enumerate(recording)]
@@ -345,7 +347,7 @@ def test_an_audio_failure_runs_the_full_plan(app_client: TestClient, recording, 
         raise RuntimeError("decoder crashed")
 
     monkeypatch.setattr(AudioLane, "run", broken)
-    sid = start(client)
+    sid = start_recording(client)
     record_session(client, sid, recording[:6])
     wait_until_caught_up(client, sid, {"moment_found"})
     assert calls(client, sid) == []
@@ -367,7 +369,7 @@ def test_a_skipped_frame_promotes_the_transcript_and_runs_from_detect(
 ):
     client = app_client
     draft_at_detect = draft_seen_at(monkeypatch, Stage.DETECT)
-    sid = start(client)
+    sid = start_recording(client)
     processor = client.app.state.runner.live.get(sid)  # type: ignore[attr-defined]
     timeline: LiveTimeline = processor.timeline
     root = client.app.state.settings.sessions_dir / sid  # type: ignore[attr-defined]
@@ -400,11 +402,11 @@ def test_a_skipped_frame_promotes_the_transcript_and_runs_from_detect(
 def test_notes_made_after_a_restart_keep_the_live_work(tmp_path: Path, fake: FakeOpenAI, recording):
     settings = live_settings(tmp_path)
     with TestClient(create_app(settings)) as client:
-        sid = start(client)
+        sid = start_recording(client)
         before_restart: LiveTimeline = client.app.state.runner.live.get(sid).timeline  # type: ignore[attr-defined]
         record_session(client, sid, recording)
         wait_until_caught_up(client, sid, LIVE_EVENTS)
-        assert stop(client, sid) == 200
+        assert stop_recording(client, sid) == 200
         before = calls(client, sid)
     root = settings.sessions_dir / sid
     windows_before = windows(root)
@@ -467,9 +469,9 @@ def test_notes_made_after_a_restart_with_live_processing_off_run_the_full_plan(
 ):
     settings = live_settings(tmp_path, live_processing=False)
     with TestClient(create_app(settings)) as client:
-        sid = start(client)
+        sid = start_recording(client)
         record_session(client, sid, recording[:4])
-        assert stop(client, sid) == 200
+        assert stop_recording(client, sid) == 200
         assert calls(client, sid) == []
     with TestClient(create_app(settings)) as client:
         r = client.post(f"/api/live/{sid}/end", json={"audio_chunks": 4})
@@ -489,11 +491,11 @@ def test_notes_made_after_a_restart_without_the_first_chunk_fail_as_before(
 ):
     settings = live_settings(tmp_path)
     with TestClient(create_app(settings)) as client:
-        sid = start(client)
+        sid = start_recording(client)
         for seq, (_, data) in enumerate(recording[:4]):
             if seq:
                 assert post_audio(client, sid, seq, data) == 204
-        assert stop(client, sid) == 200
+        assert stop_recording(client, sid) == 200
     with TestClient(create_app(settings)) as client:
         r = client.post(f"/api/live/{sid}/end", json={"allow_gaps": True})
         assert r.status_code == 200
@@ -512,11 +514,11 @@ def test_notes_asked_for_when_the_lanes_cannot_start_leave_the_session_as_it_was
 ):
     settings = live_settings(tmp_path)
     with TestClient(create_app(settings)) as client:
-        sid = start(client)
+        sid = start_recording(client)
         for seq, (_, data) in enumerate(recording[:2]):
             assert post_audio(client, sid, seq, data) == 204
         if status == "stopped":
-            assert stop(client, sid) == 200
+            assert stop_recording(client, sid) == 200
     with TestClient(create_app(settings), raise_server_exceptions=False) as client:
         runner = client.app.state.runner  # type: ignore[attr-defined]
 

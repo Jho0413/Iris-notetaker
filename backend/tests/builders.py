@@ -3,7 +3,6 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-from fastapi.testclient import TestClient
 from markdown_it import MarkdownIt
 
 from iris.config import Settings
@@ -35,18 +34,24 @@ def stage_ctx(
     settings: Settings | None = None,
     **overrides,
 ) -> StageContext:
+    if settings is not None and overrides:
+        raise TypeError("pass settings or setting overrides, not both")
     ctx = StageContext(
         session_id=root,
         source=SourceKind.BROWSER_LIVE if live else SourceKind.UPLOAD,
         paths=SessionPaths(tmp_path / root).ensure(),
-        settings=settings or Settings(data_dir=tmp_path, **overrides),
+        settings=settings
+        or Settings(**{"data_dir": tmp_path, "openai_api_key": None, **overrides}),
     )
     if events is not None:
         ctx.emit = lambda kind, data: events.append((kind, data))
     return ctx
 
 
-def section(ids=(), text="## Decisions\n\nShip the prototype. Alex will test it."):
+SPOKEN = "Ship the prototype. Alex will test it."
+
+
+def section(ids=(), text=f"## Decisions\n\n{SPOKEN}"):
     return write.WrittenSection(
         session_type=SessionType.MEETING,
         title="Prototype review",
@@ -136,19 +141,3 @@ def markdown_images(markdown: str) -> list:
         for child in (block.children or [])
         if child.type == "image"
     ]
-
-
-def start(client: TestClient) -> str:
-    return client.post("/api/live", json={"title": "standup"}).json()["id"]
-
-
-def post_audio(client: TestClient, sid: str, seq: int, data: bytes) -> int:
-    return client.post(f"/api/live/{sid}/audio?seq={seq}", content=data).status_code
-
-
-def post_frame(client: TestClient, sid: str, t: float, data: bytes, share: int = 1) -> int:
-    return client.post(f"/api/live/{sid}/frame?t={t}&share={share}", content=data).status_code
-
-
-def stop(client: TestClient, sid: str) -> int:
-    return client.post(f"/api/live/{sid}/stop").status_code

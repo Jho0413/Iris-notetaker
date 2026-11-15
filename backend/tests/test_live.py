@@ -41,8 +41,9 @@ from iris.sources.browser_live import (
     store_frame,
 )
 from iris.store.layout import SessionPaths, read_model, session_paths
-from tests.builders import post_audio, post_frame, stage_ctx, start, stop
+from tests.builders import stage_ctx
 from tests.fakes import PipelineOpenAI, install_get_openai
+from tests.live_api import post_audio, post_frame, start_recording, stop_recording
 from tests.media import (
     COLOURS,
     TONE_SECONDS,
@@ -185,8 +186,8 @@ def test_unreadable_audio_raises(paths: SessionPaths):
 
 
 async def test_ingest_requires_audio_and_its_first_chunk(tmp_path: Path, webm: bytes):
-    paths = SessionPaths(tmp_path / "s1").ensure()
     ctx = stage_ctx(tmp_path, live=True)
+    paths = ctx.paths
     with pytest.raises(UserFacingError, match="no audio was recorded") as raised:
         await BrowserLiveSource().ingest(ctx)
     assert raised.value.message == LIVE_WITHOUT_AUDIO
@@ -305,7 +306,7 @@ def test_fit_keeps_aspect():
 
 
 def test_live_input_is_validated(client: TestClient):
-    sid = start(client)
+    sid = start_recording(client)
     assert post_audio(client, sid, 0, b"not webm") == 415
     assert post_audio(client, sid, -1, b"x") == 422
     assert post_audio(client, sid, 1, b"") == 400
@@ -319,7 +320,7 @@ def test_live_input_is_validated(client: TestClient):
 
 
 def test_frames_need_their_share(client: TestClient, settings: Settings):
-    sid = start(client)
+    sid = start_recording(client)
     for share in ("0", "-1", "10000", "x"):
         assert post_frame(client, sid, 1.0, solid_jpeg(COLOURS[0]), share) == 422  # type: ignore[arg-type]
     url = f"/api/live/{sid}/frame?t=1"
@@ -330,7 +331,7 @@ def test_frames_need_their_share(client: TestClient, settings: Settings):
 
 
 def test_repeated_chunk_with_other_content_conflicts(client: TestClient, webm: bytes):
-    sid = start(client)
+    sid = start_recording(client)
     chunks = split(webm)
     assert post_audio(client, sid, 1, chunks[1]) == 204
     assert post_audio(client, sid, 1, chunks[1]) == 204
@@ -338,7 +339,7 @@ def test_repeated_chunk_with_other_content_conflicts(client: TestClient, webm: b
 
 
 def test_end_waits_for_missing_chunks_then_processes(client: TestClient, webm: bytes):
-    sid = start(client)
+    sid = start_recording(client)
     chunks = split(webm)
     for seq in range(1, len(chunks)):
         assert post_audio(client, sid, seq, chunks[seq]) == 204
@@ -357,7 +358,7 @@ def test_end_waits_for_missing_chunks_then_processes(client: TestClient, webm: b
 
 
 def test_end_with_allowed_gaps(client: TestClient, webm: bytes, settings: Settings):
-    sid = start(client)
+    sid = start_recording(client)
     chunks = split(webm, 2000)
     for seq in range(len(chunks)):
         if seq != 3:
@@ -377,7 +378,7 @@ def test_end_with_allowed_gaps(client: TestClient, webm: bytes, settings: Settin
 
 
 def test_stop_keeps_the_recording_without_making_notes(client: TestClient, webm: bytes):
-    sid = start(client)
+    sid = start_recording(client)
     chunks = split(webm)
     assert post_audio(client, sid, 0, chunks[0]) == 204
     r = client.post(f"/api/live/{sid}/stop")
@@ -391,74 +392,74 @@ def test_stop_keeps_the_recording_without_making_notes(client: TestClient, webm:
 
 
 def test_stopping_again_is_a_no_op(client: TestClient):
-    sid = start(client)
-    assert stop(client, sid) == 200
+    sid = start_recording(client)
+    assert stop_recording(client, sid) == 200
     r = client.post(f"/api/live/{sid}/stop")
     assert r.status_code == 200
     assert r.json()["status"] == "stopped"
 
 
 def test_stop_is_announced_to_open_pages(client: TestClient):
-    sid = start(client)
-    stop(client, sid)
+    sid = start_recording(client)
+    stop_recording(client, sid)
     bus = client.app.state.bus  # type: ignore[attr-defined]
     statuses = [e.data["status"] for e in bus.history(sid) if e.type == "status"]
     assert statuses == ["stopped"]
 
 
 def test_make_notes_from_a_stopped_recording(client: TestClient, webm: bytes, settings: Settings):
-    sid = start(client)
+    sid = start_recording(client)
     chunks = split(webm)
     for seq, chunk in enumerate(chunks):
         post_audio(client, sid, seq, chunk)
-    stop(client, sid)
+    stop_recording(client, sid)
     r = client.post(f"/api/live/{sid}/end", json={"allow_gaps": True})
     assert r.status_code == 200
     assert r.json()["status"] == "processing"
-    assert stop(client, sid) == 409
+    assert stop_recording(client, sid) == 409
     wait_for_status(client, sid, {"done", "failed"})
     audio = settings.sessions_dir / sid / "audio.wav"
     assert len(read_16k_wav(audio)) / 16_000 == pytest.approx(WEBM_SECONDS, abs=0.1)
 
 
 def test_discard_a_stopped_recording(client: TestClient, settings: Settings):
-    sid = start(client)
-    stop(client, sid)
+    sid = start_recording(client)
+    stop_recording(client, sid)
     assert client.delete(f"/api/sessions/{sid}").status_code == 204
     assert client.get(f"/api/sessions/{sid}").status_code == 404
     assert not (settings.sessions_dir / sid).exists()
-    assert stop(client, sid) == 404
+    assert stop_recording(client, sid) == 404
 
 
 def test_only_a_live_recording_can_be_stopped(client: TestClient):
-    assert stop(client, "nope") == 404
+    assert stop_recording(client, "nope") == 404
     upload = client.post("/api/sessions", files={"file": ("talk.mp4", b"not really a video")})
     sid = upload.json()["id"]
-    assert stop(client, sid) == 409
+    assert stop_recording(client, sid) == 409
     wait_for_status(client, sid, {"failed"})
-    assert stop(client, sid) == 409
-    live = start(client)
+    assert stop_recording(client, sid) == 409
+    live = start_recording(client)
     client.post(f"/api/live/{live}/end")
-    assert stop(client, live) == 409
+    assert stop_recording(client, live) == 409
     wait_for_status(client, live, {"done", "failed"})
-    assert stop(client, live) == 409
+    assert stop_recording(client, live) == 409
 
 
 def test_stop_keeps_live_processing_for_making_notes(client: TestClient):
-    sid = start(client)
+    sid = start_recording(client)
     live = client.app.state.runner.live  # type: ignore[attr-defined]
     processor = live.get(sid)
     assert processor is not None
-    stop(client, sid)
+    stop_recording(client, sid)
     assert live.get(sid) is processor
 
 
 def test_make_notes_after_an_engine_restart(settings: Settings, webm: bytes):
     with TestClient(create_app(settings)) as client:
-        sid = start(client)
+        sid = start_recording(client)
         for seq, chunk in enumerate(split(webm)):
             post_audio(client, sid, seq, chunk)
-        stop(client, sid)
+        stop_recording(client, sid)
     with TestClient(create_app(settings)) as client:
         assert client.get(f"/api/sessions/{sid}").json()["status"] == "stopped"
         assert client.app.state.runner.live.get(sid) is None  # type: ignore[attr-defined]
@@ -474,7 +475,7 @@ def test_live_session_produces_notes_like_an_upload(
     client: TestClient, webm: bytes, settings: Settings, monkeypatch
 ):
     install_get_openai(monkeypatch, PipelineOpenAI(), write, select, transcribe, render, audio_lane)
-    sid = start(client)
+    sid = start_recording(client)
     chunks = split(webm)
     order = list(range(len(chunks)))
     random.Random(1).shuffle(order)

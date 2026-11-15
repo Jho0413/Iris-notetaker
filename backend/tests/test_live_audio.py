@@ -34,9 +34,8 @@ from iris.store.layout import SessionPaths, read_model, write_model
 from tests.api_errors import connection_error, status_error
 from tests.builders import stage_ctx
 from tests.fakes import fake_openai, install_client
-from tests.media import split, tone, wav_seconds
+from tests.media import SPEECH_RATE, split, tone, wav_seconds
 
-RATE = 16_000
 SECONDS = 12
 WORDS = [
     (0.2, 0.9),
@@ -193,7 +192,7 @@ def finalized(tmp_path: Path, chunks: list[bytes], skip: set[int] = frozenset())
     for seq in range(len(chunks)):
         if seq not in skip:
             store_audio_chunk(ref, seq, chunks[seq])
-    finalize_audio(audio_chunks(ref), ref.audio, RATE)
+    finalize_audio(audio_chunks(ref), ref.audio, SPEECH_RATE)
     with wave.open(str(ref.audio)) as w:
         return np.frombuffer(w.readframes(w.getnframes()), np.int16)
 
@@ -221,7 +220,7 @@ async def test_a_missing_chunk_is_waited_for_then_skipped_as_silence(
     assert not run.timeline.ending
     await run.stop()
     assert np.array_equal(live_pcm(paths), finalized(tmp_path, chunks, skip=lost))
-    assert len(live_pcm(paths)) / RATE == pytest.approx(SECONDS, abs=0.1)
+    assert len(live_pcm(paths)) / SPEECH_RATE == pytest.approx(SECONDS, abs=0.1)
 
 
 async def test_a_chunk_arriving_within_the_wait_is_used(
@@ -310,13 +309,13 @@ async def test_windows_are_cut_in_pauses_and_cover_the_audio(
     windows = run.windows()
     assert windows[0][0] == 0
     assert all(a[1] == b[0] for a, b in zip(windows, windows[1:], strict=False))
-    assert windows[-1][1] == pytest.approx(len(live_pcm(paths)) / RATE, abs=0.001)
+    assert windows[-1][1] == pytest.approx(len(live_pcm(paths)) / SPEECH_RATE, abs=0.001)
     for start, end in windows[:-1]:
         assert 1.0 - 1e-3 <= end - start <= 2.5 + 1e-3
         assert in_silence(end), f"cut at {end:.3f}s is inside a word"
     pcm = live_pcm(paths)
     for _, end in windows[:-1]:
-        i = round(end * RATE)
+        i = round(end * SPEECH_RATE)
         assert np.abs(pcm[i - 800 : i + 800]).max() < 1000
     assert [c["seconds"] for c in fake.calls] == pytest.approx(
         [e - s for s, e in windows], abs=1e-3
@@ -324,12 +323,12 @@ async def test_windows_are_cut_in_pauses_and_cover_the_audio(
 
 
 def test_window_cut_prefers_the_quietest_point_else_the_maximum():
-    tone = (8000 * np.sin(np.arange(RATE * 4) * 0.2)).astype(np.int16)
+    tone = (8000 * np.sin(np.arange(SPEECH_RATE * 4) * 0.2)).astype(np.int16)
     gap = tone.copy()
-    gap[int(1.6 * RATE) : int(2.1 * RATE)] = 0
-    cut = window_cut(gap, RATE, RATE, int(3 * RATE)) / RATE
+    gap[int(1.6 * SPEECH_RATE) : int(2.1 * SPEECH_RATE)] = 0
+    cut = window_cut(gap, SPEECH_RATE, SPEECH_RATE, int(3 * SPEECH_RATE)) / SPEECH_RATE
     assert 1.6 < cut < 2.1
-    assert window_cut(tone, RATE, RATE, int(3 * RATE)) == 3 * RATE
+    assert window_cut(tone, SPEECH_RATE, SPEECH_RATE, int(3 * SPEECH_RATE)) == 3 * SPEECH_RATE
 
 
 async def test_transcript_commits_while_recording_and_stop_flushes_the_rest(
@@ -352,12 +351,12 @@ async def test_transcript_commits_while_recording_and_stop_flushes_the_rest(
     await run.until(lambda: run.timeline.transcribed_to > 0)
     await reached(decoded_half)
     samples = len(live_pcm(paths))
-    decoded = samples / RATE
+    decoded = samples / SPEECH_RATE
     async with asyncio.timeout(10):
         while (samples, None) not in decisions:
             await asyncio.sleep(0.01)
     last_cut = max(cut for _, cut in decisions if cut is not None)
-    await run.until(lambda: run.timeline.transcribed_to >= last_cut / RATE - 1e-6)
+    await run.until(lambda: run.timeline.transcribed_to >= last_cut / SPEECH_RATE - 1e-6)
     early = run.timeline.transcribed_to
     assert decoded - early < 2.5 + CONFIRM_S
     assert run.chunk_events()
@@ -365,7 +364,7 @@ async def test_transcript_commits_while_recording_and_stop_flushes_the_rest(
 
     run.store(chunks, range(half, len(chunks)))
     await run.stop()
-    duration = len(live_pcm(paths)) / RATE
+    duration = len(live_pcm(paths)) / SPEECH_RATE
     assert run.timeline.transcribed_to == pytest.approx(duration, abs=1e-3)
     assert run.timeline.transcribed_to > early
     n = len(run.windows())
@@ -388,8 +387,8 @@ async def test_windows_commit_in_order_when_transcription_finishes_out_of_order(
     ref = Run(ref_paths, s, FakeTranscriber(), monkeypatch)
     ref.store(chunks, range(len(chunks)))
     await ref.stop()
-    first_end = round(ref.windows()[0][1] * RATE)
-    held = hashlib.sha1(encode_wav(live_pcm(ref_paths)[:first_end], RATE)).hexdigest()
+    first_end = round(ref.windows()[0][1] * SPEECH_RATE)
+    held = hashlib.sha1(encode_wav(live_pcm(ref_paths)[:first_end], SPEECH_RATE)).hexdigest()
 
     later_done = asyncio.Event()
 
@@ -767,15 +766,15 @@ async def test_at_stop_a_very_short_tail_joins_the_last_window(
 ):
     s = settings(tmp_path)
     lane = AudioLane(stage_ctx(tmp_path, live=True, settings=s), LiveTimeline())
-    speech = (8000 * np.sin(np.arange(RATE * 4) * 0.2)).astype("<i2")
+    speech = (8000 * np.sin(np.arange(SPEECH_RATE * 4) * 0.2)).astype("<i2")
     paths.live_pcm.parent.mkdir(parents=True, exist_ok=True)
     speech.tofile(paths.live_pcm)
-    tail = int(2.5 * RATE) + RATE // 2
+    tail = int(2.5 * SPEECH_RATE) + SPEECH_RATE // 2
     assert await lane._next_cut(0, tail, final=False) is None
     assert await lane._next_cut(0, tail, final=True) == tail
-    longer = int(2.5 * RATE) + int(1.5 * RATE)
-    assert await lane._next_cut(0, longer, final=False) == int(2.5 * RATE)
-    assert await lane._next_cut(0, longer, final=True) == int(2.5 * RATE)
+    longer = int(2.5 * SPEECH_RATE) + int(1.5 * SPEECH_RATE)
+    assert await lane._next_cut(0, longer, final=False) == int(2.5 * SPEECH_RATE)
+    assert await lane._next_cut(0, longer, final=True) == int(2.5 * SPEECH_RATE)
 
 
 async def test_a_cached_window_just_past_its_bounds_still_commits(
@@ -849,7 +848,7 @@ async def test_a_window_without_speech_is_not_sent_and_the_transcript_still_move
     assert all(w.segments == [] and w.language is None for w in silent)
     assert len(fake.calls) == len(windows) - len(silent)
     assert run.chunk_events() == list(range(len(windows)))
-    assert run.timeline.transcribed_to == pytest.approx(len(live_pcm(paths)) / RATE)
+    assert run.timeline.transcribed_to == pytest.approx(len(live_pcm(paths)) / SPEECH_RATE)
 
 
 async def test_after_a_window_without_text_the_next_is_sent_without_a_prompt(

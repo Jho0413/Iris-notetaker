@@ -32,9 +32,11 @@ from iris.pipeline.stages import write
 from iris.store.layout import read_model, session_paths, write_model
 from tests.api_errors import connection_error, status_error
 from tests.builders import stage_ctx
-from tests.waiting import eventually
+from tests.waiting import eventually, wait_until_idle
 
 BUDGET = 2000
+LONGER_THAN_THE_TEST_S = 60.0
+TIME_FOR_ANOTHER_RETRY_S = 1.0
 WORDS = "the derivative measures how fast the function changes at a point "
 
 
@@ -398,7 +400,7 @@ async def test_a_failed_call_is_retried_after_the_retry_delay(tmp_path, notes, m
 
 
 async def test_a_temporary_error_is_retried_within_the_call(tmp_path, notes, monkeypatch):
-    monkeypatch.setattr(draft, "RETRY_DELAY_S", 60.0)
+    monkeypatch.setattr(draft, "RETRY_DELAY_S", LONGER_THAN_THE_TEST_S)
     ctx, events = make_ctx(tmp_path)
     tl = audio_only()
     notes.fail_next, notes.error = 2, connection_error()
@@ -476,7 +478,7 @@ async def test_a_model_that_always_fails_validation_is_called_at_most_twice_per_
     closed = draft.plan(tl.transcript(), tl.selection(), BUDGET, tl.horizon)
     assert len(closed) >= 2
     await eventually(lambda: notes.calls == draft.MAX_ATTEMPTS * len(closed))
-    await idle(1.0)
+    await idle(TIME_FOR_ANOTHER_RETRY_S)
     assert notes.calls == draft.MAX_ATTEMPTS * len(closed)
     payloads = [json.dumps(p, sort_keys=True) for p in notes.payloads]
     assert len(set(payloads)) == len(closed)
@@ -629,25 +631,18 @@ def test_a_run_that_selects_again_never_assembles_a_draft_of_the_old_selection(
         monkeypatch.setitem(pipeline.STAGES, stage, nothing)
     monkeypatch.setitem(pipeline.STAGES, Stage.SELECT, select)
     monkeypatch.setitem(pipeline.STAGES, Stage.WRITE, write_stage)
-    runner = client.app.state.runner
-
-    def finish() -> None:
-        deadline = time.monotonic() + 5
-        while runner.is_running(session.id):
-            assert time.monotonic() < deadline, "the run never finished"
-            time.sleep(0.02)
 
     assert client.post(f"/api/sessions/{session.id}/run").status_code == 200
     try:
         assert selecting.wait(5)
     finally:
         release.set()
-    finish()
+    wait_until_idle(client, session.id, 5.0)
     assert drafts_seen_by_select == [False] and drafts_seen_by_write == [False]
 
     write_model(paths.notes_draft, old)
     assert client.post(f"/api/sessions/{session.id}/run?from_stage=write").status_code == 200
-    finish()
+    wait_until_idle(client, session.id, 5.0)
     assert drafts_seen_by_write == [False, True]
 
 
