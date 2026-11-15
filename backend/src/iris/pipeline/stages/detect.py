@@ -61,9 +61,12 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from iris.media.images import grey, shrink_to_width, size_within_width
 from iris.models import Box, Build, EventType, FrameIndex, FrameRef, Moment, Moments
 from iris.pipeline.context import StageContext
 from iris.store.layout import read_model, write_model
+
+SHARPNESS_MAX_WIDTH = 640
 
 
 @dataclass(frozen=True)
@@ -240,12 +243,11 @@ class MomentDetector:
     # --- frame processing ----------------------------------------------------------------------
 
     def _prepare(self, image: np.ndarray) -> np.ndarray:
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image
+        gray = grey(image)
         h, w = gray.shape
         self._frame_size = (w, h)
         if self._work_size is None:
-            ww = min(self.p.work_width, w)
-            self._work_size = (ww, max(1, round(h * ww / w)))
+            self._work_size = size_within_width(w, h, self.p.work_width)
         if (w, h) != self._work_size:
             gray = cv2.resize(gray, self._work_size, interpolation=cv2.INTER_AREA)
         k = self.p.blur_ksize
@@ -472,10 +474,7 @@ def _edges(small: np.ndarray) -> np.ndarray:
 
 
 def _sharpness(image: np.ndarray) -> float:
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image
-    h, w = gray.shape
-    if w > 640:
-        gray = cv2.resize(gray, (640, max(1, round(h * 640 / w))), interpolation=cv2.INTER_AREA)
+    gray = shrink_to_width(grey(image), SHARPNESS_MAX_WIDTH)
     return float(cv2.Laplacian(gray, cv2.CV_64F).var())
 
 

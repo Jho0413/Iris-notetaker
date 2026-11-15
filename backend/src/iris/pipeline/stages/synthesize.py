@@ -16,6 +16,7 @@ from iris import notes_format
 from iris.llm import structured, usage
 from iris.llm.errors import describe
 from iris.markdown import MATH
+from iris.media.images import grey
 from iris.models import (
     Moment,
     Moments,
@@ -138,14 +139,14 @@ class Fingerprint:
 
 
 def fingerprint(image: np.ndarray) -> Fingerprint:
-    grey = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image
-    height, width = grey.shape[:2]
-    small = cv2.resize(grey, (32, 32), interpolation=cv2.INTER_AREA).astype(np.float32)
+    grey_image = grey(image)
+    height, width = grey_image.shape[:2]
+    small = cv2.resize(grey_image, (32, 32), interpolation=cv2.INTER_AREA).astype(np.float32)
     low = cv2.dct(small)[:8, :8].flatten()
     median_without_dc = np.median(low[1:])
     bits = low > median_without_dc
     phash = int("".join("1" if b else "0" for b in bits), 2)
-    thumb = cv2.resize(grey, (THUMB_SIZE, THUMB_SIZE), interpolation=cv2.INTER_AREA)
+    thumb = cv2.resize(grey_image, (THUMB_SIZE, THUMB_SIZE), interpolation=cv2.INTER_AREA)
     thumb = cv2.GaussianBlur(thumb, (3, 3), 0).astype(np.float32)
     return Fingerprint(phash, thumb, width / max(height, 1))
 

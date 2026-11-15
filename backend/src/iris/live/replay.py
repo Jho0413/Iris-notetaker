@@ -15,6 +15,7 @@ import cv2
 import numpy as np
 
 from iris.media.container import first_video_stream
+from iris.media.images import shrink_to_width
 
 OPUS_RATE = 48_000
 OPUS_FRAME = 960
@@ -122,10 +123,7 @@ def file_audio(path: Path, rate: int = OPUS_RATE) -> Iterator[np.ndarray]:
 
 
 def encode_jpeg(image: np.ndarray, max_width: int = FRAME_MAX_WIDTH) -> bytes:
-    height, width = image.shape[:2]
-    if width > max_width:
-        size = (max_width, round(height * max_width / width))
-        image = cv2.resize(image, size, interpolation=cv2.INTER_AREA)
+    image = shrink_to_width(image, max_width)
     ok, buf = cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
     if not ok:
         raise ValueError("could not encode a frame")
