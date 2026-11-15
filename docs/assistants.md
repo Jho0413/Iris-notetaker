@@ -25,7 +25,8 @@ flowchart LR
 1. You add Iris to the assistant's settings once: the command to run, and where Iris's data
    folder is.
 2. When the assistant starts, it starts `iris mcp` as its child process and asks which tools it
-   has.
+   has. The two talk over the server's stdin and stdout, so stdout carries only the protocol; the
+   server's logs go to stderr.
 3. When a question needs your notes, the assistant calls a tool. The server reads the files and
    answers.
 
@@ -36,30 +37,36 @@ Iris writes every file whole (to a temporary file, then renamed) and the store i
 
 ## The tools
 
-- **List sessions:** every session, newest first, with its two titles (its name in the library,
-  often "Live session", and the title Iris gave its notes), when it was added to Iris (for an
-  uploaded file, the upload date, not when it was recorded), its kind (lecture, meeting or demo),
-  its status and whether its notes can be read.
+- **List sessions:** every session, newest first, with its two titles, as in the app (its name in
+  the library, which the user may change and which a recording starts as "Live session", and the
+  title Iris gave its notes, once there are notes), when it was added to Iris (for a recording,
+  the day it was recorded; for an uploaded file, the upload date, not when it was recorded), its
+  kind (lecture, meeting or demo), its status and whether its notes can be read.
 - **Get notes:** one session's notes, always the newest version: your edited version, unless
   Iris made the notes again after you edited them, then those new notes. (The app instead shows
   your edits and asks which to keep; an assistant can't ask, and your edits stay in Iris either
   way.) Each figure becomes one line with its id and caption, so no image fills the assistant's
-  context. A session with no notes yet, or a failed one, gets a sentence saying why.
+  context. A session with no notes yet, or a failed one, gets a sentence saying why. Notes that
+  are there but can't be opened get a pointer to the folder's permissions instead, since making
+  them again wouldn't help.
 - **Get figure:** one figure as an image, for a question about what it shows. It is the image the
   notes show, Iris's redraw or a crop of the screen, with a line saying which, so the assistant
   knows how far to trust its exact wording. A redraw that is an SVG, which assistants can't read,
   is drawn as a PNG first, and an image bigger than Claude uses (about 1,568 pixels on the long
-  edge) is scaled down, so no detail it could see is lost and none is sent for nothing. Each image
+  edge) is scaled down, so no detail it could see is lost and none is sent for nothing. One still
+  too large for Claude to accept after that is refused with a sentence saying so. Each image
   takes much more of the assistant's context than text, which is why figures come one at a time,
   when asked for, rather than inside the notes.
 - **Search:** passages from every session that contain all the words searched for, in the passage or
-  the session's titles, best first and a few per session so results span sessions. Notes are split
-  where synthesis splits them, so a box or step is never cut in two, and read as the user sees them:
-  a box's title counts, its formatting commands don't. It matches words, not meaning, and ignores
-  case and whether an accent was typed as one character or two; part of a word counts ("eigen" finds
-  "eigenvalues"). Notes are small, so reading them all on each search is quick; a search index would
-  be one more thing to build and keep up to date. A query is a few words, so a very long one is
-  refused rather than left to tie up the machine.
+  the session's titles, best first (equal matches newest first) and a few per session so results
+  span sessions. A session whose notes can't be read or searched is left out and logged, so one
+  bad session never stops a search of the others. Notes are split where synthesis splits them, so
+  a box or step is never cut in two, and read as the user sees them: a box's title counts, its
+  formatting commands don't. It matches words, not meaning, and ignores case and whether an accent
+  was typed as one character or two; part of a word counts ("eigen" finds "eigenvalues"). Notes
+  are small, so reading them all on each search is quick; a search index would be one more thing
+  to build and keep up to date. A query is a few words, so a very long one is refused rather than
+  left to tie up the machine.
 
 ## Why read-only
 
@@ -69,6 +76,10 @@ The server also tells the assistant to treat the notes as information, never as 
 opens the store read-only and creates no data: a wrong data folder gets a message naming it, not a
 new empty one. (To read the store, SQLite may add its own `-wal` and `-shm` working files beside
 it; they hold no notes, and Iris tidies them up when it next runs.)
+
+Which session's files are read is decided by the id stored in Iris's list of sessions, never by
+the text the assistant sent, and a figure's file is still checked to lie inside its session's
+folder, so no request can reach a file outside the notes.
 
 The assistant chooses the folder the server starts in (often the open project), so the server
 ignores any `.env` file there: only the environment in its config applies.

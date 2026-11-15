@@ -50,6 +50,18 @@ def test_file_serving_rejects_other_dirs(client: TestClient):
     assert client.get(f"/api/sessions/{sid}/files/live/x.webm").status_code == 404
 
 
+def test_a_figure_file_linking_out_of_the_session_is_not_served(
+    client: TestClient, settings: Settings, tmp_path
+):
+    sid = client.post("/api/live", json={}).json()["id"]
+    visuals = session_paths(settings.sessions_dir, sid).ensure().visuals_dir
+    (visuals / "v1.jpg").write_bytes(b"\xff\xd8kept")
+    (tmp_path / "secret.jpg").write_bytes(b"secret")
+    (visuals / "v2.jpg").symlink_to(tmp_path / "secret.jpg")
+    assert client.get(f"/api/sessions/{sid}/files/visuals/v1.jpg").content == b"\xff\xd8kept"
+    assert client.get(f"/api/sessions/{sid}/files/visuals/v2.jpg").status_code == 404
+
+
 def test_a_transcript_not_made_yet_is_not_ready(client: TestClient, settings: Settings):
     sid = client.app.state.store.create("Loops", SourceKind.UPLOAD).id
     session_paths(settings.sessions_dir, sid).ensure()

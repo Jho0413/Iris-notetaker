@@ -1,11 +1,3 @@
-"""SQLite index of sessions. The files under sessions/<id>/ are the source of truth for content;
-this table only tracks what sessions exist and their status.
-
-A failed run stores what the user is told (``failure_message``, ``failure_kind``) apart from what
-it failed on (``error_detail``, ``failed_at``), which is for developers only: it is never part of
-the API's ``Session`` and is read with ``failure_detail`` (``iris show``).
-"""
-
 import sqlite3
 import threading
 import uuid
@@ -31,7 +23,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     source        TEXT NOT NULL,
     status        TEXT NOT NULL,
     current_stage TEXT,
-    error         TEXT,  -- older versions' raw error; migrated to error_detail on open
+    error         TEXT,
     duration_s    REAL,
     created_at    TEXT NOT NULL,
     updated_at    TEXT NOT NULL
@@ -39,8 +31,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE INDEX IF NOT EXISTS sessions_created_at ON sessions (created_at DESC);
 """
 
-# Columns added since the first schema, created on open if missing.
-ADDED_COLUMNS = {
+COLUMNS_ADDED_SINCE_FIRST_SCHEMA = {
     "failure_message": "TEXT",
     "failure_kind": "TEXT",
     "error_detail": "TEXT",
@@ -49,14 +40,13 @@ ADDED_COLUMNS = {
 SESSION_FIELDS = tuple(Session.model_fields)
 FAILURE_MESSAGES = frozenset(get_args(FailureMessage))
 FAILURE_KINDS = frozenset(FailureKind)
+FAILURE_COLUMNS = ("failure_message", "failure_kind", "error_detail", "failed_at", "error")
 
 
 @dataclass(frozen=True)
 class FailureDetail:
-    """What a failed run failed on, for developers (never served by the API)."""
-
     error: str | None
-    at: str | None  # ISO time of the failure; None for sessions failed before it was recorded
+    at: str | None
 
 
 def _now() -> str:
@@ -64,20 +54,8 @@ def _now() -> str:
 
 
 class SessionStore:
-    """Small synchronous wrapper. Single user and tiny queries, so no async driver needed.
-
-    One connection is shared by FastAPI's threadpool (sync routes) and the event loop (the job
-    runner). A sqlite3 connection must not be used by two threads at once: concurrent queries
-    interleave their cursors and return mixed-up rows or raise ``InterfaceError``. Every use of
-    the connection therefore holds ``_lock``. Queries are tiny, so contention is negligible.
-    """
-
     def __init__(self, db_path: Path, *, read_only: bool = False):
-        """``read_only`` opens an existing database for reading only (the MCP server, which runs
-        beside the app): no folder, table or column is made, and any write fails. A missing
-        database then raises ``sqlite3.OperationalError``. (SQLite may still add its own -wal and
-        -shm working files beside the database, to read it.)"""
-        self._lock = threading.RLock()  # re-entrant, so a locked method may call another
+        self._one_query_at_a_time = threading.RLock()
         if read_only:
             target = f"{db_path.resolve().as_uri()}?mode=ro"
         else:
@@ -87,17 +65,15 @@ class SessionStore:
         self._conn.row_factory = sqlite3.Row
         if read_only:
             return
-        with self._lock:
+        with self._one_query_at_a_time:
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.executescript(SCHEMA)
             self._migrate()
 
     def _migrate(self) -> None:
-        """Add new columns, and move older versions' raw ``error`` text out of what is served:
-        it becomes the developer-only ``error_detail``, and the user sees the generic message."""
         existing = {row["name"] for row in self._conn.execute("PRAGMA table_info(sessions)")}
         with self._conn:
-            for column, kind in ADDED_COLUMNS.items():
+            for column, kind in COLUMNS_ADDED_SINCE_FIRST_SCHEMA.items():
                 if column not in existing:
                     self._conn.execute(f"ALTER TABLE sessions ADD COLUMN {column} {kind}")
             self._conn.execute(
@@ -110,29 +86,26 @@ class SessionStore:
 
     @staticmethod
     def _session(row: sqlite3.Row) -> Session:
-        # Only stored fields: the cost is added by the API from the call log (``with_cost``).
-        columns = set(row.keys())  # (``in row`` would test the values)
-        fields = {k: row[k] for k in SESSION_FIELDS if k in columns}
-        # A stored message no longer on the list (reworded since, or written by mistake) is served
-        # as the generic one, never as is, and never breaks reading the session list.
-        if fields["failure_message"] is not None:
-            if fields["failure_message"] not in FAILURE_MESSAGES:
-                fields["failure_message"] = GENERIC_FAILURE
-                fields["failure_kind"] = FailureKind.GENERAL
-            elif fields["failure_kind"] not in FAILURE_KINDS:
-                fields["failure_kind"] = FailureKind.GENERAL
-        elif fields["failure_kind"] is not None:
-            fields["failure_kind"] = None
-        return Session(**fields)
+        column_names = set(row.keys())
+        stored_fields = {k: row[k] for k in SESSION_FIELDS if k in column_names}
+        if stored_fields["failure_message"] is not None:
+            if stored_fields["failure_message"] not in FAILURE_MESSAGES:
+                stored_fields["failure_message"] = GENERIC_FAILURE
+                stored_fields["failure_kind"] = FailureKind.GENERAL
+            elif stored_fields["failure_kind"] not in FAILURE_KINDS:
+                stored_fields["failure_kind"] = FailureKind.GENERAL
+        elif stored_fields["failure_kind"] is not None:
+            stored_fields["failure_kind"] = None
+        return Session(**stored_fields)
 
     def close(self) -> None:
-        with self._lock:
+        with self._one_query_at_a_time:
             self._conn.close()
 
     def create(self, title: str, source: SourceKind) -> Session:
         now = _now()
         sid = uuid.uuid4().hex[:12]
-        with self._lock, self._conn:
+        with self._one_query_at_a_time, self._conn:
             self._conn.execute(
                 "INSERT INTO sessions (id, title, source, status, created_at, updated_at)"
                 " VALUES (?, ?, ?, ?, ?, ?)",
@@ -141,16 +114,23 @@ class SessionStore:
         return self.get(sid)  # type: ignore[return-value]
 
     def get(self, session_id: str) -> Session | None:
-        with self._lock:
+        with self._one_query_at_a_time:
             row = self._conn.execute(
                 "SELECT * FROM sessions WHERE id = ?", (session_id,)
             ).fetchone()
         return self._session(row) if row else None
 
     def list(self) -> list[Session]:
-        with self._lock:
+        with self._one_query_at_a_time:
             rows = self._conn.execute("SELECT * FROM sessions ORDER BY created_at DESC").fetchall()
         return [self._session(r) for r in rows]
+
+    def _set(self, session_id: str, fields: dict[str, object]) -> None:
+        cols = ", ".join(f"{k} = ?" for k in fields)
+        with self._one_query_at_a_time, self._conn:
+            self._conn.execute(
+                f"UPDATE sessions SET {cols} WHERE id = ?", (*fields.values(), session_id)
+            )
 
     def update(
         self,
@@ -170,11 +150,7 @@ class SessionStore:
             fields["duration_s"] = duration_s
         if title is not None:
             fields["title"] = title
-        cols = ", ".join(f"{k} = ?" for k in fields)
-        with self._lock, self._conn:
-            self._conn.execute(
-                f"UPDATE sessions SET {cols} WHERE id = ?", (*fields.values(), session_id)
-            )
+        self._set(session_id, fields)
 
     def fail(
         self,
@@ -185,8 +161,6 @@ class SessionStore:
         detail: str,
         stage: Stage | None = None,
     ) -> None:
-        """Mark the session failed: ``message`` and ``kind`` for the user, ``detail`` (the raw
-        error) for developers, and the stage it stopped at, if known."""
         now = _now()
         fields: dict[str, object] = {
             "status": SessionStatus.FAILED.value,
@@ -198,24 +172,13 @@ class SessionStore:
         }
         if stage is not None:
             fields["current_stage"] = stage.value
-        cols = ", ".join(f"{k} = ?" for k in fields)
-        with self._lock, self._conn:
-            self._conn.execute(
-                f"UPDATE sessions SET {cols} WHERE id = ?", (*fields.values(), session_id)
-            )
+        self._set(session_id, fields)
 
     def clear_error(self, session_id: str) -> None:
-        """Forget a previous failure (a new run is starting)."""
-        with self._lock, self._conn:
-            self._conn.execute(
-                "UPDATE sessions SET failure_message = NULL, failure_kind = NULL,"
-                " error_detail = NULL, failed_at = NULL, error = NULL WHERE id = ?",
-                (session_id,),
-            )
+        self._set(session_id, dict.fromkeys(FAILURE_COLUMNS))
 
     def failure_detail(self, session_id: str) -> FailureDetail | None:
-        """The raw error of the session's last failed run (developers only), or None."""
-        with self._lock:
+        with self._one_query_at_a_time:
             row = self._conn.execute(
                 "SELECT error_detail, failed_at FROM sessions WHERE id = ?", (session_id,)
             ).fetchone()
@@ -224,5 +187,5 @@ class SessionStore:
         return FailureDetail(error=row["error_detail"], at=row["failed_at"])
 
     def delete(self, session_id: str) -> None:
-        with self._lock, self._conn:
+        with self._one_query_at_a_time, self._conn:
             self._conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))

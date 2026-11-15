@@ -98,6 +98,5 @@ async def cached[M: BaseModel, R](
         pass
     fresh = await retry_temporary(make, delays, what=what)
     accepted = accept(fresh)
-    path.parent.mkdir(exist_ok=True)
     write_model(path, fresh)
     return accepted
