@@ -15,7 +15,7 @@ from iris.store.layout import SessionPaths, frame_name, frame_path, write_model
 log = logging.getLogger(__name__)
 
 JPEG_QUALITY = 90
-_GRID_EPS = 1e-3
+_GRID_ROUNDING_TOLERANCE = 1e-3
 
 
 class GridSampler:
@@ -24,10 +24,10 @@ class GridSampler:
         self._next_k = 0
 
     def cell(self, t: float) -> int:
-        return math.floor(t * self.fps + _GRID_EPS)
+        return math.floor(t * self.fps + _GRID_ROUNDING_TOLERANCE)
 
     def take(self, t: float) -> bool:
-        if t * self.fps + _GRID_EPS < self._next_k:
+        if t * self.fps + _GRID_ROUNDING_TOLERANCE < self._next_k:
             return False
         self._next_k = self.cell(t) + 1
         return True

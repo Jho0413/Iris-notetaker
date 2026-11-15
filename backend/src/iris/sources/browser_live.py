@@ -1,35 +1,3 @@
-"""Browser live source: audio chunks and screen frames posted by the UI while recording.
-
-Capture (while recording, through ``api/routes/live.py``):
-  - Audio: MediaRecorder timeslice chunks, stored as ``live/audio/<seq:06d>.webm``. The chunks are
-    consecutive byte ranges of one WebM stream (only chunk 0 has the header), so concatenated in
-    ``seq`` order they form a valid stream whose timestamps start at 0 when recording started.
-  - Frames: JPEG screenshots, stored as ``live/frames/<t_ms:09d>-<share:04d>.jpg``, where ``t`` is
-    seconds since recording started (the same clock as the audio) and ``share`` numbers the
-    screen share the frame belongs to: 1 for the first, one more for each share after it (Share
-    screen, or Continue after Stop). A recording can share the screen any number of times, or
-    never (Record audio); frames are posted only while something is shared. Frames stored before
-    share numbers (``<t_ms:09d>.jpg``) are one share.
-
-  Chunks are keyed by ``seq``, frames by ``t`` and ``share``, so chunks arriving out of order
-  land in the right place and a chunk posted twice (a client retry) is stored once. Each file is
-  written atomically. Ingest never modifies the captured files, so a session can be re-ingested
-  (retried) at any time, and the session stays its own recording. Where each share starts and
-  ends comes from the frames alone: nothing else needs to arrive for it.
-
-Ingest (when recording ends) writes the standard layout, exactly like the upload source:
-  - ``audio.wav``: the chunks decoded in order as 16 kHz mono. Audio is placed by its timestamps,
-    so a missing chunk becomes silence of the same length rather than pulling later speech
-    earlier, which keeps audio and screen aligned.
-  - ``frames/`` + ``frames.json``: captured frames sampled onto the ``frame_fps`` grid, scaled to
-    at most ``frame_max_width`` wide and letterboxed to one size per share, because detection
-    compares frames pixel by pixel and a shared window can change size mid-share. A share is a
-    run of sampled frames with the same share number; each is sized from its own first frame, so
-    a small window shared first doesn't shrink the entire screen shared later, and frames are
-    never compared across shares. Where each share after the first starts goes in
-    ``frames.json`` (``share_starts``).
-"""
-
 import asyncio
 import io
 import logging
@@ -54,39 +22,27 @@ from iris.store.layout import SessionPaths, read_audio_chunk_name, read_captured
 
 log = logging.getLogger(__name__)
 
-MAX_UPLOAD_BYTES = 16 * 1024 * 1024  # per chunk or frame; real ones are well under 1 MB
+MAX_UPLOAD_BYTES = 16 * 1024 * 1024
 
-WEBM_MAGIC = b"\x1a\x45\xdf\xa3"  # EBML header, at the start of chunk 0 only
+WEBM_MAGIC = b"\x1a\x45\xdf\xa3"
 JPEG_MAGIC = b"\xff\xd8\xff"
 
-# A forward jump in audio timestamps longer than this is a gap (a lost chunk) and is filled with
-# silence; shorter ones are codec and resampler jitter.
 AUDIO_GAP_S = 0.05
-# Frames are decoded, scaled and re-encoded in parallel (OpenCV releases the GIL).
 FRAME_WORKERS = 4
 
 
-class ChunkConflict(Exception):
-    """A chunk or frame with this key was already stored with different content."""
-
-
-# --- Capture ----------------------------------------------------------------------------------
+class ChunkConflict(Exception): ...
 
 
 def store_audio_chunk(paths: SessionPaths, seq: int, data: bytes) -> bool:
-    """Store audio chunk ``seq``. Returns False if this exact chunk was already stored."""
     return _store_once(paths.live_audio_chunk(seq), data)
 
 
 def store_frame(paths: SessionPaths, t: float, share: int, data: bytes) -> bool:
-    """Store a frame of share ``share`` captured ``t`` s after recording started. False if
-    already stored."""
     return _store_once(paths.live_frame(t, share), data)
 
 
 def _store_once(path: Path, data: bytes) -> bool:
-    """Write ``data`` atomically unless ``path`` exists. A repeat with the same bytes is a no-op;
-    different bytes raise ``ChunkConflict`` rather than silently replacing captured content."""
     if path.exists():
         if path.read_bytes() == data:
             return False
@@ -99,7 +55,6 @@ def _store_once(path: Path, data: bytes) -> bool:
 
 
 def audio_chunks(paths: SessionPaths) -> list[tuple[int, Path]]:
-    """Stored audio chunks as ``(seq, path)``, in ``seq`` order."""
     if not paths.live_audio_dir.is_dir():
         return []
     found = []
@@ -110,7 +65,6 @@ def audio_chunks(paths: SessionPaths) -> list[tuple[int, Path]]:
 
 
 def missing_audio_chunks(paths: SessionPaths, expected: int) -> list[int]:
-    """Sequence numbers in ``0..expected-1`` that have not been stored."""
     have = {seq for seq, _ in audio_chunks(paths)}
     return [seq for seq in range(expected) if seq not in have]
 
@@ -122,7 +76,6 @@ class CapturedFrame(NamedTuple):
 
 
 def captured_frames(paths: SessionPaths) -> list[CapturedFrame]:
-    """Stored frames in time order (at the same time, the earlier share first)."""
     if not paths.live_frames_dir.is_dir():
         return []
     found = []
@@ -133,7 +86,6 @@ def captured_frames(paths: SessionPaths) -> list[CapturedFrame]:
 
 
 def split_shares(frames: Sequence[CapturedFrame]) -> list[list[CapturedFrame]]:
-    """``frames`` (in time order) split where the share number changes."""
     shares: list[list[CapturedFrame]] = []
     for frame in frames:
         if not shares or shares[-1][-1].share != frame.share:
@@ -142,12 +94,8 @@ def split_shares(frames: Sequence[CapturedFrame]) -> list[list[CapturedFrame]]:
     return shares
 
 
-# --- Ingest -----------------------------------------------------------------------------------
-
-
 class BrowserLiveSource:
     async def ingest(self, ctx: StageContext) -> None:
-        """Finalize the captured chunks and frames into ``audio.wav`` and ``frames.json``."""
         chunks = audio_chunks(ctx.paths)
         if not chunks:
             raise UserFacingError(LIVE_WITHOUT_AUDIO, "no audio was recorded")
@@ -157,7 +105,6 @@ class BrowserLiveSource:
             )
         missing = missing_audio_chunks(ctx.paths, chunks[-1][0] + 1)
         if missing:
-            # The end request already refused gaps unless the client accepted them.
             log.warning(
                 "session %s: audio chunks %s missing; filled with silence", ctx.session_id, missing
             )
@@ -168,21 +115,13 @@ class BrowserLiveSource:
         )
 
 
-# --- Audio ------------------------------------------------------------------------------------
-
-
-# The Matroska/WebM Cluster element ID. Every cluster carries an absolute timecode, so decoding
-# can restart at one after a lost chunk, given the stream header (EBML, Segment info and Tracks).
 CLUSTER_ID = b"\x1f\x43\xb6\x75"
-MAX_HEADER_BYTES = 1024 * 1024  # MediaRecorder headers are a few hundred bytes
+MAX_HEADER_BYTES = 1024 * 1024
 
-# A part of a stream: literal bytes, or a file read from an offset.
 Part = bytes | tuple[Path, int]
 
 
 class ChunkReader(io.RawIOBase):
-    """Reads parts one after another as one stream, without joining them on disk."""
-
     def __init__(self, parts: Sequence[Part]):
         self._parts = list(parts)
         self._next = 0
@@ -217,7 +156,6 @@ class ChunkReader(io.RawIOBase):
 
 
 def contiguous_runs(chunks: Sequence[tuple[int, Path]]) -> list[list[Path]]:
-    """Group ``(seq, path)`` chunks (in order) into runs with no missing ``seq`` inside."""
     runs: list[list[Path]] = []
     prev = None
     for seq, path in chunks:
@@ -229,10 +167,6 @@ def contiguous_runs(chunks: Sequence[tuple[int, Path]]) -> list[list[Path]]:
 
 
 def find_cluster(files: Sequence[Path], limit: int | None = None) -> tuple[int, int] | None:
-    """``(file index, offset)`` of the first Cluster element in ``files`` read as one stream.
-
-    Matches across file boundaries. Stops after ``limit`` bytes if given.
-    """
     keep = len(CLUSTER_ID) - 1
     carry = b""
     scanned = 0
@@ -253,12 +187,6 @@ def find_cluster(files: Sequence[Path], limit: int | None = None) -> tuple[int, 
 
 
 def stream_header(files: Sequence[Path]) -> bytes | None:
-    """The bytes before the first cluster: what a stream needs to decode a later cluster.
-
-    If ``files`` hold no complete cluster (MediaRecorder's first chunk can be header only), all of
-    them are the header, minus any partial Cluster ID at the end. None if that is implausibly
-    large for a header.
-    """
     found = find_cluster(files, MAX_HEADER_BYTES)
     if found is not None:
         index, offset = found
@@ -273,15 +201,6 @@ def stream_header(files: Sequence[Path]) -> bytes | None:
 
 
 def finalize_audio(chunks: Sequence[tuple[int, Path]], dest: Path, rate: int) -> float:
-    """Decode the ``(seq, path)`` chunks, in order, to 16-bit mono PCM WAV at ``rate`` Hz.
-
-    The first contiguous run of chunks is one stream. After each missing chunk, decoding restarts
-    at the next cluster with the stream header prepended (rather than trusting the demuxer to
-    resynchronise inside damaged data, which can lose the rest of the recording). Samples are
-    placed by timestamp (``PlacedWav``), so audio time stays session time. A damaged packet is
-    skipped. Written to a temp file and renamed, so ``dest`` is never half-written. Returns the
-    duration in seconds.
-    """
     runs = contiguous_runs(chunks)
     if not runs:
         raise UserFacingError(LIVE_WITHOUT_AUDIO, "no audio was recorded")
@@ -289,8 +208,8 @@ def finalize_audio(chunks: Sequence[tuple[int, Path]], dest: Path, rate: int) ->
     try:
         with wave.open(str(tmp), "wb") as out:
             wav = PlacedWav(out, rate)
-            # A first run that can't be opened is only fatal if nothing follows it.
-            _decode_run([(p, 0) for p in runs[0]], wav, required=len(runs) == 1)
+            only_run = len(runs) == 1
+            _decode_run([(p, 0) for p in runs[0]], wav, required=only_run)
             header = stream_header(runs[0]) if len(runs) > 1 else None
             for run in runs[1:]:
                 found = find_cluster(run)
@@ -312,9 +231,6 @@ def finalize_audio(chunks: Sequence[tuple[int, Path]], dest: Path, rate: int) ->
 
 
 class RawPcm:
-    """A ``PlacedWav`` destination that writes bare samples (no WAV header) to a binary file: the
-    live audio lane's ``live/audio.pcm``, which grows as chunks are decoded."""
-
     def __init__(self, file: BinaryIO):
         self.file = file
 
@@ -332,12 +248,6 @@ class RawPcm:
 
 
 class PlacedWav:
-    """Writes decoded audio as mono s16 at ``rate``, placed by timestamp.
-
-    Leading audio and any gap longer than ``AUDIO_GAP_S`` are written as silence. Before a gap
-    the resampler is flushed, so audio it still holds from before the gap is not played after it.
-    """
-
     def __init__(self, out: wave.Wave_write | RawPcm, rate: int):
         out.setnchannels(1)
         out.setsampwidth(2)
@@ -367,15 +277,11 @@ class PlacedWav:
             self._resampler = None
 
     def _write_pcm(self, frame: av.AudioFrame) -> None:
-        self.out.writeframes(frame.to_ndarray().tobytes())  # (1, samples) int16, packed mono
+        self.out.writeframes(frame.to_ndarray().tobytes())
         self.samples += frame.samples
 
 
 def _decode_run(parts: Sequence[Part], wav: PlacedWav, *, required: bool) -> None:
-    """Decode one stream (the first run, or the header plus a later run) into ``wav``.
-
-    If the stream can't be opened, raise when ``required``, else log and skip it.
-    """
     with ChunkReader(parts) as reader:
         try:
             container = av.open(reader)
@@ -397,9 +303,6 @@ def _decode_run(parts: Sequence[Part], wav: PlacedWav, *, required: bool) -> Non
                     continue
                 for frame in frames:
                     wav.write(frame)
-
-
-# --- Frames -----------------------------------------------------------------------------------
 
 
 def finalize_frames(paths: SessionPaths, fps: float, max_width: int) -> FrameIndex:

@@ -1,13 +1,3 @@
-"""Live capture input. The browser posts audio chunks and screen frames while recording.
-
-Chunks may arrive out of order or more than once (the browser retries failed uploads); they are
-keyed by ``seq``, and frames by ``t`` and ``share``, so neither loses nor duplicates content
-(``sources/browser_live.py``).
-Each handler reads the whole body first, then checks the session is still recording and stores
-the file with no ``await`` in between, so nothing is stored after ``end`` has started ingest, or
-after ``stop``.
-"""
-
 import asyncio
 from typing import Annotated
 
@@ -31,7 +21,6 @@ from iris.store.layout import FIRST_SHARE, MAX_AUDIO_SEQ, MAX_FRAME_T, MAX_SHARE
 
 router = APIRouter(prefix="/live", tags=["live"])
 
-# The 409 for missing chunks lists at most this many (the message gives the full count).
 MAX_LISTED_MISSING = 100
 
 
@@ -53,16 +42,13 @@ class LiveEnd(BaseModel):
     )
 
 
-# What a live session can be in to take each request: input only while recording; stop, and making
-# notes, also once stopped (a stopped session's notes are made only when asked).
 RECORDING = frozenset({SessionStatus.RECORDING})
 RECORDING_OR_STOPPED = frozenset({SessionStatus.RECORDING, SessionStatus.STOPPED})
 
 
-def _require_live(
+def _require_live_now(
     store: SessionStore, session_id: str, statuses: frozenset[SessionStatus] = RECORDING
 ) -> Session:
-    """The session's current state (not the one read before an ``await``), if in ``statuses``."""
     session = store.get(session_id)
     if session is None:
         raise HTTPException(404, "session not found")
@@ -112,8 +98,7 @@ async def post_audio(
     data = await _read_body(request)
     if seq == 0 and not data.startswith(WEBM_MAGIC):
         raise HTTPException(415, "audio must be WebM")
-    _require_live(store, session.id)
-    # Small synchronous write, deliberately with no await after the status check (see above).
+    _require_live_now(store, session.id)
     try:
         store_audio_chunk(paths, seq, data)
     except ChunkConflict as e:
@@ -144,7 +129,7 @@ async def post_frame(
     data = await _read_body(request)
     if not data.startswith(JPEG_MAGIC):
         raise HTTPException(415, "frame must be a JPEG")
-    _require_live(store, session.id)
+    _require_live_now(store, session.id)
     try:
         store_frame(paths, t, share, data)
     except ChunkConflict as e:
@@ -176,7 +161,7 @@ async def end_live(
     chunks and frames are kept, so a failed run can be retried with ``POST /sessions/{id}/run``.
     """
     body = body or LiveEnd()
-    _require_live(store, session.id, RECORDING_OR_STOPPED)
+    _require_live_now(store, session.id, RECORDING_OR_STOPPED)
     if body.audio_chunks is not None and not body.allow_gaps:
         missing = missing_audio_chunks(paths, body.audio_chunks)
         if missing:
@@ -187,16 +172,9 @@ async def end_live(
                     "missing_audio_chunks": missing[:MAX_LISTED_MISSING],
                 },
             )
-    # After an engine restart the session has no processor yet (e.g. the desktop app quit and
-    # stopped it): fresh lanes catch up on the captured files and their caches before the run
-    # finishes them, so the work done before the restart is promoted, not paid for again. Started
-    # before the status changes, so an error here leaves the session as it was.
     runner.live.ensure(session.id)
-    # Leave RECORDING (or STOPPED) before any await, so no chunk is accepted once ingest may have
-    # started, and no second end or stop is.
     store.update(session.id, status=SessionStatus.PROCESSING)
     runner.start(session.id)
-    # Live work has made model calls already, so the returned session carries their cost.
     return await asyncio.to_thread(with_cost, store.get(session.id), paths.usage_log)  # type: ignore[arg-type]
 
 
@@ -213,8 +191,7 @@ async def stop_live(session: SessionDep, paths: PathsDep, store: StoreDep, bus: 
     so making notes later (``/end``) reuses that work. Stopping a stopped session again is a no-op:
     the page and the desktop app may both send it. Delete it with ``DELETE /sessions/{id}``.
     """
-    current = _require_live(store, session.id, RECORDING_OR_STOPPED)
-    # No await since the check, so no chunk is stored once this has answered.
+    current = _require_live_now(store, session.id, RECORDING_OR_STOPPED)
     if current.status == SessionStatus.RECORDING:
         store.update(session.id, status=SessionStatus.STOPPED)
         bus.publish(session.id, EventType.STATUS, {"status": SessionStatus.STOPPED})
