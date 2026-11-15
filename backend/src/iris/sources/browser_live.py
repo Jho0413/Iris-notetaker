@@ -10,7 +10,7 @@ from typing import BinaryIO, NamedTuple
 import av
 
 from iris.llm.errors import UserFacingError
-from iris.media.frames import FrameNormaliser, GridSampler, rebuild_frames
+from iris.media.frames import FrameNormaliser, GridSampler, normalise_frame, rebuild_frames
 from iris.models import (
     LIVE_WITHOUT_AUDIO,
     UNREADABLE_LIVE_AUDIO,
@@ -329,9 +329,20 @@ def _normalise_share(
 ) -> list[FrameRef]:
     for i, frame in enumerate(share):
         if (first := normaliser.add(frame.t, frame.path)) is not None:
-            sized = pool.map(lambda later: normaliser.add(later.t, later.path), share[i + 1 :])
-            return [first, *(ref for ref in sized if ref is not None)]
+            assert normaliser.size is not None
+            rest = _normalise_in_size(normaliser.frames_dir, normaliser.size, share[i + 1 :], pool)
+            return [first, *rest]
     return []
+
+
+def _normalise_in_size(
+    frames_dir: Path,
+    size: tuple[int, int],
+    frames: Sequence[CapturedFrame],
+    pool: ThreadPoolExecutor,
+) -> list[FrameRef]:
+    sized = pool.map(lambda frame: normalise_frame(frames_dir, frame.t, frame.path, size), frames)
+    return [ref for ref in sized if ref is not None]
 
 
 def _sample_on_grid(frames: list[CapturedFrame], fps: float) -> list[CapturedFrame]:

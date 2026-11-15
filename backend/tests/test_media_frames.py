@@ -10,6 +10,7 @@ from iris.media.frames import (
     GridSampler,
     clear_frames,
     fit,
+    normalise_frame,
     output_size,
     rebuild_frames,
     to_upright_bgr,
@@ -164,6 +165,21 @@ def test_an_unreadable_frame_is_skipped_and_does_not_fix_the_size(tmp_path: Path
     assert list((tmp_path / "frames").iterdir()) == []
     norm.add(1.0, captured(tmp_path, "a.jpg", (320, 240)))
     assert norm.size == (320, 240)
+
+
+def test_a_frame_normalised_to_a_given_size_is_fitted_copied_or_skipped(tmp_path: Path):
+    frames_dir = tmp_path / "frames"
+    frames_dir.mkdir()
+    broken = tmp_path / "broken.jpg"
+    broken.write_bytes(b"\xff\xd8\xffnot a jpeg")
+    same = captured(tmp_path, "a.jpg", (320, 240))
+    fitted = normalise_frame(frames_dir, 1.0, captured(tmp_path, "b.jpg", (640, 360)), (320, 240))
+    copied = normalise_frame(frames_dir, 2.0, same, (320, 240))
+    assert fitted is not None and copied is not None
+    assert written_size(tmp_path, fitted) == (320, 240)
+    assert (tmp_path / copied.path).read_bytes() == same.read_bytes()
+    assert normalise_frame(frames_dir, 3.0, broken, (320, 240)) is None
+    assert sorted(p.name for p in frames_dir.iterdir()) == ["000001000.jpg", "000002000.jpg"]
 
 
 def test_a_written_frame_is_named_by_its_time(tmp_path: Path):

@@ -100,20 +100,37 @@ class FrameNormaliser:
         self.size = None
 
     def add(self, t: float, src: Path) -> FrameRef | None:
+        if self.size is not None:
+            return normalise_frame(self.frames_dir, t, src, self.size)
         image = _read_captured_frame(src)
         if image is None:
             return None
-        if self.size is None:
-            height, width = image.shape[:2]
-            self.size = output_size(width, height, 0, self.max_width)
-            self.first_size = self.first_size or self.size
-        if (image.shape[1], image.shape[0]) == self.size:
-            return self._copy_without_reencoding(t, src)
-        return write_frame(self.frames_dir, t, fit(image, self.size))
+        height, width = image.shape[:2]
+        self.size = output_size(width, height, 0, self.max_width)
+        self.first_size = self.first_size or self.size
+        return _write_in_size(self.frames_dir, t, src, image, self.size)
 
-    def _copy_without_reencoding(self, t: float, src: Path) -> FrameRef:
-        shutil.copyfile(src, self.frames_dir / frame_name(t))
-        return FrameRef(t=t, path=frame_path(t))
+
+def normalise_frame(
+    frames_dir: Path, t: float, src: Path, size: tuple[int, int]
+) -> FrameRef | None:
+    image = _read_captured_frame(src)
+    if image is None:
+        return None
+    return _write_in_size(frames_dir, t, src, image, size)
+
+
+def _write_in_size(
+    frames_dir: Path, t: float, src: Path, image: np.ndarray, size: tuple[int, int]
+) -> FrameRef:
+    if (image.shape[1], image.shape[0]) == size:
+        return _copy_without_reencoding(frames_dir, t, src)
+    return write_frame(frames_dir, t, fit(image, size))
+
+
+def _copy_without_reencoding(frames_dir: Path, t: float, src: Path) -> FrameRef:
+    shutil.copyfile(src, frames_dir / frame_name(t))
+    return FrameRef(t=t, path=frame_path(t))
 
 
 def _read_captured_frame(src: Path) -> np.ndarray | None:
