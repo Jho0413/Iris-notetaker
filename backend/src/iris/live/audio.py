@@ -74,7 +74,6 @@ from iris.pipeline.stages import transcribe
 from iris.sources.browser_live import (
     PlacedWav,
     RawPcm,
-    audio_chunk_path,
     audio_chunks,
     find_cluster,
     stream_header,
@@ -153,7 +152,7 @@ class LiveDecoder:
             return
         stream = ChunkStream(self, b"", 0, first, 0)
         self._decode(stream)
-        run0 = [audio_chunk_path(self.paths, s) for s in range(stream.seq + 1)]
+        run0 = [self.paths.live_audio_chunk(s) for s in range(stream.seq + 1)]
         header: bytes | None = None
         ended, lost = stream.ended, stream.seq + 1
         while ended == "gap":
@@ -170,7 +169,7 @@ class LiveDecoder:
                 lost = found
                 continue
             seq, offset = found
-            stream = ChunkStream(self, header, seq, audio_chunk_path(self.paths, seq), offset)
+            stream = ChunkStream(self, header, seq, self.paths.live_audio_chunk(seq), offset)
             self._decode(stream)
             ended, lost = stream.ended, stream.seq + 1
 
@@ -180,7 +179,7 @@ class LiveDecoder:
         seq = self._next_stored(lost)
         if seq is None:
             return None
-        files = [audio_chunk_path(self.paths, seq)]
+        files = [self.paths.live_audio_chunk(seq)]
         while True:
             # The last two chunks suffice: a Cluster ID can straddle one chunk boundary.
             found = find_cluster(files[-2:])
@@ -233,7 +232,7 @@ class LiveDecoder:
             self._poke.clear()  # before checking, so a poke during the checks is not lost
             if self._cancelled:
                 return "stop"
-            path = audio_chunk_path(self.paths, seq)
+            path = self.paths.live_audio_chunk(seq)
             if path.exists():
                 return path
             later = self._next_stored(seq) is not None

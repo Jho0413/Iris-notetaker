@@ -34,7 +34,6 @@ import asyncio
 import io
 import logging
 import math
-import re
 import shutil
 import wave
 from collections.abc import Sequence
@@ -55,14 +54,17 @@ from iris.models import (
 )
 from iris.pipeline.context import StageContext
 from iris.sources.upload import JPEG_QUALITY, output_size
-from iris.store.layout import SessionPaths, write_model
+from iris.store.layout import (
+    SessionPaths,
+    frame_name,
+    frame_path,
+    read_audio_chunk_name,
+    read_captured_frame_name,
+    write_model,
+)
 
 log = logging.getLogger(__name__)
 
-# Chunk and frame names have fixed widths: 6 digits of seq, 9 digits of milliseconds.
-MAX_AUDIO_SEQ = 999_999  # 57 days of 5 s chunks
-MAX_FRAME_T = 24 * 3600.0  # seconds; well inside the 9-digit millisecond name
-MAX_SHARE = 9999  # 4 digits; a share per Share screen or Continue
 MAX_UPLOAD_BYTES = 16 * 1024 * 1024  # per chunk or frame; real ones are well under 1 MB
 
 WEBM_MAGIC = b"\x1a\x45\xdf\xa3"  # EBML header, at the start of chunk 0 only
@@ -76,10 +78,6 @@ _GRID_EPS = 1e-3
 # Frames are decoded, scaled and re-encoded in parallel (OpenCV releases the GIL).
 FRAME_WORKERS = 4
 
-_AUDIO_NAME = re.compile(r"^(\d{6})\.webm$")
-# A captured frame: its time and, since share numbers, its share (none: share 1).
-_CAPTURED_FRAME_NAME = re.compile(r"^(\d{9})(?:-(\d{4}))?\.jpg$")
-
 
 class ChunkConflict(Exception):
     """A chunk or frame with this key was already stored with different content."""
@@ -88,24 +86,15 @@ class ChunkConflict(Exception):
 # --- Capture ----------------------------------------------------------------------------------
 
 
-def frame_name(t: float) -> str:
-    return f"{round(t * 1000):09d}.jpg"
-
-
-def audio_chunk_path(paths: SessionPaths, seq: int) -> Path:
-    return paths.live_audio_dir / f"{seq:06d}.webm"
-
-
 def store_audio_chunk(paths: SessionPaths, seq: int, data: bytes) -> bool:
     """Store audio chunk ``seq``. Returns False if this exact chunk was already stored."""
-    return _store_once(audio_chunk_path(paths, seq), data)
+    return _store_once(paths.live_audio_chunk(seq), data)
 
 
 def store_frame(paths: SessionPaths, t: float, share: int, data: bytes) -> bool:
     """Store a frame of share ``share`` captured ``t`` s after recording started. False if
     already stored."""
-    name = f"{round(t * 1000):09d}-{share:04d}.jpg"
-    return _store_once(paths.live_frames_dir / name, data)
+    return _store_once(paths.live_frame(t, share), data)
 
 
 def _store_once(path: Path, data: bytes) -> bool:
@@ -128,8 +117,8 @@ def audio_chunks(paths: SessionPaths) -> list[tuple[int, Path]]:
         return []
     found = []
     for p in paths.live_audio_dir.iterdir():
-        if m := _AUDIO_NAME.match(p.name):
-            found.append((int(m.group(1)), p))
+        if (seq := read_audio_chunk_name(p.name)) is not None:
+            found.append((seq, p))
     return sorted(found)
 
 
@@ -151,8 +140,8 @@ def captured_frames(paths: SessionPaths) -> list[CapturedFrame]:
         return []
     found = []
     for p in paths.live_frames_dir.iterdir():
-        if m := _CAPTURED_FRAME_NAME.match(p.name):
-            found.append(CapturedFrame(int(m.group(1)) / 1000, int(m.group(2) or 1), p))
+        if (key := read_captured_frame_name(p.name)) is not None:
+            found.append(CapturedFrame(*key, p))
     return sorted(found)
 
 
@@ -567,7 +556,7 @@ def _write_frame(
         str(frames_dir / name), fit(image, size), [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY]
     ):
         raise OSError(f"could not write frame {name}")
-    return FrameRef(t=t, path=f"frames/{name}")
+    return FrameRef(t=t, path=frame_path(t))
 
 
 def fit(image: np.ndarray, size: tuple[int, int]) -> np.ndarray:

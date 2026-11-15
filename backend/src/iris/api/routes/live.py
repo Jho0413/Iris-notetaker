@@ -19,9 +19,6 @@ from iris.llm.usage import with_cost
 from iris.models import EventType, Session, SessionStatus, SourceKind
 from iris.sources.browser_live import (
     JPEG_MAGIC,
-    MAX_AUDIO_SEQ,
-    MAX_FRAME_T,
-    MAX_SHARE,
     MAX_UPLOAD_BYTES,
     WEBM_MAGIC,
     ChunkConflict,
@@ -30,7 +27,7 @@ from iris.sources.browser_live import (
     store_frame,
 )
 from iris.store.db import SessionStore
-from iris.store.layout import session_paths
+from iris.store.layout import FIRST_SHARE, MAX_AUDIO_SEQ, MAX_FRAME_T, MAX_SHARE, session_paths
 
 router = APIRouter(prefix="/live", tags=["live"])
 
@@ -133,7 +130,7 @@ async def post_frame(
     runner: RunnerDep,
     request: Request,
     t: Annotated[float, Query(ge=0, le=MAX_FRAME_T, allow_inf_nan=False)],
-    share: Annotated[int, Query(ge=1, le=MAX_SHARE)],
+    share: Annotated[int, Query(ge=FIRST_SHARE, le=MAX_SHARE)],
 ) -> None:
     """Body: one JPEG screen frame. ``t`` is seconds since recording started (the audio's clock).
     ``share`` numbers the screen share it belongs to: 1 for the first, one more for each share

@@ -22,7 +22,7 @@ from av.container import InputContainer
 from iris.llm.errors import UserFacingError
 from iris.models import UNREADABLE_UPLOAD, UPLOAD_WITHOUT_AUDIO, FrameIndex, FrameRef
 from iris.pipeline.context import StageContext
-from iris.store.layout import SessionPaths, write_model
+from iris.store.layout import SessionPaths, frame_name, frame_path, write_model
 
 JPEG_QUALITY = 90
 # Tolerance when comparing a frame time to the sampling grid, so a frame stamped 0.9999 s by
@@ -185,12 +185,12 @@ def extract_frames(src: Path, frames_dir: Path, fps: float, max_width: int) -> F
             if size is None:
                 size = output_size(frame.width, frame.height, rotation, max_width)
             image = to_upright_bgr(frame, size, rotation)
-            name = f"{round(t * 1000):09d}.jpg"
+            name = frame_name(t)
             if not cv2.imwrite(
                 str(frames_dir / name), image, [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY]
             ):
                 raise OSError(f"could not write frame {name}")
-            refs.append(FrameRef(t=t, path=f"frames/{name}"))
+            refs.append(FrameRef(t=t, path=frame_path(t)))
     width, height = size or (0, 0)
     return FrameIndex(fps=fps, width=width, height=height, frames=refs)
 
