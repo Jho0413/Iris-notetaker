@@ -343,6 +343,7 @@ async def test_a_blocking_error_cancels_the_stage_running_beside_it(tmp_path, mo
 
 
 async def test_a_blocking_error_in_one_chunk_cancels_the_others(tmp_path, monkeypatch):
+    from iris.llm import transcription
     from iris.pipeline.stages import transcribe
 
     runner, sid, ctx = runner_session(tmp_path)
@@ -361,7 +362,7 @@ async def test_a_blocking_error_in_one_chunk_cancels_the_others(tmp_path, monkey
             cancelled.append(n)
             raise
 
-    monkeypatch.setattr(transcribe, "transcribe_chunk", fake_chunk)
+    monkeypatch.setattr(transcription, "transcribe_chunk", fake_chunk)
     monkeypatch.setattr(transcribe, "get_openai", lambda _s: object())
     with pytest.raises(openai.PermissionDeniedError):
         await asyncio.wait_for(transcribe.run(ctx, target_s=10, max_s=12, search_s=1), 5)

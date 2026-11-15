@@ -565,7 +565,7 @@ def test_measure_real_sdk_responses():
 
 
 def test_audio_without_usage_is_billed_from_the_wav_sent():
-    from iris.pipeline.stages.transcribe import encode_wav
+    from iris.media.audio import encode_wav
 
     wav = encode_wav(__import__("numpy").zeros(16_000 * 3 + 100, dtype="<i2"), 16_000)
     request = {"file": ("chunk.wav", wav, "audio/wav")}

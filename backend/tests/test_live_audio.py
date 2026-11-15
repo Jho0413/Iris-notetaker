@@ -21,9 +21,10 @@ from iris.live.audio import (
 )
 from iris.live.replay import encode_webm
 from iris.llm import usage
+from iris.llm.transcription import transcribe_chunk
+from iris.media.audio import encode_wav
 from iris.models import EventType, SourceKind, Stage, Transcript
 from iris.pipeline.context import StageContext
-from iris.pipeline.stages.transcribe import encode_wav, transcribe_chunk
 from iris.sources.browser_live import (
     CLUSTER_ID,
     audio_chunks,

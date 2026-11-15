@@ -16,6 +16,7 @@ from iris.llm import structured
 from iris.llm.errors import UserFacingError
 from iris.llm.usage import append_record
 from iris.main import create_app
+from iris.media.audio import read_wav
 from iris.models import (
     LIVE_WITHOUT_AUDIO,
     UNREADABLE_LIVE_AUDIO,
@@ -23,7 +24,6 @@ from iris.models import (
     UsageRecord,
 )
 from iris.pipeline.stages import render, transcribe
-from iris.pipeline.stages.transcribe import read_wav
 from iris.sources.browser_live import (
     CLUSTER_ID,
     BrowserLiveSource,

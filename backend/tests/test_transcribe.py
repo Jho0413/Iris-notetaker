@@ -10,10 +10,13 @@ import openai
 import pytest
 
 from iris.config import Settings
+from iris.llm import transcription
+from iris.llm.transcription import transcribe_chunk
+from iris.media.audio import encode_wav
 from iris.models import EventType, Transcript
 from iris.pipeline.context import StageContext
 from iris.pipeline.stages import transcribe
-from iris.pipeline.stages.transcribe import encode_wav, plan_chunks, transcribe_chunk
+from iris.pipeline.stages.transcribe import plan_chunks
 from iris.store.layout import read_model
 from tests.api_errors import status_error
 from tests.builders import stage_ctx
@@ -415,7 +418,7 @@ async def test_a_blocking_error_in_one_stretch_cancels_the_chunks_other_stretch(
             cancelled.append(n)
             raise
 
-    monkeypatch.setattr(transcribe, "transcribe_chunk", fake_chunk)
+    monkeypatch.setattr(transcription, "transcribe_chunk", fake_chunk)
     use_client(monkeypatch, object())
     with pytest.raises(openai.PermissionDeniedError):
         await asyncio.wait_for(transcribe.run(ctx), 5)

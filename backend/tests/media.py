@@ -8,9 +8,9 @@ import cv2
 import numpy as np
 
 from iris.live.replay import encode_webm
+from iris.media.audio import encode_wav
 from iris.models import FrameRef, Moment
 from iris.pipeline.stages.detect import DetectParams, MomentDetector
-from iris.pipeline.stages.transcribe import encode_wav
 
 COLOURS = [(0, 0, 255), (0, 255, 0), (255, 0, 0), (0, 255, 255), (255, 0, 255), (255, 255, 0)]
 

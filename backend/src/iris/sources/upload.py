@@ -8,6 +8,7 @@ import av
 from av.container import InputContainer
 
 from iris.llm.errors import UserFacingError
+from iris.media.audio import SAMPLE_BYTES, open_mono_wav
 from iris.media.container import first_video_stream, session_origin
 from iris.media.frames import GridSampler, output_size, rebuild_frames, to_upright_bgr, write_frame
 from iris.models import UNREADABLE_UPLOAD, UPLOAD_WITHOUT_AUDIO, FrameIndex, FrameRef
@@ -64,15 +65,12 @@ def extract_audio(src: Path, dest: Path, rate: int) -> float:
         origin = session_origin(container)
         resampler = av.AudioResampler(format="s16", layout="mono", rate=rate)
         n_samples = 0
-        with wave.open(str(tmp), "wb") as out:
-            out.setnchannels(1)
-            out.setsampwidth(2)
-            out.setframerate(rate)
+        with open_mono_wav(str(tmp), rate) as out:
             for frame in container.decode(stream):
                 if n_samples == 0 and frame.time is not None:
                     lead = round((frame.time - origin) * rate)
                     if lead > 0:
-                        out.writeframes(bytes(2 * lead))
+                        out.writeframes(bytes(SAMPLE_BYTES * lead))
                         n_samples += lead
                 for chunk in resampler.resample(frame):
                     n_samples += _write_pcm(out, chunk)
