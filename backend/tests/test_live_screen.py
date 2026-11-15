@@ -20,6 +20,7 @@ from tests.media import (
     SLIDE_A,
     SLIDE_B,
     SLIDE_C,
+    UNREADABLE_JPEG,
     Deck,
     image_bytes,
     solid_jpeg,
@@ -83,7 +84,7 @@ def frame_files(paths: SessionPaths) -> dict[str, bytes]:
 
 async def test_shuffled_frames_within_the_holdback_match_ingest(ctx: StageContext):
     frames = {
-        0.0: b"\xff\xd8\xff truncated",
+        0.0: UNREADABLE_JPEG,
         1.02: solid_jpeg(COLOURS[1], (640, 480)),
         1.6: solid_jpeg(COLOURS[2], (640, 480)),
         2.05: solid_jpeg(COLOURS[3], (640, 480)),
@@ -357,6 +358,31 @@ async def test_a_frame_from_before_closed_to_is_skipped(ctx: StageContext):
     assert Lane.SCREEN in driver.timeline.skipped_input
     timeline = await driver.stop()
     assert timeline.moments == []
+
+
+async def test_unreadable_first_frames_and_a_size_change_within_a_share_match_ingest(
+    tmp_path: Path, events: list
+):
+    ctx = deck_ctx(tmp_path, events)
+    small = cv2.resize(SLIDE_B, (SLIDE_B.shape[1] // 2, SLIDE_B.shape[0] // 2))
+    driver = await Driver(ctx).start()
+    await driver.deliver((0.0, UNREADABLE_JPEG), *slides(1, SLIDE_A, 10, seed=0))
+    await driver.deliver(*slides(11, small, 10, seed=1))
+    await driver.deliver((30.0, UNREADABLE_JPEG), (31.0, UNREADABLE_JPEG), share=2)
+    await driver.deliver(*slides(32, small, 10, seed=2), share=2)
+    await driver.deliver(*slides(42, SLIDE_C, 10, seed=3), share=2)
+    timeline = await driver.stop()
+
+    index = assert_matches_ingest(ctx, timeline)
+    assert index.frames[0].t == 1.0
+    assert index.share_starts == [32.0]
+    assert (index.width, index.height) == (SLIDE_A.shape[1], SLIDE_A.shape[0])
+    assert [(m.start, m.end) for m in timeline.moments] == [
+        (1.0, 11.0),
+        (11.0, 21.0),
+        (32.0, 42.0),
+        (42.0, 52.0),
+    ]
 
 
 def random_recording(rng: random.Random) -> list[tuple[float, int, bytes]]:
