@@ -14,7 +14,7 @@ import av
 import cv2
 import numpy as np
 
-from iris.sources.upload import first_video_stream
+from iris.media.container import first_video_stream
 
 OPUS_RATE = 48_000
 OPUS_FRAME = 960

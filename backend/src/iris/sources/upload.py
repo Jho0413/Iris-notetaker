@@ -8,26 +8,20 @@ earliest stream start), so audio and frames share one clock even when a stream s
 """
 
 import asyncio
-import math
 import shutil
 import wave
 from pathlib import Path
 from typing import BinaryIO
 
 import av
-import cv2
-import numpy as np
 from av.container import InputContainer
 
 from iris.llm.errors import UserFacingError
+from iris.media.container import first_video_stream, session_origin
+from iris.media.frames import GridSampler, output_size, rebuild_frames, to_upright_bgr, write_frame
 from iris.models import UNREADABLE_UPLOAD, UPLOAD_WITHOUT_AUDIO, FrameIndex, FrameRef
 from iris.pipeline.context import StageContext
-from iris.store.layout import SessionPaths, frame_name, frame_path, write_model
-
-JPEG_QUALITY = 90
-# Tolerance when comparing a frame time to the sampling grid, so a frame stamped 0.9999 s by
-# rounding still counts as the 1 s sample.
-_GRID_EPS = 1e-3
+from iris.store.layout import SessionPaths
 
 
 def save_upload(paths: SessionPaths, filename: str, data: BinaryIO) -> Path:
@@ -70,21 +64,6 @@ def open_media(src: Path) -> InputContainer:
         raise UserFacingError(
             UNREADABLE_UPLOAD, f"{src.name} is not a readable audio or video file: {e}"
         ) from e
-
-
-def session_origin(container: InputContainer) -> float:
-    """Session start in seconds: the earliest start time over all streams."""
-    if container.start_time is None:
-        return 0.0
-    return container.start_time / av.time_base
-
-
-def first_video_stream(container: InputContainer) -> av.VideoStream | None:
-    """The first real video stream, ignoring cover art embedded in audio files."""
-    for stream in container.streams.video:
-        if not stream.disposition & av.stream.Disposition.attached_pic:
-            return stream
-    return None
 
 
 def check_has_audio(src: Path) -> None:
@@ -145,13 +124,7 @@ def ingest_frames(src: Path, paths: SessionPaths, fps: float, max_width: int) ->
     ``frames.json`` is the commit point: it is removed first and written atomically at the end,
     so if it exists, every frame it lists is on disk.
     """
-    paths.frame_index.unlink(missing_ok=True)
-    paths.frames_dir.mkdir(parents=True, exist_ok=True)
-    for old in paths.frames_dir.glob("*.jpg"):
-        old.unlink()
-    index = extract_frames(src, paths.frames_dir, fps, max_width)
-    write_model(paths.frame_index, index)
-    return index
+    return rebuild_frames(paths, lambda: extract_frames(src, paths.frames_dir, fps, max_width))
 
 
 def extract_frames(src: Path, frames_dir: Path, fps: float, max_width: int) -> FrameIndex:
@@ -173,50 +146,16 @@ def extract_frames(src: Path, frames_dir: Path, fps: float, max_width: int) -> F
             return FrameIndex(fps=fps, width=0, height=0, frames=[])
         stream.thread_type = "AUTO"
         origin = session_origin(container)
-        next_k = 0
+        sampler = GridSampler(fps)
         for frame in container.decode(stream):
             if frame.time is None:
                 continue
             t = max(0.0, frame.time - origin)
-            if t * fps + _GRID_EPS < next_k:
+            if not sampler.take(t):
                 continue
-            next_k = math.floor(t * fps + _GRID_EPS) + 1
             rotation = frame.rotation % 360
             if size is None:
                 size = output_size(frame.width, frame.height, rotation, max_width)
-            image = to_upright_bgr(frame, size, rotation)
-            name = frame_name(t)
-            if not cv2.imwrite(
-                str(frames_dir / name), image, [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY]
-            ):
-                raise OSError(f"could not write frame {name}")
-            refs.append(FrameRef(t=t, path=frame_path(t)))
+            refs.append(write_frame(frames_dir, t, to_upright_bgr(frame, size, rotation)))
     width, height = size or (0, 0)
     return FrameIndex(fps=fps, width=width, height=height, frames=refs)
-
-
-def output_size(width: int, height: int, rotation: int, max_width: int) -> tuple[int, int]:
-    """Upright (width, height) scaled down to at most ``max_width`` wide, keeping aspect."""
-    if rotation in (90, 270):
-        width, height = height, width
-    if width <= max_width:
-        return width, height
-    return max_width, max(1, round(height * max_width / width))
-
-
-def to_upright_bgr(frame: av.VideoFrame, size: tuple[int, int], rotation: int) -> np.ndarray:
-    """Scale and convert in one swscale pass, then rotate (cheaper on the smaller image)."""
-    width, height = size
-    if rotation in (90, 270):
-        width, height = height, width
-    image = frame.reformat(
-        width=width, height=height, format="bgr24", interpolation="AREA"
-    ).to_ndarray()
-    # frame.rotation is the counterclockwise angle needed to display the frame upright.
-    if rotation == 90:
-        return cv2.rotate(image, cv2.ROTATE_90_COUNTERCLOCKWISE)
-    if rotation == 180:
-        return cv2.rotate(image, cv2.ROTATE_180)
-    if rotation == 270:
-        return cv2.rotate(image, cv2.ROTATE_90_CLOCKWISE)
-    return image

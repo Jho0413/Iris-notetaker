@@ -16,6 +16,7 @@ from iris.llm import structured
 from iris.llm.errors import UserFacingError
 from iris.llm.usage import append_record
 from iris.main import create_app
+from iris.media.frames import fit
 from iris.models import (
     LIVE_WITHOUT_AUDIO,
     UNREADABLE_LIVE_AUDIO,
@@ -35,7 +36,6 @@ from iris.sources.browser_live import (
     finalize_audio,
     finalize_frames,
     find_cluster,
-    fit,
     missing_audio_chunks,
     split_shares,
     store_audio_chunk,

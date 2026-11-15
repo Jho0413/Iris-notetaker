@@ -33,8 +33,6 @@ Ingest (when recording ends) writes the standard layout, exactly like the upload
 import asyncio
 import io
 import logging
-import math
-import shutil
 import wave
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
@@ -42,10 +40,9 @@ from pathlib import Path
 from typing import BinaryIO, NamedTuple
 
 import av
-import cv2
-import numpy as np
 
 from iris.llm.errors import UserFacingError
+from iris.media.frames import FrameNormaliser, GridSampler, rebuild_frames
 from iris.models import (
     LIVE_WITHOUT_AUDIO,
     UNREADABLE_LIVE_AUDIO,
@@ -53,15 +50,7 @@ from iris.models import (
     FrameRef,
 )
 from iris.pipeline.context import StageContext
-from iris.sources.upload import JPEG_QUALITY, output_size
-from iris.store.layout import (
-    SessionPaths,
-    frame_name,
-    frame_path,
-    read_audio_chunk_name,
-    read_captured_frame_name,
-    write_model,
-)
+from iris.store.layout import SessionPaths, read_audio_chunk_name, read_captured_frame_name
 
 log = logging.getLogger(__name__)
 
@@ -73,8 +62,6 @@ JPEG_MAGIC = b"\xff\xd8\xff"
 # A forward jump in audio timestamps longer than this is a gap (a lost chunk) and is filled with
 # silence; shorter ones are codec and resampler jitter.
 AUDIO_GAP_S = 0.05
-# Tolerance when comparing a frame time to the sampling grid (as in the upload source).
-_GRID_EPS = 1e-3
 # Frames are decoded, scaled and re-encoded in parallel (OpenCV releases the GIL).
 FRAME_WORKERS = 4
 
@@ -416,158 +403,34 @@ def _decode_run(parts: Sequence[Part], wav: PlacedWav, *, required: bool) -> Non
 
 
 def finalize_frames(paths: SessionPaths, fps: float, max_width: int) -> FrameIndex:
-    """Rebuild ``frames/`` from the captured frames and write ``frames.json`` last.
+    return rebuild_frames(paths, lambda: _normalise_shares(paths, fps, max_width))
 
-    As in the upload source, ``frames.json`` is the commit point: it is removed first and written
-    atomically at the end. Frames are sampled onto the ``k/fps`` grid by timestamp (the browser
-    sends about one per second, unevenly), then sized per share (``split_shares``). Unreadable
-    frames are skipped; a share with none readable is left out. No frames (audio-only capture)
-    gives an empty index.
 
-    The live screen lane builds the same frames one at a time with ``GridSampler`` and
-    ``FrameNormaliser``; this batch version decodes frames in parallel but writes the same names
-    and bytes.
-    """
-    paths.frame_index.unlink(missing_ok=True)
-    clear_frames(paths)
-
-    shares = split_shares(_sample_on_grid(captured_frames(paths), fps))
-    first_size: tuple[int, int] | None = None
+def _normalise_shares(paths: SessionPaths, fps: float, max_width: int) -> FrameIndex:
+    normaliser = FrameNormaliser(paths.frames_dir, max_width)
     refs: list[FrameRef] = []
     starts: list[float] = []
     with ThreadPoolExecutor(FRAME_WORKERS) as pool:
-        for share in shares:
-            size, first = _share_size(share, max_width)
-            if size is None:
-                continue
-            first_size = first_size or size
-
-            def convert(item: CapturedFrame, size: tuple[int, int] = size) -> FrameRef | None:
-                return _convert_frame(item.t, item.path, paths.frames_dir, size)
-
-            share_refs = [ref for ref in pool.map(convert, share[first:]) if ref is not None]
-            if refs:
+        for share in split_shares(_sample_on_grid(captured_frames(paths), fps)):
+            normaliser.new_share()
+            share_refs = _normalise_share(normaliser, share, pool)
+            if refs and share_refs:
                 starts.append(share_refs[0].t)
             refs += share_refs
-    width, height = first_size or (0, 0)
-    index = FrameIndex(fps=fps, width=width, height=height, frames=refs, share_starts=starts)
-    write_model(paths.frame_index, index)
-    return index
+    width, height = normaliser.first_size or (0, 0)
+    return FrameIndex(fps=fps, width=width, height=height, frames=refs, share_starts=starts)
 
 
-def _share_size(
-    share: Sequence[CapturedFrame], max_width: int
-) -> tuple[tuple[int, int] | None, int]:
-    """The share's output size (from its first readable frame) and that frame's position; no
-    size if none is readable."""
-    for i, (_, _, src) in enumerate(share):
-        image = _read_frame(src)
-        if image is not None:
-            height, width = image.shape[:2]
-            return output_size(width, height, 0, max_width), i
-    return None, len(share)
-
-
-def clear_frames(paths: SessionPaths) -> None:
-    """Remove sampled frames left by an earlier run (captured frames are kept)."""
-    paths.frames_dir.mkdir(parents=True, exist_ok=True)
-    for old in paths.frames_dir.glob("*.jpg"):
-        old.unlink()
-
-
-class GridSampler:
-    """Picks the first frame at or after each ``k/fps`` grid point that has frames.
-
-    Offer frames in time order. Each grid cell ``[k/fps, (k+1)/fps)`` keeps its earliest frame.
-    """
-
-    def __init__(self, fps: float):
-        self.fps = fps
-        self._next_k = 0
-
-    def cell(self, t: float) -> int:
-        return math.floor(t * self.fps + _GRID_EPS)
-
-    def take(self, t: float) -> bool:
-        """Whether the frame at ``t`` (later than any offered before) is sampled."""
-        if t * self.fps + _GRID_EPS < self._next_k:
-            return False
-        self._next_k = self.cell(t) + 1
-        return True
+def _normalise_share(
+    normaliser: FrameNormaliser, share: Sequence[CapturedFrame], pool: ThreadPoolExecutor
+) -> list[FrameRef]:
+    for i, frame in enumerate(share):
+        if (first := normaliser.add(frame.t, frame.path)) is not None:
+            sized = pool.map(lambda later: normaliser.add(later.t, later.path), share[i + 1 :])
+            return [first, *(ref for ref in sized if ref is not None)]
+    return []
 
 
 def _sample_on_grid(frames: list[CapturedFrame], fps: float) -> list[CapturedFrame]:
-    """The first frame at or after each ``k/fps`` grid point that has frames."""
     sampler = GridSampler(fps)
     return [frame for frame in frames if sampler.take(frame.t)]
-
-
-class FrameNormaliser:
-    """Writes sampled frames to ``frames/`` one at a time, as ``finalize_frames`` does.
-
-    The output size is fixed by the share's first readable frame; later frames are scaled and
-    letterboxed to it. ``new_share`` starts the next share (the share number changed). Not
-    thread-safe: call ``add`` from one thread at a time, in time order.
-    """
-
-    def __init__(self, frames_dir: Path, max_width: int):
-        self.frames_dir = frames_dir
-        self.max_width = max_width
-        self.size: tuple[int, int] | None = None  # (width, height) of this share
-        self.first_size: tuple[int, int] | None = None  # of the first share (FrameIndex)
-
-    def new_share(self) -> None:
-        """The next frame is another share's: it fixes the size again."""
-        self.size = None
-
-    def add(self, t: float, src: Path) -> FrameRef | None:
-        """Normalise the frame captured at ``t``; None if it is unreadable."""
-        image = _read_frame(src)
-        if image is None:
-            return None
-        if self.size is None:
-            height, width = image.shape[:2]
-            self.size = output_size(width, height, 0, self.max_width)
-            self.first_size = self.first_size or self.size
-        return _write_frame(t, src, image, self.frames_dir, self.size)
-
-
-def _read_frame(src: Path) -> np.ndarray | None:
-    image = cv2.imread(str(src), cv2.IMREAD_COLOR)
-    if image is None:
-        log.warning("skipping unreadable live frame %s", src.name)
-    return image
-
-
-def _convert_frame(t: float, src: Path, frames_dir: Path, size: tuple[int, int]) -> FrameRef | None:
-    image = _read_frame(src)
-    if image is None:
-        return None
-    return _write_frame(t, src, image, frames_dir, size)
-
-
-def _write_frame(
-    t: float, src: Path, image: np.ndarray, frames_dir: Path, size: tuple[int, int]
-) -> FrameRef:
-    name = frame_name(t)
-    if (image.shape[1], image.shape[0]) == size:
-        shutil.copyfile(src, frames_dir / name)  # already the right size: no re-encode loss
-    elif not cv2.imwrite(
-        str(frames_dir / name), fit(image, size), [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY]
-    ):
-        raise OSError(f"could not write frame {name}")
-    return FrameRef(t=t, path=frame_path(t))
-
-
-def fit(image: np.ndarray, size: tuple[int, int]) -> np.ndarray:
-    """Scale ``image`` to fit ``size`` (width, height) keeping its aspect, centred on black."""
-    width, height = size
-    h, w = image.shape[:2]
-    scale = min(width / w, height / h)
-    new_w, new_h = max(1, round(w * scale)), max(1, round(h * scale))
-    interp = cv2.INTER_AREA if scale < 1 else cv2.INTER_LINEAR
-    scaled = cv2.resize(image, (new_w, new_h), interpolation=interp)
-    canvas = np.zeros((height, width, 3), np.uint8)
-    x, y = (width - new_w) // 2, (height - new_h) // 2
-    canvas[y : y + new_h, x : x + new_w] = scaled
-    return canvas

@@ -45,16 +45,11 @@ import cv2
 
 from iris.live.lane import LiveLane
 from iris.live.timeline import Lane, LiveTimeline
+from iris.media.frames import FrameNormaliser, GridSampler, clear_frames
 from iris.models import EventType, FrameIndex, FrameRef, Moment, Moments
 from iris.pipeline.context import StageContext
 from iris.pipeline.stages.detect import DetectParams, MomentDetector, moment_event, share_end
-from iris.sources.browser_live import (
-    CapturedFrame,
-    FrameNormaliser,
-    GridSampler,
-    captured_frames,
-    clear_frames,
-)
+from iris.sources.browser_live import CapturedFrame, captured_frames
 from iris.store.layout import SessionPaths, write_model
 
 log = logging.getLogger(__name__)
