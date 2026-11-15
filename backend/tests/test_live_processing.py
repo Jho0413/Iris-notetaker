@@ -12,9 +12,8 @@ from iris.live import Lane, LiveProcessor, LiveRegistry, LiveTimeline
 from iris.live.lane import LiveLane
 from iris.main import create_app
 from iris.models import FrameRef, Moment, MomentContent, TranscriptSegment
-from tests.builders import stage_ctx
+from tests.builders import post_audio, post_frame, stage_ctx, start
 from tests.media import make_webm, solid_jpeg, split
-from tests.test_live import post_audio, post_frame, start
 from tests.waiting import settle, wait_for_status
 
 

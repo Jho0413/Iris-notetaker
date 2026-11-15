@@ -34,7 +34,7 @@ from iris.pipeline.context import StageContext
 from iris.pipeline.stages import render, select
 from iris.store.db import SessionStore
 from iris.store.layout import SessionPaths, read_model, session_paths, write_model
-from tests.builders import stage_ctx
+from tests.builders import section, stage_ctx
 from tests.media import make_media
 from tests.waiting import wait_until_idle
 
@@ -82,8 +82,6 @@ class FakeOpenAI:
         self.audio = SimpleNamespace(transcriptions=SimpleNamespace(create=self.transcribe))
 
     async def parse(self, **kwargs):
-        from tests.test_write import section
-
         self.calls.append(kwargs)
         schema = kwargs.get("response_format")
         if schema is None:

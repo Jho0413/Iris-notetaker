@@ -18,17 +18,9 @@ from iris.models import (
 )
 from iris.pipeline.stages import assemble, write
 from iris.store.layout import read_model, write_model
-from tests.builders import stage_ctx
+from tests.builders import markdown_images, section, stage_ctx
 from tests.media import make_media
 from tests.waiting import wait_for_status
-
-
-def section(ids=(), text="## Decisions\n\nShip the prototype. Alex will test it."):
-    return write.WrittenSection(
-        session_type=SessionType.MEETING,
-        title="Prototype review",
-        blocks=[write.NoteBlock(markdown=text, visual_ids=list(ids))],
-    )
 
 
 @pytest.fixture
@@ -291,14 +283,7 @@ def test_upload_pipeline_reaches_export(client, tmp_path, monkeypatch):
     assert "[visual:" not in notes["markdown"]
     exported = client.get(f"/api/sessions/{sid}/export")
     assert exported.status_code == 200
-    from markdown_it import MarkdownIt
-
-    image_tokens = [
-        child
-        for token in MarkdownIt().parse(exported.text)
-        for child in (token.children or [])
-        if child.type == "image"
-    ]
+    image_tokens = markdown_images(exported.text)
     assert image_tokens, exported.text[:600]
     assert all(t.attrGet("src").startswith("data:image/png;base64,") for t in image_tokens)
     assert calls[0] is select.Decisions

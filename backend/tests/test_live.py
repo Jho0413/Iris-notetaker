@@ -41,7 +41,7 @@ from iris.sources.browser_live import (
     store_frame,
 )
 from iris.store.layout import SessionPaths, read_model, session_paths
-from tests.builders import stage_ctx
+from tests.builders import post_audio, post_frame, section, stage_ctx, start, stop
 from tests.media import (
     COLOURS,
     TONE_SECONDS,
@@ -303,18 +303,6 @@ def test_fit_keeps_aspect():
     assert out[:, :30].max() == 0 and out[:, 40:60].min() == 255
 
 
-def start(client: TestClient) -> str:
-    return client.post("/api/live", json={"title": "standup"}).json()["id"]
-
-
-def post_audio(client: TestClient, sid: str, seq: int, data: bytes) -> int:
-    return client.post(f"/api/live/{sid}/audio?seq={seq}", content=data).status_code
-
-
-def post_frame(client: TestClient, sid: str, t: float, data: bytes, share: int = 1) -> int:
-    return client.post(f"/api/live/{sid}/frame?t={t}&share={share}", content=data).status_code
-
-
 def test_live_input_is_validated(client: TestClient):
     sid = start(client)
     assert post_audio(client, sid, 0, b"not webm") == 415
@@ -385,10 +373,6 @@ def test_end_with_allowed_gaps(client: TestClient, webm: bytes, settings: Settin
     wait_for_status(client, sid, {"done", "failed"})
     audio = settings.sessions_dir / sid / "audio.wav"
     assert len(read_16k_wav(audio)) / 16_000 == pytest.approx(WEBM_SECONDS, abs=0.1)
-
-
-def stop(client: TestClient, sid: str) -> int:
-    return client.post(f"/api/live/{sid}/stop").status_code
 
 
 def test_stop_keeps_the_recording_without_making_notes(client: TestClient, webm: bytes):
@@ -488,7 +472,6 @@ def test_make_notes_after_an_engine_restart(settings: Settings, webm: bytes):
 def fake_openai(monkeypatch) -> None:
     from iris.live import audio
     from iris.pipeline.stages import render, select, transcribe, write
-    from tests.test_write import section
 
     async def parse(**kwargs):
         schema = kwargs["response_format"]

@@ -56,8 +56,8 @@ from iris.pipeline.stages import render, select, write
 from iris.store.db import SessionStore
 from iris.store.layout import read_model, write_model
 from tests.api_errors import connection_error, status_error, timeout_error
+from tests.builders import section
 from tests.media import make_audio, make_media, write_wav
-from tests.test_write import section
 from tests.waiting import wait_for_stage, wait_for_status
 
 SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 10"><rect width="20"/></svg>'

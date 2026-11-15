@@ -36,10 +36,8 @@ from iris.pipeline import PLAN, STAGES
 from iris.pipeline.context import StageContext
 from iris.pipeline.stages import render, select, synthesize
 from iris.store.layout import SessionPaths, read_model, session_paths
-from tests.builders import stage_ctx
+from tests.builders import post_audio, post_frame, section, stage_ctx, start, stop
 from tests.media import WEBM_RATE, image_bytes, slide, tone
-from tests.test_live import post_audio, post_frame, start, stop
-from tests.test_write import section
 from tests.waiting import wait_for_done
 
 SECONDS = 120
