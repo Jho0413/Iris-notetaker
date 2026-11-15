@@ -35,13 +35,13 @@ class DetectParams:
     activity_threshold: float = 0.6
     max_mask_frac: float = 0.35
 
-    region_dilate: int = 9
+    region_dilate_work_px: int = 9
     region_min_blob_frac: float = 0.0005
     region_max_frac: float = 0.6
-    region_pad: int = 8
+    region_pad_frame_px: int = 8
 
-    scroll_max_frac: float = 0.6
-    scroll_min_edges: int = 40
+    scroll_max_height_frac: float = 0.6
+    scroll_min_edge_work_px: int = 40
 
 
 @dataclass
@@ -78,7 +78,7 @@ class _Pending:
 
 _OPEN_KERNEL = np.ones((3, 3), np.uint8)
 _MASK_KERNEL = np.ones((5, 5), np.uint8)
-_EMPTY_BACKGROUND_MAX_EDGES = 20
+_EMPTY_BACKGROUND_EDGE_LIMIT = 20
 
 
 class MomentDetector:
@@ -273,11 +273,11 @@ class MomentDetector:
         if self._mask is not None:
             moving &= ~self._mask
         ys, xs = np.nonzero(moving)
-        if len(ys) < self.p.scroll_min_edges:
+        if len(ys) < self.p.scroll_min_edge_work_px:
             return None
         target = cv2.dilate(new.edges.astype(np.uint8), np.ones((3, 3), np.uint8)).astype(bool)
         best_score, best_dy = 0.0, 0
-        limit = int(h * self.p.scroll_max_frac)
+        limit = int(h * self.p.scroll_max_height_frac)
         for dy in range(-limit, limit + 1):
             if abs(dy) < 2:
                 continue
@@ -315,7 +315,7 @@ class MomentDetector:
         area = cv2.dilate(changed, _MASK_KERNEL).astype(bool)
         old_edges = old.edges & area
         n = int(old_edges.sum())
-        if n < _EMPTY_BACKGROUND_MAX_EDGES:
+        if n < _EMPTY_BACKGROUND_EDGE_LIMIT:
             return True
         new_edges = cv2.dilate(new.edges.astype(np.uint8), np.ones((3, 3), np.uint8)).astype(bool)
         return (old_edges & new_edges).sum() / n >= self.p.additive_keep
@@ -343,7 +343,7 @@ class MomentDetector:
         )
 
     def _region(self, changed: np.ndarray) -> Box | None:
-        k = self.p.region_dilate
+        k = self.p.region_dilate_work_px
         blobs = cv2.dilate(changed, np.ones((k, k), np.uint8))
         contours, _ = cv2.findContours(blobs, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         min_area = self.p.region_min_blob_frac * blobs.size
@@ -359,7 +359,7 @@ class MomentDetector:
             return None
         fw, fh = self._frame_size
         sx, sy = fw / blobs.shape[1], fh / blobs.shape[0]
-        pad = self.p.region_pad
+        pad = self.p.region_pad_frame_px
         bx0 = max(0, int(x0 * sx) - pad)
         by0 = max(0, int(y0 * sy) - pad)
         bx1 = min(fw, int(np.ceil(x1 * sx)) + pad)

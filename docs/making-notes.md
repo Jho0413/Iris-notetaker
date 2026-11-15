@@ -127,9 +127,9 @@ machine with OpenCV and makes no model calls.
 
 1. Each frame is shrunk and blurred, so camera noise and compression don't count as change, and
    small changes (a cursor, a blinking caret, a clock) are ignored.
-2. Parts of the screen that keep changing, such as a call's video tiles or an embedded video, are
-   masked out, unless the mask would cover most of the screen: that is a scroll or a new screen,
-   not a widget.
+2. Parts of the screen that keep changing (about five frames in a row), such as a call's video
+   tiles or an embedded video, are masked out, unless the mask would cover most of the screen:
+   that is a scroll or a new screen, not a widget.
 3. A new picture only counts once it holds still for a moment. Animations and slide transitions
    never do, so they are never picked.
 4. If the new picture only adds to the old one (a bullet appears, a stroke is drawn), it is a
