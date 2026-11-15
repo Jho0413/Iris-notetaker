@@ -60,7 +60,7 @@ the form that fits the change; don't invent states where there are none.
   near-copy.
 - **Change only what the task needs.** No drive-by refactors, renames or reformatting; note them
   and do them separately, unless the user asks. Remove code a change leaves unused. The one
-  exception: removing the comments of a file you work on (see *No comments*).
+  exception: removing the comments and docstrings of a file you work on (see *No comments*).
 - **One source of truth.** Settings, file names, wording and constants live in one place
   (`Settings`, `store/layout.py`, `session/messages.ts`) and are imported, never copied.
 - **Pure logic, thin edges.** Keep decisions in small pure functions (no I/O) that plain
@@ -76,18 +76,19 @@ the form that fits the change; don't invent states where there are none.
   one step (where the input comes from, how an error is handled), share the rest and pass that
   step in, as a small `Protocol` or a function argument, the way `Source` does for uploads and
   live recordings. An interface earns its place with two real implementations, not one.
-- **No comments.** Name things for what they mean to the user or the domain, and let a clear name
-  or a smaller function carry what a comment would, including a reason too detailed for a docs
-  page. No comments in any form (`#`, `//`, `/* */`, JSDoc, HTML and CSS comments) and no
-  docstrings, except where something reads them:
+- **No comments** in hand-written code and tests (`backend/`, `frontend/src/`, `desktop/`). Name
+  things for what they mean to the user or the domain, and let a clear name or a smaller function
+  carry what a comment would, including a reason too detailed for a docs page. The why lives in
+  the feature's `docs/` page. Tool directives stay (`# noqa`, `# type: ignore`,
+  `// eslint-disable`). Generated files (`schema.d.ts`) and config and example files
+  (`.env.example`, `Makefile`, CI workflows) keep their comments. No comments in any form (`#`,
+  `//`, `/* */`, JSDoc, HTML and CSS comments) and no docstrings; when you work on a file, remove
+  the ones it has. The exceptions are docstrings something reads:
   - MCP tool docstrings: the assistant reads them as the tools' descriptions;
   - docstrings of FastAPI routes and of the models the API sends or accepts (the ones that reach
     `schema.d.ts`): they become the OpenAPI schema;
   - the module or class docstring that states an interface's contract (today `sources/base.py`
     and `live/lane.py`), without docstrings on its methods.
-
-  The why lives in the feature's `docs/` page. Tool directives stay (`# noqa`, `# type: ignore`,
-  `// eslint-disable`). When you work on a file, remove its other comments and docstrings.
 
 ## Conventions
 

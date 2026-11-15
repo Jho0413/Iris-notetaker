@@ -133,18 +133,19 @@ to every change; the reviewer says which ones it checked. Principles are those i
 - Matches the conventions and practices in `CLAUDE.md`.
 - Simple: no options, layers or abstractions without a current use.
 - Reuse: nothing rebuilt that Iris or a dependency already provides; no near-copies.
-- Scope: no unrelated refactors, renames or reformatting; removing the comments of files the
-  change touches is expected.
+- Scope: no unrelated refactors, renames or reformatting; removing the comments and docstrings
+  of files the change touches is expected.
 - Logic that decides something is in pure functions with tests; routes, components and the
   Electron main process stay thin.
 - One source of truth: no copied constants, settings, file names or wording; tunable numbers are
   named constants or `Settings` fields, and new fields are listed in `backend/.env.example`.
 - Shared building blocks live in a shared module, not in a stage, lane or route that others
   import from or copy; an interface or `Protocol` has two real implementations.
-- Names say what things mean; no comments in any form and no docstrings except MCP tools,
-  FastAPI routes and the models that reach `schema.d.ts`, and the contract of an interface
-  (`sources/base.py`, `live/lane.py`); files the change touches have their other comments and
-  docstrings removed; no dead code left behind.
+- Names say what things mean. In hand-written code and tests, no comments in any form and no
+  docstrings except MCP tools, FastAPI routes and the models that reach `schema.d.ts`, and the
+  contract of an interface (`sources/base.py`, `live/lane.py`); files the change touches have
+  their other comments and docstrings removed. Generated files and config and example files keep
+  theirs. No dead code left behind.
 - A change in behaviour leaves nothing describing the old one: search for comments, docstrings,
   UI wording and files that still say or do what the code used to.
 - No secrets in code or logs; no new dependency without a reason.
