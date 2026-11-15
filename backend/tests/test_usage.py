@@ -28,13 +28,12 @@ from iris.models import (
     SourceKind,
     Stage,
     UsageRecord,
-    Visual,
 )
 from iris.pipeline.context import StageContext
 from iris.pipeline.stages import render, select
 from iris.store.db import SessionStore
 from iris.store.layout import SessionPaths, read_model, session_paths, write_model
-from tests.builders import section, stage_ctx
+from tests.builders import figure_to_render, section, stage_ctx
 from tests.media import make_media
 from tests.waiting import wait_until_idle
 
@@ -385,7 +384,7 @@ async def test_unpriced_model_is_flagged_not_guessed(ctx, fake):
 
 
 async def test_usage_recording_failure_never_fails_the_stage(ctx, fake, monkeypatch, caplog):
-    write_model(ctx.paths.selection, Selection(visuals=[visual(ctx)]))
+    write_model(ctx.paths.selection, Selection(visuals=[figure_to_render(ctx)]))
 
     def broken(*_args):
         raise OSError("disk full")
@@ -671,7 +670,7 @@ async def test_reasoning_effort_per_call_type(ctx, fake):
     ctx.settings = ctx.settings.model_copy(
         update={"check_reasoning_effort": "low", "notes_reasoning_effort": "high"}
     )
-    v = visual(ctx)
+    v = figure_to_render(ctx)
     await render.check(ctx, v, b"src", b"candidate")
     await render.draw_svg(ctx, v, b"src", [])
     from iris.pipeline.stages import write
@@ -681,7 +680,7 @@ async def test_reasoning_effort_per_call_type(ctx, fake):
 
 
 def test_render_cache_key_changes_only_when_an_effort_override_is_set(ctx):
-    v = visual(ctx)
+    v = figure_to_render(ctx)
     base = render._cache_key(ctx, v, b"src")
     ctx.settings = ctx.settings.model_copy(update={"select_reasoning_effort": "low"})
     assert render._cache_key(ctx, v, b"src") == base
@@ -797,23 +796,4 @@ def test_iris_cost_defaults_to_the_most_recent_session(tmp_path, monkeypatch, ca
 def test_iris_cost_with_no_calls():
     assert cli.format_usage("abc", usage.summarize([])) == (
         "session abc: $0.0000 over 0 model calls (none recorded)"
-    )
-
-
-def visual(ctx: StageContext) -> Visual:
-    import cv2
-    import numpy as np
-
-    from iris.models import FrameRef
-
-    cv2.imwrite(str(ctx.paths.visuals_dir / "v1.source.jpg"), np.full((20, 40, 3), 255, np.uint8))
-    return Visual(
-        id="v1",
-        moment_id="m1",
-        frame=FrameRef(t=0, path="frames/0.jpg"),
-        caption="Orbit",
-        path="visuals/v1.source.jpg",
-        source_path="visuals/v1.source.jpg",
-        description="Two bodies orbiting",
-        render_as="svg",
     )

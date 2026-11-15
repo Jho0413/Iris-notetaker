@@ -4,8 +4,6 @@ import sqlite3
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-import cv2
-import numpy as np
 import openai
 import pytest
 from fastapi.testclient import TestClient
@@ -34,13 +32,9 @@ from iris.models import (
     UNREADABLE_LIVE_AUDIO,
     UNREADABLE_UPLOAD,
     UPLOAD_WITHOUT_AUDIO,
-    AlignedMoment,
-    Alignment,
     EventType,
     FailureKind,
     FailureMessage,
-    FrameRef,
-    Moment,
     Notes,
     Renders,
     Selection,
@@ -56,7 +50,7 @@ from iris.pipeline.stages import render, select, write
 from iris.store.db import SessionStore
 from iris.store.layout import read_model, write_model
 from tests.api_errors import connection_error, status_error, timeout_error
-from tests.builders import section
+from tests.builders import aligned_moments, figure_to_render, section
 from tests.media import make_audio, make_media, write_wav
 from tests.waiting import wait_for_stage, wait_for_status
 
@@ -217,23 +211,8 @@ def error_events(runner: JobRunner, sid: str) -> list[dict]:
     return [e.data for e in runner.bus.history(sid) if e.type == EventType.ERROR]
 
 
-def figure_visual(ctx, vid: str) -> Visual:
-    source = f"visuals/{vid}.source.jpg"
-    cv2.imwrite(str(ctx.paths.root / source), np.full((20, 40, 3), 200, np.uint8))
-    return Visual(
-        id=vid,
-        moment_id="m1",
-        frame=FrameRef(t=0, path="frames/0.jpg"),
-        caption=f"Figure {vid}",
-        path=source,
-        source_path=source,
-        description="Two bodies orbiting",
-        render_as="svg",
-    )
-
-
 def with_figures(ctx, monkeypatch, *ids: str) -> list[Visual]:
-    visuals = [figure_visual(ctx, vid) for vid in ids]
+    visuals = [figure_to_render(ctx, vid, f"Figure {vid}") for vid in ids]
     write_model(ctx.paths.selection, Selection(visuals=visuals))
     segment = TranscriptSegment(start=0, end=10, text="Two bodies orbit each other.")
     write_model(ctx.paths.transcript, Transcript(segments=[segment]))
@@ -395,17 +374,6 @@ async def test_a_blocking_error_in_one_chunk_cancels_the_others(tmp_path, monkey
     runner.store.close()
 
 
-def with_moments(ctx, n: int = 2) -> None:
-    items = []
-    for i in range(n):
-        path = f"frames/{i}.jpg"
-        cv2.imwrite(str(ctx.paths.root / path), np.zeros((60, 100, 3), np.uint8))
-        moment = Moment(id=f"m{i}", start=i * 10, end=i * 10 + 10, frame=FrameRef(t=i, path=path))
-        segment = TranscriptSegment(start=i * 10, end=i * 10 + 1, text="Revenue")
-        items.append(AlignedMoment(moment=moment, transcript=[segment]))
-    write_model(ctx.paths.alignment, Alignment(items=items))
-
-
 def decisions(*ids: str):
     parsed = select.Decisions(
         decisions=[select.Decision(moment_id=i, keep=False, elements=[]) for i in ids]
@@ -424,7 +392,7 @@ def fake_vision(monkeypatch, *responses) -> AsyncMock:
 
 async def test_a_temporary_error_in_a_select_batch_succeeds_after_a_retry(tmp_path, monkeypatch):
     runner, sid, ctx = runner_session(tmp_path, selection_batch_size=1)
-    with_moments(ctx)
+    aligned_moments(ctx, 2, "Revenue")
     parse = fake_vision(
         monkeypatch, decisions("m0"), status_error(503), connection_error(), decisions("m1")
     )
@@ -438,7 +406,7 @@ async def test_a_persistent_temporary_error_fails_select_with_the_generic_messag
     tmp_path, monkeypatch
 ):
     runner, sid, ctx = runner_session(tmp_path, selection_batch_size=1)
-    with_moments(ctx)
+    aligned_moments(ctx, 2, "Revenue")
     parse = fake_vision(monkeypatch, decisions("m0"), *[status_error(500)] * 4)
     await runner.run(sid, Stage.SELECT)
     assert parse.await_count == 1 + 4

@@ -1,21 +1,17 @@
-import cv2
-import numpy as np
 import pytest
 
 from iris.models import (
     EventType,
-    FrameRef,
     Notes,
     NotesDraft,
     Renders,
     Selection,
     SessionType,
-    Visual,
 )
 from iris.pipeline.stages import assemble, render
 from iris.store.layout import read_model, write_model
 from iris.svg import rasterize_svg, sanitize_svg
-from tests.builders import stage_ctx
+from tests.builders import figure_to_render, stage_ctx
 
 SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 10"><rect width="20"/></svg>'
 
@@ -24,17 +20,7 @@ SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 10"><rect width="
 def setup(tmp_path, monkeypatch):
     events = []
     ctx = stage_ctx(tmp_path, events=events, render_attempts=2)
-    cv2.imwrite(str(ctx.paths.root / "visuals/v1.source.jpg"), np.full((20, 40, 3), 255, np.uint8))
-    visual = Visual(
-        id="v1",
-        moment_id="m1",
-        frame=FrameRef(t=0, path="frames/0.jpg"),
-        caption="Orbit",
-        path="visuals/v1.source.jpg",
-        source_path="visuals/v1.source.jpg",
-        description="Two bodies orbiting",
-        render_as="svg",
-    )
+    visual = figure_to_render(ctx)
     write_model(ctx.paths.selection, Selection(visuals=[visual]))
     calls = []
     verdicts = []

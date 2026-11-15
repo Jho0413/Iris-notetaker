@@ -7,40 +7,22 @@ import numpy as np
 import pytest
 
 from iris.models import (
-    AlignedMoment,
     Alignment,
     Box,
     Build,
     EventType,
-    FrameRef,
-    Moment,
     Selection,
-    TranscriptSegment,
 )
 from iris.pipeline.stages import select
 from iris.store.layout import read_model, write_model
-from tests.builders import stage_ctx
+from tests.builders import aligned_moments, stage_ctx
 
 
 @pytest.fixture
 def setup(tmp_path, monkeypatch):
     events = []
     ctx = stage_ctx(tmp_path, events=events, selection_batch_size=2)
-    image = np.zeros((60, 100, 3), dtype=np.uint8)
-    image[:, 50:] = 255
-    items = []
-    for i in range(3):
-        path = f"frames/{i}.jpg"
-        cv2.imwrite(str(ctx.paths.root / path), image)
-        items.append(
-            AlignedMoment(
-                moment=Moment(
-                    id=f"m{i}", start=i * 10, end=(i + 1) * 10, frame=FrameRef(t=i * 10, path=path)
-                ),
-                transcript=[TranscriptSegment(start=i * 10, end=i * 10 + 1, text="Revenue chart")],
-            )
-        )
-    write_model(ctx.paths.alignment, Alignment(items=items))
+    items = aligned_moments(ctx, 3, "Revenue chart")
     parse = AsyncMock()
     client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(parse=parse)))
     monkeypatch.setattr(select, "get_openai", lambda _: client)
