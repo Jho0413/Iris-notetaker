@@ -1,9 +1,3 @@
-"""Export notes as standalone Markdown with figures and local images embedded.
-
-Boxes and steps keep their ``:::`` lines as written (``iris.notes_format``): other Markdown apps
-show them as text. Each ``::figure{#<id>}`` becomes the figure's image, embedded, and its caption.
-"""
-
 import base64
 import mimetypes
 from pathlib import Path
@@ -20,15 +14,15 @@ from iris.notes_format import scan, upgraded
 from iris.store.layout import inside
 from iris.svg import rasterize_svg
 
+ESCAPED_PUNCTUATION_TOKEN = "text_special"
+
 
 def _image_markdown(node: RenderTreeNode, context: RenderContext) -> str:
-    # Preserve literal alt text, including brackets, when serializing image tokens.
-    alt = escape_text(node.meta["export_alt"])
-    # Escape Markdown delimiters and entity-like text without URL-encoding the URL.
-    src = escape_text(node.attrs["src"])
+    literal_alt = escape_text(node.meta["export_alt"])
+    unencoded_src = escape_text(node.attrs["src"])
     title = node.attrs.get("title")
     suffix = f' "{escape_text(title)}"' if title is not None else ""
-    return f"![{alt}](<{src}>{suffix})"
+    return f"![{literal_alt}](<{unencoded_src}>{suffix})"
 
 
 class _ImageRenderer:
@@ -36,12 +30,6 @@ class _ImageRenderer:
 
 
 def export_markdown_embedded(notes: Notes, session_root: Path) -> str:
-    """Embed session images; preserve external, missing and outside-session references.
-
-    Parse and serialize CommonMark, so whitespace/formatting can be normalized. Code
-    examples are not images. Reference-style images are serialized as inline images. The lines
-    that open and close boxes and steps are kept as they are, between the normalized text.
-    """
     notes = upgraded(notes)
     root = session_root.resolve()
     visuals = {v.id: v for v in notes.visuals}
@@ -73,11 +61,9 @@ def export_markdown_embedded(notes: Notes, session_root: Path) -> str:
 
 
 def _normalized(markdown: str, root: Path) -> str:
-    """CommonMark serialized again, with session images embedded."""
     parser = MarkdownIt("commonmark", renderer_cls=MDRenderer)
     parser.options["parser_extension"] = [_ImageRenderer]
     env: dict = {}
-    # Serialization would escape LaTeX (x_1 -> x\_1), so math is swapped out and restored.
     protected, math = protect_math(markdown)
     tokens = parser.parse(protected, env)
     _prepare_images(tokens, root, parser, env)
@@ -85,7 +71,6 @@ def _normalized(markdown: str, root: Path) -> str:
 
 
 def _embedded_source(ref: str, root: Path) -> str:
-    """Resolve a local image within the session; preserve all other URLs."""
     url = urlsplit(ref)
     if not ref or url.scheme or url.netloc:
         return ref
@@ -93,7 +78,6 @@ def _embedded_source(ref: str, root: Path) -> str:
     if path is None or not path.is_file():
         return ref
     if path.suffix == ".svg":
-        # Markdown viewers reject SVG data URIs (SVG can carry script), so embed a PNG.
         mime, raw = "image/png", rasterize_svg(path.read_text(), width=1600)
     else:
         mime, raw = mimetypes.guess_type(path.name)[0] or "image/jpeg", path.read_bytes()
@@ -102,13 +86,10 @@ def _embedded_source(ref: str, root: Path) -> str:
 
 
 def _prepare_images(tokens: list[Token], root: Path, parser: MarkdownIt, env: dict) -> None:
-    """Normalize literal tokens and replace image sources before serialization."""
     for token in tokens:
         if token.children:
             _prepare_images(token.children, root, parser, env)
-        # markdown-it-py 4 emits escaped punctuation as text_special; the
-        # plain-text image renderer only recognizes text tokens.
-        if token.type == "text_special":
+        if token.type == ESCAPED_PUNCTUATION_TOKEN:
             token.type = "text"
         if token.type == "image":
             token.meta["export_alt"] = RendererHTML().renderInlineAsText(
