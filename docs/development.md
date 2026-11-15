@@ -59,8 +59,27 @@ uv run iris mcp                             # the read-only MCP server, as an as
 `mcp` speaks MCP on stdin and stdout, so it is for an assistant to start, not for typing at;
 connecting one is in [`assistants.md`](assistants.md#connecting).
 
+`iris serve --secrets-from-stdin` is how the desktop app starts the engine: it reads the key and
+the token from one line on its input. It can't be combined with `--reload`, because a reload
+starts the engine again in a new process, which has no such line to read.
+
 `replay-live` needs a running engine and makes real, paid model calls through it, so point that
-engine at a scratch data folder (`IRIS_DATA_DIR`).
+engine at a scratch data folder (`IRIS_DATA_DIR`). It plays a file the way the browser records:
+
+1. The audio is re-encoded as one WebM/Opus stream with short clusters, as the browser's recorder
+   writes it, and sent in pieces of about five seconds. Only the first piece carries the stream
+   header, as with the browser's own pieces. The stream is written through a small buffer, so
+   it is known exactly how far into it each moment of audio reaches, and pieces are cut there.
+2. Once a second it sends the latest picture the video has shown by then, scaled as the browser
+   scales a screen, as one screen share from start to end. A screen recording often stores a
+   picture only when the screen changes, so a picture is sent again until the next one shows. A
+   file with no real video (an audio file, even one with cover art) is replayed as an audio-only
+   recording, with no frames.
+3. Everything is paced in real time, or faster with `--speed` (the session's clock stays the
+   file's), then it asks for notes.
+4. It follows the session's progress and reports when the first transcript, moment, figure and
+   notes section arrived, how many sections were written before notes were asked for, how long
+   making notes took, what live work was kept, and the cost before and after.
 
 To use them on the desktop app's data, set the folder:
 `IRIS_DATA_DIR="$HOME/Library/Application Support/Iris" uv run iris show <id>`. In the app, the
