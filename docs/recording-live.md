@@ -177,7 +177,7 @@ more can be recorded. The engine never ends a recording on its own.
 - `frontend/src/pages/LivePage.tsx`: the Live page
 - `backend/src/iris/api/routes/live.py`: the live API
 - `backend/src/iris/sources/browser_live.py`: how chunks and frames are stored and ingested
-- `backend/src/iris/live/`: the processor, each lane (its docstring goes deeper), the timeline
+- `backend/src/iris/live/`: the processor, each lane, the timeline
   and promotion
 - `backend/src/iris/live/replay.py`: plays a recording into a running engine to measure it; it
   makes real, paid calls, so use a scratch data folder ([`development.md`](development.md))

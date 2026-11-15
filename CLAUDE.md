@@ -68,8 +68,20 @@ the form that fits the change; don't invent states where there are none.
   model output) once, where it enters; code behind that works with typed, valid data.
 - **Fail clearly.** Developers get the full error in the log; the user gets plain words and a way
   to recover. Never swallow an error silently.
-- **Names and comments explain why.** Name things for what they mean to the user or the domain;
-  comment the reason behind non-obvious code, not what it does.
+- **Shared code has a home.** A building block used by more than one stage, lane or entry point
+  lives in a shared module (`llm/` for model calls, `store/` for file names and reading and
+  writing files, `speech.py`, `svg.py`), never inside a stage, lane or route that the others then
+  import from or copy. Stages and lanes hold only their own decisions. When two callers differ in
+  one step (where the input comes from, how an error is handled), share the rest and pass that
+  step in, as a small `Protocol` or a function argument, the way `Source` does for uploads and
+  live recordings. An interface earns its place with two real implementations, not one.
+- **No comments.** Name things for what they mean to the user or the domain, and let a clear name
+  or a smaller function carry what a comment would. No `#` or `//` comments and no docstrings,
+  except where something reads them: MCP tool docstrings (the assistant's tool descriptions), API
+  route and model docstrings (they become the OpenAPI schema and `schema.d.ts`), and the short
+  contract of an interface (`Source`, `LiveLane`). The why lives in the feature's `docs/` page.
+  Tool directives stay (`# noqa`, `# type: ignore`, `// eslint-disable`). When you work on a
+  file, remove the comments in it.
 
 ## Conventions
 
@@ -91,9 +103,8 @@ the form that fits the change; don't invent states where there are none.
 - **Tests never call real paid APIs.** Use fakes or monkeypatching. Generate media fixtures in
   `tmp_path` (synthetic video/audio/frames); don't commit large binaries.
 - **Docs are overviews.** `docs/` explains the shape, the flow and the decisions with their why;
-  the detail stays in the code and its comments. A change that alters a flow or a decision updates
-  its page. Links run one way: a page's "Where to look" points at the code; code comments explain
-  themselves and never point at a docs page.
+  the detail stays in the code. A change that alters a flow or a decision updates its page. Links
+  run one way: a page's "Where to look" points at the code; code never points at a docs page.
 - **Commits:** one short single-line message, `<type>(<domain>): <comment>`, e.g.
   `fix(render): retry transient API errors per figure`. No body, no `Co-Authored-By`, no AI
   attribution.

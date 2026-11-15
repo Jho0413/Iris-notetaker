@@ -138,14 +138,18 @@ to every change; the reviewer says which ones it checked. Principles are those i
   Electron main process stay thin.
 - One source of truth: no copied constants, settings, file names or wording; tunable numbers are
   named constants or `Settings` fields, and new fields are listed in `backend/.env.example`.
-- Names and comments explain why; no dead code left behind.
+- Shared building blocks live in a shared module, not in a stage, lane or route that others
+  import from or copy; an interface or `Protocol` has two real implementations.
+- Names say what things mean; no comments and no docstrings except MCP tools, API routes and
+  models, and interface contracts; files the change touches have their comments removed; no dead
+  code left behind.
 - A change in behaviour leaves nothing describing the old one: search for comments, docstrings,
   UI wording and files that still say or do what the code used to.
 - No secrets in code or logs; no new dependency without a reason.
 
 ## 10. Docs
 
-- Docs describe shapes, flows and decisions, not code detail; the detail lives in the code and its
-  docstrings.
+- Docs describe shapes, flows and decisions with their why, not code detail; the detail lives in
+  the code.
 - A change that alters a flow or a decision updates that page in `docs/`.
-- Module docstrings (what a stage reads and writes) match the code.
+- The docstrings that stay (MCP tools, API routes and models, interface contracts) match the code.
