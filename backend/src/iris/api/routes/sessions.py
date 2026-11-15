@@ -20,13 +20,11 @@ from iris.models import Notes, NotesEdits, Session, SourceKind, Stage, Transcrip
 from iris.notes_edits import MAX_EDITED_CHARS, as_read, read_notes
 from iris.notes_format import validate
 from iris.sources.upload import save_upload
-from iris.store.layout import SessionPaths, read_model, session_paths, write_model
+from iris.store.layout import SERVED_DIRS, SessionPaths, read_model, session_paths, write_model
 
 log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
-
-SERVABLE_DIRS = ("frames", "visuals")
 
 
 def _with_cost(session: Session, settings: Settings) -> Session:
@@ -234,7 +232,7 @@ def _clean_filename(name: str) -> str:
 @router.get("/{session_id}/files/{subdir}/{name}")
 def get_file(subdir: str, name: str, paths: PathsDep) -> FileResponse:
     """Serve frames and visuals referenced by notes (e.g. ``visuals/v1.jpg``)."""
-    if subdir not in SERVABLE_DIRS or "/" in name or name.startswith("."):
+    if subdir not in SERVED_DIRS or "/" in name or name.startswith("."):
         raise HTTPException(404)
     path = paths.root / subdir / name
     if not path.is_file():

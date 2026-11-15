@@ -17,6 +17,7 @@ from mdformat.renderer import MDRenderer, RenderContext, RenderTreeNode
 from iris.markdown import escape_text, protect_math, restore_math
 from iris.models import Notes
 from iris.notes_format import scan, upgraded
+from iris.store.layout import inside
 from iris.svg import rasterize_svg
 
 
@@ -88,8 +89,8 @@ def _embedded_source(ref: str, root: Path) -> str:
     url = urlsplit(ref)
     if not ref or url.scheme or url.netloc:
         return ref
-    path = (root / unquote(url.path)).resolve()
-    if not path.is_relative_to(root) or not path.is_file():
+    path = inside(root, unquote(url.path))
+    if path is None or not path.is_file():
         return ref
     if path.suffix == ".svg":
         # Markdown viewers reject SVG data URIs (SVG can carry script), so embed a PNG.

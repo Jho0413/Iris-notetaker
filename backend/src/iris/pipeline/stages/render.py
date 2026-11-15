@@ -3,7 +3,6 @@ import base64
 import hashlib
 import json
 import logging
-import shutil
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Literal
@@ -16,7 +15,7 @@ from iris.llm.client import get_openai
 from iris.llm.errors import ErrorKind, classify, describe, gather_units
 from iris.models import EventType, RenderAs, RenderedVisual, Renders, Selection, Visual
 from iris.pipeline.context import StageContext
-from iris.store.layout import read_model, write_model
+from iris.store.layout import read_model, visual_path, write_bytes, write_model
 from iris.svg import rasterize_svg, sanitize_svg
 
 log = logging.getLogger(__name__)
@@ -192,10 +191,8 @@ def _cache_key(ctx: StageContext, visual: Visual, source: bytes) -> str:
 
 
 def _publish(ctx: StageContext, cached: Path, visual_id: str, ext: str) -> str:
-    path = f"visuals/{visual_id}.{ext}"
-    tmp = ctx.paths.root / f"{path}.tmp"
-    shutil.copyfile(cached, tmp)
-    tmp.replace(ctx.paths.root / path)
+    path = visual_path(visual_id, ext)
+    write_bytes(ctx.paths.root / path, cached.read_bytes())
     return path
 
 
@@ -243,9 +240,8 @@ async def render_visual(ctx: StageContext, visual: Visual) -> RenderedVisual:
     if result is None:
         result = ("screenshot", source, "jpg")
     renderer, data, ext = result
-    cache_dir.mkdir(exist_ok=True)
     cached_file = cache_dir / f"{key}.{ext}"
-    cached_file.write_bytes(data)
+    write_bytes(cached_file, data)
     path = _publish(ctx, cached_file, visual.id, ext)
     rendered = RenderedVisual(
         id=visual.id,
@@ -304,15 +300,4 @@ async def run(ctx: StageContext) -> None:
         if isinstance(outcome, Exception):
             raise outcome
     write_model(ctx.paths.renders, Renders(visuals=[done[v.id] for v in selection.visuals]))
-    remove_stale(ctx, {r.path for r in done.values()})
-
-
-def remove_stale(ctx: StageContext, keep: set[str]) -> None:
-    for path in ctx.paths.visuals_dir.glob("v*.*"):
-        rel = f"visuals/{path.name}"
-        if (
-            ".source." not in path.name
-            and path.suffix in {".svg", ".png", ".jpg"}
-            and rel not in keep
-        ):
-            path.unlink(missing_ok=True)
+    ctx.paths.remove_redraws_except({r.path for r in done.values()})

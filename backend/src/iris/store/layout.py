@@ -1,59 +1,26 @@
-"""The on-disk layout of one session. Every stage reads and writes files named here.
-
-sessions/<id>/
-    source.<ext>          uploaded recording (upload source only)
-    live/audio/<n>.webm   live audio chunks, by sequence number (browser live source only)
-    live/frames/<t_ms>-<share>.jpg
-                          live screen frames as captured, with the number of the screen share
-                          each belongs to (browser live source only)
-    live/audio.pcm        live: the contiguous audio decoded so far, 16-bit mono at
-                          audio_sample_rate (sample i is at i / rate seconds)
-    live/transcript_windows/<i>_<start_ms>_<end_ms>.json
-                          live: one transcribed window each (cache, like transcript_chunks/)
-    live/transcript.json  live: Transcript committed so far (complete up to transcribed_to)
-    live/frames.json      live: FrameIndex of the normalised frames fed to detection so far
-    live/moments.json     live: Moments closed so far
-    live/selection.json   live: Selection of the moments read so far
-    live/select_batches.json
-                          live: the moment ids of each batch the select lane read, so a lane
-                          restarted mid-recording reads the same batches (and hits their cache)
-    audio.wav             16 kHz mono
-    frames/<t_ms>.jpg     sampled frames
-    frames.json           FrameIndex
-    transcript_chunks/<i>_<start_ms>_<end_ms>.json
-                          per-chunk transcription cache (so re-runs don't re-pay)
-    transcript.json       Transcript
-    moments.json          Moments
-    alignment.json        Alignment
-    selection_batches/<hash>.json
-                          cached vision decisions, keyed by model, prompt and inputs
-    selection.json        Selection
-    visuals/<id>.source.jpg
-                          source crop of each kept figure (for rendering and verification)
-    visuals/<id>.<ext>    rendered visual (svg, png or jpg)
-    render_cache/<hash>.json
-                          completed renders, keyed by models, prompts and inputs
-    renders.json          Renders
-    notes_sections/<hash>.json
-                          validated writing sections, keyed by model, prompt and inputs
-    notes_draft.json      NotesDraft (written by write; the live draft lane only fills
-                          notes_sections/)
-    synthesis_cache/<hash>.json
-                          synthesis edit plans and section rewrites, keyed by model, prompt
-                          and inputs
-    notes_synthesis.json  SynthesizedDraft: the notes draft after the synthesis pass
-    synthesis.json        SynthesisReport: what synthesis did, or why it skipped or failed
-    notes.json            Notes
-    notes_edits.json      NotesEdits: the user's edited notes, latest save only. Written by the
-                          API, never by a stage, so re-runs keep them
-    usage_calls.jsonl     one UsageRecord per model call, appended by iris.llm.usage
-    usage.json            SessionUsage: those records with totals, refreshed after each stage
-"""
-
 from dataclasses import dataclass
 from pathlib import Path
 
 from pydantic import BaseModel
+
+FRAMES_DIR = "frames"
+VISUALS_DIR = "visuals"
+SERVED_DIRS = (FRAMES_DIR, VISUALS_DIR)
+SOURCE_CROP_SUFFIX = ".source.jpg"
+REDRAW_SUFFIXES = frozenset({".svg", ".png", ".jpg"})
+
+
+def visual_source_path(visual_id: str) -> str:
+    return f"{VISUALS_DIR}/{visual_id}{SOURCE_CROP_SUFFIX}"
+
+
+def visual_path(visual_id: str, ext: str) -> str:
+    return f"{VISUALS_DIR}/{visual_id}.{ext}"
+
+
+def inside(root: Path, relative: str, within: Path | None = None) -> Path | None:
+    path = (root / relative).resolve()
+    return path if path.is_relative_to((within or root).resolve()) else None
 
 
 @dataclass(frozen=True)
@@ -75,7 +42,6 @@ class SessionPaths:
     def live_frames_dir(self) -> Path:
         return self.root / "live" / "frames"
 
-    # Live processing outputs (iris/live/). Each lane writes only its own; see the docstring above.
     @property
     def live_dir(self) -> Path:
         return self.root / "live"
@@ -114,7 +80,7 @@ class SessionPaths:
 
     @property
     def frames_dir(self) -> Path:
-        return self.root / "frames"
+        return self.root / FRAMES_DIR
 
     @property
     def frame_index(self) -> Path:
@@ -146,7 +112,7 @@ class SessionPaths:
 
     @property
     def visuals_dir(self) -> Path:
-        return self.root / "visuals"
+        return self.root / VISUALS_DIR
 
     @property
     def render_cache_dir(self) -> Path:
@@ -180,12 +146,10 @@ class SessionPaths:
     def notes(self) -> Path:
         return self.root / "notes.json"
 
-    # Written by the API (the user's edits), never by a stage.
     @property
     def notes_edits(self) -> Path:
         return self.root / "notes_edits.json"
 
-    # Cost tracking: written by iris.llm.usage around every model call, not by one stage.
     @property
     def usage_log(self) -> Path:
         return self.root / "usage_calls.jsonl"
@@ -193,6 +157,17 @@ class SessionPaths:
     @property
     def usage(self) -> Path:
         return self.root / "usage.json"
+
+    def remove_source_crops_except(self, keep: set[str]) -> None:
+        for path in self.visuals_dir.glob(f"v*{SOURCE_CROP_SUFFIX}"):
+            if f"{VISUALS_DIR}/{path.name}" not in keep:
+                path.unlink(missing_ok=True)
+
+    def remove_redraws_except(self, keep: set[str]) -> None:
+        for path in self.visuals_dir.glob("v*.*"):
+            is_redraw = SOURCE_CROP_SUFFIX not in path.name and path.suffix in REDRAW_SUFFIXES
+            if is_redraw and f"{VISUALS_DIR}/{path.name}" not in keep:
+                path.unlink(missing_ok=True)
 
     def ensure(self) -> "SessionPaths":
         for d in (self.root, self.frames_dir, self.visuals_dir):
@@ -204,11 +179,15 @@ def session_paths(sessions_dir: Path, session_id: str) -> SessionPaths:
     return SessionPaths(sessions_dir / session_id)
 
 
-def write_model(path: Path, model: BaseModel) -> None:
-    """Write atomically, so a crash never leaves a half-written stage output."""
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(model.model_dump_json(indent=2))
+def write_bytes(path: Path, data: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_bytes(data)
     tmp.replace(path)
+
+
+def write_model(path: Path, model: BaseModel) -> None:
+    write_bytes(path, model.model_dump_json(indent=2).encode())
 
 
 def read_model[M: BaseModel](path: Path, model: type[M]) -> M:

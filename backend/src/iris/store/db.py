@@ -49,6 +49,7 @@ ADDED_COLUMNS = {
 SESSION_FIELDS = tuple(Session.model_fields)
 FAILURE_MESSAGES = frozenset(get_args(FailureMessage))
 FAILURE_KINDS = frozenset(FailureKind)
+FAILURE_COLUMNS = ("failure_message", "failure_kind", "error_detail", "failed_at", "error")
 
 
 @dataclass(frozen=True)
@@ -152,6 +153,13 @@ class SessionStore:
             rows = self._conn.execute("SELECT * FROM sessions ORDER BY created_at DESC").fetchall()
         return [self._session(r) for r in rows]
 
+    def _set(self, session_id: str, fields: dict[str, object]) -> None:
+        cols = ", ".join(f"{k} = ?" for k in fields)
+        with self._lock, self._conn:
+            self._conn.execute(
+                f"UPDATE sessions SET {cols} WHERE id = ?", (*fields.values(), session_id)
+            )
+
     def update(
         self,
         session_id: str,
@@ -170,11 +178,7 @@ class SessionStore:
             fields["duration_s"] = duration_s
         if title is not None:
             fields["title"] = title
-        cols = ", ".join(f"{k} = ?" for k in fields)
-        with self._lock, self._conn:
-            self._conn.execute(
-                f"UPDATE sessions SET {cols} WHERE id = ?", (*fields.values(), session_id)
-            )
+        self._set(session_id, fields)
 
     def fail(
         self,
@@ -198,20 +202,11 @@ class SessionStore:
         }
         if stage is not None:
             fields["current_stage"] = stage.value
-        cols = ", ".join(f"{k} = ?" for k in fields)
-        with self._lock, self._conn:
-            self._conn.execute(
-                f"UPDATE sessions SET {cols} WHERE id = ?", (*fields.values(), session_id)
-            )
+        self._set(session_id, fields)
 
     def clear_error(self, session_id: str) -> None:
         """Forget a previous failure (a new run is starting)."""
-        with self._lock, self._conn:
-            self._conn.execute(
-                "UPDATE sessions SET failure_message = NULL, failure_kind = NULL,"
-                " error_detail = NULL, failed_at = NULL, error = NULL WHERE id = ?",
-                (session_id,),
-            )
+        self._set(session_id, dict.fromkeys(FAILURE_COLUMNS))
 
     def failure_detail(self, session_id: str) -> FailureDetail | None:
         """The raw error of the session's last failed run (developers only), or None."""

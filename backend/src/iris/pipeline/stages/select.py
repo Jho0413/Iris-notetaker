@@ -1,7 +1,6 @@
 import asyncio
 import hashlib
 import json
-import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -23,7 +22,7 @@ from iris.models import (
     Visual,
 )
 from iris.pipeline.context import StageContext
-from iris.store.layout import read_model, write_model
+from iris.store.layout import inside, read_model, visual_source_path, write_bytes, write_model
 
 TRANSCRIPT_CHARS_PER_BATCH = 24_000
 OCR_CHARS_PER_MOMENT = 1_000
@@ -177,8 +176,8 @@ def prepare_batch(
     )
     digest.update(earlier_json.encode())
     for item in items:
-        path = (ctx.paths.root / item.moment.frame.path).resolve()
-        if not path.is_relative_to(ctx.paths.frames_dir.resolve()):
+        path = inside(ctx.paths.root, item.moment.frame.path, ctx.paths.frames_dir)
+        if path is None:
             raise ValueError("selection frame must be inside the session frames directory")
         raw = path.read_bytes()
         image = cv2.imread(str(path))
@@ -240,20 +239,16 @@ async def choose(ctx: StageContext, content: list[ChatCompletionContentPartParam
 
 
 def render(source: Path, target: Path, crop: Box | None) -> None:
-    tmp = target.with_name(target.stem + ".tmp.jpg")
-    try:
-        if crop is None:
-            shutil.copyfile(source, tmp)
-        else:
-            image = cv2.imread(str(source))
-            if image is None:
-                raise ValueError(f"unreadable selection frame: {source.name}")
-            image = image[crop.y : crop.y + crop.h, crop.x : crop.x + crop.w]
-            if not cv2.imwrite(str(tmp), image):
-                raise OSError(f"could not write visual: {target.name}")
-        tmp.replace(target)
-    finally:
-        tmp.unlink(missing_ok=True)
+    if crop is None:
+        write_bytes(target, source.read_bytes())
+        return
+    image = cv2.imread(str(source))
+    if image is None:
+        raise ValueError(f"unreadable selection frame: {source.name}")
+    ok, encoded = cv2.imencode(".jpg", image[crop.y : crop.y + crop.h, crop.x : crop.x + crop.w])
+    if not ok:
+        raise OSError(f"could not write visual: {target.name}")
+    write_bytes(target, encoded.tobytes())
 
 
 @dataclass
@@ -269,7 +264,6 @@ async def read_batch(
     earlier: list[MomentContent],
     first_visual: int,
 ) -> BatchResult:
-    ctx.paths.visuals_dir.mkdir(exist_ok=True)
     prepared = await asyncio.to_thread(
         prepare_batch, ctx, batch, summarize(earlier[-SUMMARISED_EARLIER_MOMENTS:])
     )
@@ -301,7 +295,7 @@ async def read_batch(
             if element.kind == "figure":
                 visual_id = f"v{first_visual + len(out.visuals):06d}"
                 crop = valid_crop(element.region, frame.width, frame.height)
-                source = f"visuals/{visual_id}.source.jpg"
+                source = visual_source_path(visual_id)
                 await asyncio.to_thread(render, frame.path, ctx.paths.root / source, crop)
                 visual = Visual(
                     id=visual_id,
@@ -340,8 +334,6 @@ async def run(ctx: StageContext) -> None:
     if len({item.moment.id for item in items}) != len(items):
         raise ValueError("alignment contains duplicate moment ids")
     selection = Selection(visuals=[])
-    ctx.paths.selection_batches_dir.mkdir(exist_ok=True)
-    ctx.paths.visuals_dir.mkdir(exist_ok=True)
     size = ctx.settings.selection_batch_size
     for offset in range(0, len(items), size):
         batch = items[offset : offset + size]
@@ -351,7 +343,4 @@ async def run(ctx: StageContext) -> None:
         selection.rejected_moment_ids.extend(result.rejected_moment_ids)
         write_model(ctx.paths.selection, selection)
     write_model(ctx.paths.selection, selection)
-    current = {v.source_path for v in selection.visuals}
-    for path in ctx.paths.visuals_dir.glob("v*.source.jpg"):
-        if f"visuals/{path.name}" not in current:
-            path.unlink(missing_ok=True)
+    ctx.paths.remove_source_crops_except({v.source_path for v in selection.visuals})

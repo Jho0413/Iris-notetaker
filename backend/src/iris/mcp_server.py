@@ -35,7 +35,7 @@ from iris.notes_text import (
     with_figures_as_text,
 )
 from iris.store.db import SessionStore
-from iris.store.layout import SessionPaths, session_paths
+from iris.store.layout import SessionPaths, inside, session_paths
 from iris.svg import rasterize_svg
 
 log = logging.getLogger(__name__)
@@ -151,11 +151,10 @@ def figure_image(session_root: Path, relative_path: str) -> Image:
     """A figure's image file as an image for the assistant, fitted to Claude's limits, or a
     ToolError saying why not. The path comes from notes.json, so it is still checked to stay
     inside the session folder."""
-    root = session_root.resolve()
-    path = (root / relative_path).resolve()
-    suffix = path.suffix.lower()
-    if not path.is_relative_to(root) or (suffix != ".svg" and suffix not in IMAGE_FORMATS):
-        log.error("refusing figure image %r in %s", relative_path, root)
+    path = inside(session_root, relative_path)
+    suffix = path.suffix.lower() if path else ""
+    if path is None or (suffix != ".svg" and suffix not in IMAGE_FORMATS):
+        log.error("refusing figure image %r in %s", relative_path, session_root)
         raise ToolError("This figure's image can't be shown.")
     try:
         raw = path.read_text() if suffix == ".svg" else path.read_bytes()

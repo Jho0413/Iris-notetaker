@@ -28,7 +28,7 @@ from iris.models import (
     Visual,
 )
 from iris.pipeline.context import StageContext
-from iris.store.layout import read_model, write_model
+from iris.store.layout import inside, read_model, write_model
 
 log = logging.getLogger(__name__)
 
@@ -183,8 +183,8 @@ def group_same(
 def _load(root: Path, rel: str | None) -> Fingerprint | None:
     if not rel:
         return None
-    path = (root / rel).resolve()
-    if not path.is_relative_to(root.resolve()):
+    path = inside(root, rel)
+    if path is None:
         return None
     image = cv2.imread(str(path))
     return None if image is None else fingerprint(image)
