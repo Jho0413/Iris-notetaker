@@ -1,22 +1,13 @@
-import time
 from urllib.parse import unquote
 
 import pytest
 from fastapi.testclient import TestClient
 
 from iris.config import Settings
-from iris.models import UNREADABLE_UPLOAD, Notes, SessionType, SourceKind
+from iris.models import UNREADABLE_UPLOAD, Notes, SourceKind
 from iris.store.layout import read_model, session_paths, write_model
-
-
-def wait_for_status(client: TestClient, sid: str, statuses: set[str], timeout: float = 5.0) -> dict:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        session = client.get(f"/api/sessions/{sid}").json()
-        if session["status"] in statuses:
-            return session
-        time.sleep(0.05)
-    raise AssertionError(f"session {sid} never reached {statuses}")
+from tests.builders import session_with_notes
+from tests.waiting import wait_for_status
 
 
 def test_health(client: TestClient):
@@ -79,17 +70,9 @@ def test_a_damaged_transcript_is_refused_in_plain_words_and_logged(
 
 
 def make_session_with_notes(client: TestClient, settings: Settings, title: str) -> str:
-    session = client.app.state.store.create(title, SourceKind.UPLOAD)
-    paths = session_paths(settings.sessions_dir, session.id).ensure()
-    notes = Notes(
-        session_id=session.id,
-        session_type=SessionType.MEETING,
-        title=title,
-        markdown="Body text.",
-        visuals=[],
-    )
-    write_model(paths.notes, notes)
-    return session.id
+    return session_with_notes(
+        client.app.state.store, settings, title, markdown="Body text.", format_version=1
+    )[0]
 
 
 @pytest.mark.parametrize(

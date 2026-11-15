@@ -1,70 +1,42 @@
 import json
-from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import cv2
 import numpy as np
 import pytest
 
-from iris.config import Settings
 from iris.models import (
-    AlignedMoment,
     Alignment,
     Box,
     Build,
     EventType,
-    FrameRef,
-    Moment,
     Selection,
-    SourceKind,
-    TranscriptSegment,
 )
-from iris.pipeline.context import StageContext
 from iris.pipeline.stages import select
-from iris.store.layout import SessionPaths, read_model, write_model
+from iris.store.layout import read_model, write_model
+from tests.builders import aligned_moments, stage_ctx
+from tests.fakes import (
+    answer_message,
+    chat_completion,
+    fake_openai,
+    parsed_response,
+    sdk_client,
+)
 
 
 @pytest.fixture
 def setup(tmp_path, monkeypatch):
     events = []
-    ctx = StageContext(
-        session_id="s1",
-        source=SourceKind.UPLOAD,
-        paths=SessionPaths(tmp_path).ensure(),
-        settings=Settings(data_dir=tmp_path, selection_batch_size=2),
-        emit=lambda kind, data: events.append((kind, data)),
-    )
-    image = np.zeros((60, 100, 3), dtype=np.uint8)
-    image[:, 50:] = 255
-    items = []
-    for i in range(3):
-        path = f"frames/{i}.jpg"
-        cv2.imwrite(str(tmp_path / path), image)
-        items.append(
-            AlignedMoment(
-                moment=Moment(
-                    id=f"m{i}", start=i * 10, end=(i + 1) * 10, frame=FrameRef(t=i * 10, path=path)
-                ),
-                transcript=[TranscriptSegment(start=i * 10, end=i * 10 + 1, text="Revenue chart")],
-            )
-        )
-    write_model(ctx.paths.alignment, Alignment(items=items))
+    ctx = stage_ctx(tmp_path, events=events, selection_batch_size=2)
+    items = aligned_moments(ctx, 3, "Revenue chart")
     parse = AsyncMock()
-    client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(parse=parse)))
-    monkeypatch.setattr(select, "get_openai", lambda _: client)
+    monkeypatch.setattr(select, "get_openai", lambda _: fake_openai(parse=parse))
     return ctx, items, events, parse
 
 
 def response(*decisions, refusal=None):
-    return SimpleNamespace(
-        choices=[
-            SimpleNamespace(
-                message=SimpleNamespace(
-                    parsed=select.Decisions(decisions=list(decisions)) if refusal is None else None,
-                    refusal=refusal,
-                )
-            )
-        ]
+    return parsed_response(
+        select.Decisions(decisions=list(decisions)) if refusal is None else None, refusal
     )
 
 
@@ -109,7 +81,6 @@ async def test_batches_render_real_pixels_and_emit(setup):
     assert json.loads(content[0]["text"]) == {"earlier_content": []}
     assert "Revenue chart" in content[1]["text"]
     assert content[2]["image_url"]["url"].startswith("data:image/jpeg;base64,")
-    # The next batch knows what the first one captured, so it does not list it again.
     later = json.loads(parse.call_args_list[1].kwargs["messages"][1]["content"][0]["text"])
     assert [m["moment_id"] for m in later["earlier_content"]] == ["m0"]
 
@@ -156,12 +127,10 @@ async def test_failed_batch_resumes_from_content_cache(setup):
     assert parse.await_count == 1
     await select.run(ctx)
     assert parse.await_count == 1
-    # A changed transcript invalidates only its batch.
     items[2].transcript[0].text = "Updated chart"
     write_model(ctx.paths.alignment, Alignment(items=items))
     await select.run(ctx)
     assert parse.await_count == 2
-    # Changed pixels also invalidate that batch.
     cv2.imwrite(str(ctx.paths.frames_dir / "2.jpg"), np.zeros((60, 100, 3), dtype=np.uint8))
     await select.run(ctx)
     assert parse.await_count == 3
@@ -275,10 +244,6 @@ def test_long_context_is_bounded_and_changes_invalidate_cache(setup):
 
 @pytest.mark.parametrize("valid", [True, False])
 async def test_selection_through_sdk_parser(setup, monkeypatch, valid):
-    import json
-
-    import httpx
-    from openai import AsyncOpenAI
     from pydantic import ValidationError
 
     ctx, items, _, _ = setup
@@ -291,31 +256,10 @@ async def test_selection_through_sdk_parser(setup, monkeypatch, valid):
         result = select.Decisions(decisions=[decision("m0")]).model_dump()
         if not valid:
             del result["decisions"][0]["keep"]
-        return httpx.Response(
-            200,
-            json={
-                "id": "test-completion",
-                "object": "chat.completion",
-                "created": 0,
-                "model": ctx.settings.vision_model,
-                "choices": [
-                    {
-                        "index": 0,
-                        "finish_reason": "stop",
-                        "message": {
-                            "role": "assistant",
-                            "content": json.dumps(result),
-                        },
-                    }
-                ],
-            },
-        )
+        message = answer_message(json.dumps(result))
+        return chat_completion(message, model=ctx.settings.vision_model)
 
-    async with AsyncOpenAI(
-        api_key="test-only",
-        max_retries=0,
-        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handle)),
-    ) as client:
+    async with sdk_client(handle) as client:
         monkeypatch.setattr(select, "get_openai", lambda _: client)
         if valid:
             await select.run(ctx)

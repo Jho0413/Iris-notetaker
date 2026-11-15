@@ -1,9 +1,3 @@
-"""Live screen lane: captured frames -> normalised frames and moments, while recording.
-
-Frames are synthetic JPEGs stored as the API stores them; the lane is driven one delivery at a
-time (store frames, wake the lane, wait until it is idle again), so tests are deterministic.
-"""
-
 import asyncio
 import math
 import random
@@ -13,41 +7,34 @@ import cv2
 import numpy as np
 import pytest
 
-from iris.config import Settings
 from iris.live.screen import ScreenLane
 from iris.live.timeline import Lane, LiveTimeline
-from iris.models import EventType, FrameIndex, Moments, SourceKind
+from iris.models import EventType, FrameIndex, Moments
 from iris.pipeline.context import StageContext
 from iris.pipeline.stages.detect import detect_moments, moment_event
 from iris.sources.browser_live import finalize_frames, store_frame
 from iris.store.layout import SessionPaths, read_model
-from tests.test_detect import SLIDE_A, SLIDE_B, SLIDE_C, Deck, three_slides
-from tests.test_live import COLOURS, jpeg
-
-
-@pytest.fixture
-def events() -> list[tuple[EventType, dict]]:
-    return []
-
-
-def make_ctx(tmp_path: Path, events: list, **settings) -> StageContext:
-    return StageContext(
-        session_id="s1",
-        source=SourceKind.BROWSER_LIVE,
-        paths=SessionPaths(tmp_path / "s1").ensure(),
-        settings=Settings(data_dir=tmp_path, **settings),
-        emit=lambda kind, data: events.append((kind, data)),
-    )
+from tests.builders import stage_ctx
+from tests.media import (
+    COLOURS,
+    SLIDE_A,
+    SLIDE_B,
+    SLIDE_C,
+    Deck,
+    image_bytes,
+    solid_jpeg,
+    three_slides,
+)
 
 
 @pytest.fixture
 def ctx(tmp_path: Path, events: list) -> StageContext:
-    return make_ctx(tmp_path, events, live_frame_holdback_s=2.0, frame_max_width=320)
+    return stage_ctx(
+        tmp_path, live=True, events=events, live_frame_holdback_s=2.0, frame_max_width=320
+    )
 
 
 class Driver:
-    """Runs a screen lane and hands it frames one delivery at a time."""
-
     def __init__(self, ctx: StageContext):
         self.ctx = ctx
         self.timeline = LiveTimeline()
@@ -56,7 +43,7 @@ class Driver:
         wait = self.lane.wait_for_input
 
         async def waiting() -> None:
-            self.idle.set()  # the lane has handled everything delivered so far
+            self.idle.set()
             await wait()
 
         self.lane.wait_for_input = waiting  # type: ignore[method-assign]
@@ -71,7 +58,6 @@ class Driver:
         await self.deliver_shared(*((t, share, data) for t, data in frames))
 
     async def deliver_shared(self, *frames: tuple[float, int, bytes]) -> None:
-        """Store frames of any shares, as the API stores them, and let the lane handle them."""
         for t, share, data in frames:
             store_frame(self.ctx.paths, t, share, data)
         self.idle.clear()
@@ -79,7 +65,6 @@ class Driver:
         await asyncio.wait_for(self.idle.wait(), 10)
 
     async def transcribed(self, t: float) -> None:
-        """The transcript reached ``t``: the clock while no frames come."""
         self.idle.clear()
         await self.timeline.publish_transcript([], transcribed_to=t)
         await asyncio.wait_for(self.idle.wait(), 10)
@@ -92,39 +77,29 @@ class Driver:
         return self.timeline
 
 
-def encode(image: np.ndarray) -> bytes:
-    ok, buf = cv2.imencode(".jpg", image)
-    assert ok
-    return buf.tobytes()
-
-
 def frame_files(paths: SessionPaths) -> dict[str, bytes]:
     return {p.name: p.read_bytes() for p in sorted(paths.frames_dir.glob("*.jpg"))}
 
 
-# --- Ordering and normalising -----------------------------------------------------------------
-
-
 async def test_shuffled_frames_within_the_holdback_match_ingest(ctx: StageContext):
     frames = {
-        0.0: b"\xff\xd8\xff truncated",  # unreadable: the size comes from the next frame
-        1.02: jpeg(COLOURS[1], (640, 480)),  # first readable: fixes the size at 320x240
-        1.6: jpeg(COLOURS[2], (640, 480)),  # same grid cell as 1.02: not sampled
-        2.05: jpeg(COLOURS[3], (640, 480)),
-        3.5: jpeg(COLOURS[4], (320, 240)),  # already the right size: copied
-        4.3: jpeg(COLOURS[5], (640, 480)),
-        5.0: jpeg(COLOURS[0], (640, 240)),  # the shared window got wider: letterboxed
-        6.1: jpeg(COLOURS[1], (640, 480)),
-        7.0: jpeg(COLOURS[2], (640, 480)),
+        0.0: b"\xff\xd8\xff truncated",
+        1.02: solid_jpeg(COLOURS[1], (640, 480)),
+        1.6: solid_jpeg(COLOURS[2], (640, 480)),
+        2.05: solid_jpeg(COLOURS[3], (640, 480)),
+        3.5: solid_jpeg(COLOURS[4], (320, 240)),
+        4.3: solid_jpeg(COLOURS[5], (640, 480)),
+        5.0: solid_jpeg(COLOURS[0], (640, 240)),
+        6.1: solid_jpeg(COLOURS[1], (640, 480)),
+        7.0: solid_jpeg(COLOURS[2], (640, 480)),
     }
-    # Each delivery is out of order, but no frame comes 2 s after a later one.
     deliveries = [[1.02, 0.0], [2.05, 1.6], [4.3], [3.5], [6.1, 5.0], [7.0]]
     driver = await Driver(ctx).start()
     latest = 0.0
     for times in deliveries:
         await driver.deliver(*((t, frames[t]) for t in times))
         latest = max(latest, *times)
-        if ctx.paths.live_frame_index.exists():  # fed only once a frame 2 s later exists
+        if ctx.paths.live_frame_index.exists():
             live = read_model(ctx.paths.live_frame_index, FrameIndex)
             assert max(f.t for f in live.frames) + 2.0 <= latest + 1e-9
     timeline = await driver.stop()
@@ -142,33 +117,32 @@ async def test_shuffled_frames_within_the_holdback_match_ingest(ctx: StageContex
 @pytest.mark.parametrize(
     ("late", "recorded"),
     [
-        (1.5, False),  # its grid cell already holds an earlier frame: ingest drops it too
-        (3.0, True),  # its grid cell is empty: ingest would sample it
-        (2.1, True),  # earlier than the frame sampled in its cell: ingest would take it instead
+        (1.5, False),
+        (3.0, True),
+        (2.1, True),
     ],
 )
 async def test_a_frame_later_than_the_holdback_is_skipped(
     ctx: StageContext, late: float, recorded: bool
 ):
     driver = await Driver(ctx).start()
-    for t in (0.0, 1.0, 2.4, 4.0, 6.0):  # 6.0 releases everything up to 4.0
-        await driver.deliver((t, jpeg(COLOURS[0])))
-    await driver.deliver((late, jpeg(COLOURS[1])))
+    for t in (0.0, 1.0, 2.4, 4.0, 6.0):
+        await driver.deliver((t, solid_jpeg(COLOURS[0])))
+    await driver.deliver((late, solid_jpeg(COLOURS[1])))
     assert (Lane.SCREEN in driver.timeline.skipped_input) is recorded
     timeline = await driver.stop()
 
     live = read_model(ctx.paths.live_frame_index, FrameIndex)
     assert [f.t for f in live.frames] == [0.0, 1.0, 2.4, 4.0, 6.0]
     assert (Lane.SCREEN in timeline.skipped_input) is recorded
-    # Ingest at stop uses every captured frame; it only differs when the frame was recorded.
     ingest = finalize_frames(ctx.paths, ctx.settings.frame_fps, ctx.settings.frame_max_width)
     assert (ingest != live) is recorded
 
 
 async def test_zero_holdback_feeds_frames_as_they_arrive(tmp_path: Path, events: list):
-    ctx = make_ctx(tmp_path, events, live_frame_holdback_s=0)
+    ctx = stage_ctx(tmp_path, live=True, events=events, live_frame_holdback_s=0)
     driver = await Driver(ctx).start()
-    await driver.deliver((0.0, jpeg(COLOURS[0])))
+    await driver.deliver((0.0, solid_jpeg(COLOURS[0])))
     assert [f.t for f in read_model(ctx.paths.live_frame_index, FrameIndex).frames] == [0.0]
     await driver.stop()
 
@@ -179,11 +153,11 @@ async def test_the_frame_index_is_saved_periodically_not_per_frame(ctx: StageCon
 
     driver = await Driver(ctx).start()
     for t in range(13):
-        await driver.deliver((float(t), jpeg(COLOURS[0])))
-    assert saved() == [0.0]  # written once frames start; not again for INDEX_SAVE_S
+        await driver.deliver((float(t), solid_jpeg(COLOURS[0])))
+    assert saved() == [0.0]
     for t in range(13, 33):
-        await driver.deliver((float(t), jpeg(COLOURS[0])))
-    assert saved() == [float(t) for t in range(31)]  # 30 s of frames since the last save
+        await driver.deliver((float(t), solid_jpeg(COLOURS[0])))
+    assert saved() == [float(t) for t in range(31)]
     await driver.stop()
     assert saved() == [float(t) for t in range(33)]
 
@@ -198,7 +172,7 @@ async def test_no_frames_gives_empty_outputs(ctx: StageContext, events: list):
 
 
 async def test_with_no_screen_closed_to_follows_the_transcript(ctx: StageContext, events: list):
-    tl = LiveTimeline()  # an audio-only recording: nothing was ever shared
+    tl = LiveTimeline()
     task = asyncio.create_task(ScreenLane(ctx, tl).run())
     await tl.publish_transcript([], transcribed_to=7.5)
     await asyncio.wait_for(tl.wait_until(lambda: tl.closed_to >= 7.5), 5)
@@ -212,11 +186,10 @@ async def test_with_no_screen_closed_to_follows_the_transcript(ctx: StageContext
 
 
 async def test_a_fresh_lane_replays_the_captured_frames(ctx: StageContext):
-    """After a backend restart the lane starts from the captured files and stale frames go."""
     stale = ctx.paths.frames_dir / "999999999.jpg"
     stale.write_bytes(b"old")
     for t in (0.0, 1.0, 2.0, 3.0):
-        store_frame(ctx.paths, t, 1, jpeg(COLOURS[int(t)]))
+        store_frame(ctx.paths, t, 1, solid_jpeg(COLOURS[int(t)]))
     driver = await Driver(ctx).start()
     assert [f.t for f in read_model(ctx.paths.live_frame_index, FrameIndex).frames] == [0.0, 1.0]
     await driver.stop()
@@ -225,17 +198,13 @@ async def test_a_fresh_lane_replays_the_captured_frames(ctx: StageContext):
     assert live == finalize_frames(ctx.paths, 1.0, 320)
 
 
-# --- Moments ----------------------------------------------------------------------------------
-
-
 def deck_ctx(tmp_path: Path, events: list) -> StageContext:
-    return make_ctx(tmp_path, events, live_frame_holdback_s=2.0)
+    return stage_ctx(tmp_path, live=True, events=events, live_frame_holdback_s=2.0)
 
 
 async def run_deck(ctx: StageContext, deck: Deck, seed: int = 0) -> tuple[LiveTimeline, list]:
-    """Deliver the deck's frames one per second, jittered within the holdback."""
     driver = await Driver(ctx).start()
-    data = [(float(i), encode(f)) for i, f in enumerate(deck.frames)]
+    data = [(float(i), image_bytes(f)) for i, f in enumerate(deck.frames)]
     rng = random.Random(seed)
     published_live = []
     for i in range(0, len(data), 2):
@@ -258,7 +227,6 @@ async def test_moments_match_the_detect_stage_and_close_while_recording(
     assert timeline.moments == expected
     assert read_model(ctx.paths.live_moments, Moments) == Moments(moments=expected)
     assert events == [(EventType.MOMENT_FOUND, moment_event(m)) for m in expected]
-    # The first two closed while recording; only the last waited for stop.
     assert published_live[-1] == 2
     assert timeline.closed_to == expected[-1].end
 
@@ -271,16 +239,12 @@ async def test_a_brief_flash_does_not_close_a_moment(tmp_path: Path, events: lis
     assert [(m.start, m.end) for m in timeline.moments] == [(0, 23)]
 
 
-# --- Shares ------------------------------------------------------------------------------------
-
-
 def slides(start: float, img: np.ndarray, seconds: int, seed: int) -> list[tuple[float, bytes]]:
     deck = Deck(seed).hold(img, seconds)
-    return [(float(start + i), encode(f)) for i, f in enumerate(deck.frames)]
+    return [(float(start + i), image_bytes(f)) for i, f in enumerate(deck.frames)]
 
 
 def assert_matches_ingest(ctx: StageContext, timeline: LiveTimeline) -> FrameIndex:
-    """The live outputs are what ingest and the detect stage make at stop, so they are promoted."""
     assert not timeline.skipped_input
     live = read_model(ctx.paths.live_frame_index, FrameIndex)
     live_files = frame_files(ctx.paths)
@@ -299,13 +263,9 @@ async def test_the_next_share_closes_the_moment_where_the_share_before_ended(
     tl = driver.timeline
     await driver.deliver(*slides(0, SLIDE_A, 10, seed=0))
     await driver.transcribed(30.0)
-    # Sharing stopped after 9 s, but nothing says so until the next share or stop: the moment
-    # stays open, and nothing past its start is closed.
     assert tl.moments == [] and tl.closed_to == 0.0
-    # A smaller source in the next share: its own size, compared only with itself.
     small = cv2.resize(SLIDE_B, (SLIDE_B.shape[1] // 2, SLIDE_B.shape[0] // 2))
     await driver.deliver(*slides(41, small, 12, seed=1), share=2)
-    # Closed while recording, one grid step after the share's last frame.
     assert [(m.start, m.end) for m in tl.moments] == [(0.0, 10.0)]
     timeline = await driver.stop()
 
@@ -314,7 +274,6 @@ async def test_the_next_share_closes_the_moment_where_the_share_before_ended(
 
 
 async def test_stop_then_continue_starts_a_new_share_at_the_same_time(tmp_path: Path, events: list):
-    """Continue after Stop is a new share, even of the same slide and at the same time."""
     ctx = deck_ctx(tmp_path, events)
     driver = await Driver(ctx).start()
     await driver.deliver(*slides(0, SLIDE_A, 10, seed=0))
@@ -325,7 +284,6 @@ async def test_stop_then_continue_starts_a_new_share_at_the_same_time(tmp_path: 
 
 
 async def test_closed_to_follows_the_transcript_until_the_first_share(tmp_path: Path, events: list):
-    """Record audio, then Share screen: notes follow the transcript until something is shown."""
     ctx = deck_ctx(tmp_path, events)
     driver = await Driver(ctx).start()
     tl = driver.timeline
@@ -333,7 +291,7 @@ async def test_closed_to_follows_the_transcript_until_the_first_share(tmp_path: 
     assert tl.closed_to == 20.0
     await driver.deliver(*slides(25, SLIDE_A, 10, seed=0))
     await driver.transcribed(40.0)
-    assert tl.closed_to == 20.0  # a moment is open from 25 s
+    assert tl.closed_to == 20.0
     timeline = await driver.stop()
     assert [(m.start, m.end) for m in timeline.moments] == [(25.0, 35.0)]
     assert_matches_ingest(ctx, timeline)
@@ -342,8 +300,6 @@ async def test_closed_to_follows_the_transcript_until_the_first_share(tmp_path: 
 async def test_a_share_continued_within_a_grid_step_ends_where_the_next_starts(
     tmp_path: Path, events: list
 ):
-    """Continue soon after Stop: the next share's first frame comes less than a grid step after
-    the last one, so the share before ends there, not a full step after its last frame."""
     ctx = deck_ctx(tmp_path, events)
     driver = await Driver(ctx).start()
     await driver.deliver(*((t + 0.3, data) for t, data in slides(0, SLIDE_A, 10, seed=0)))
@@ -356,18 +312,15 @@ async def test_a_share_continued_within_a_grid_step_ends_where_the_next_starts(
 async def test_an_earlier_share_s_frame_at_the_same_time_is_skipped_once_the_next_s_is_fed(
     ctx: StageContext,
 ):
-    """At the same time, ingest puts the earlier share's frame first; live already fed the later
-    share's, so the earlier one, arriving late, is skipped input."""
     driver = await Driver(ctx).start()
-    await driver.deliver((9.0, jpeg(COLOURS[0])))
-    await driver.deliver(*((t, jpeg(COLOURS[1])) for t in (10.0, 12.0)), share=2)  # 10 s is fed
-    await driver.deliver((10.0, jpeg(COLOURS[2])))  # share 1's, retried
+    await driver.deliver((9.0, solid_jpeg(COLOURS[0])))
+    await driver.deliver(*((t, solid_jpeg(COLOURS[1])) for t in (10.0, 12.0)), share=2)
+    await driver.deliver((10.0, solid_jpeg(COLOURS[2])))
     assert Lane.SCREEN in driver.timeline.skipped_input
     await driver.stop()
 
 
 async def test_a_fresh_lane_replays_every_share(tmp_path: Path, events: list):
-    """After a backend restart, every captured frame, of every share, is replayed."""
     ctx = deck_ctx(tmp_path, events)
     for t, data in slides(0, SLIDE_A, 10, seed=0):
         store_frame(ctx.paths, t, 1, data)
@@ -382,12 +335,10 @@ async def test_a_fresh_lane_replays_every_share(tmp_path: Path, events: list):
 async def test_a_share_s_frames_landing_after_the_next_share_s_are_skipped(
     tmp_path: Path, events: list
 ):
-    """Share 1's frames are still being retried when share 2's have been fed: fed now they would
-    be out of order, so they are skipped input, and stop runs detect again from everything."""
     ctx = deck_ctx(tmp_path, events)
     driver = await Driver(ctx).start()
     await driver.deliver(*slides(24, SLIDE_A, 12, seed=1), share=2)
-    await driver.deliver(*slides(10, SLIDE_B, 10, seed=0), share=1)  # late
+    await driver.deliver(*slides(10, SLIDE_B, 10, seed=0), share=1)
     assert Lane.SCREEN in driver.timeline.skipped_input
     timeline = await driver.stop()
     assert Lane.SCREEN in timeline.skipped_input
@@ -399,29 +350,22 @@ async def test_a_share_s_frames_landing_after_the_next_share_s_are_skipped(
 
 
 async def test_a_frame_from_before_closed_to_is_skipped(ctx: StageContext):
-    """Nothing was shared, so closed_to followed the transcript; a frame then arrives from before
-    it (delayed longer than the transcript): moments can no longer start there."""
     driver = await Driver(ctx).start()
     await driver.transcribed(20.0)
     assert driver.timeline.closed_to == 20.0
-    await driver.deliver((12.0, jpeg(COLOURS[0])))
+    await driver.deliver((12.0, solid_jpeg(COLOURS[0])))
     assert Lane.SCREEN in driver.timeline.skipped_input
     timeline = await driver.stop()
     assert timeline.moments == []
 
 
 def random_recording(rng: random.Random) -> list[tuple[float, int, bytes]]:
-    """Shares of random slides, with gaps inside shares (a minimised window, dropped frames),
-    and shares that start straight after the one before (Continue) or later (Share screen). The
-    second share always starts less than a grid step after the first's last frame."""
     images = [SLIDE_A, SLIDE_B, SLIDE_C]
     frames: list[tuple[float, int, bytes]] = []
     t = 0.0
     for share in range(1, rng.randint(2, 4) + 1):
         exact: float | None = None
         if share == 2:
-            # In the next grid cell, but less than a step after the last frame (whose time is a
-            # whole second plus 0.1-0.3 s here).
             last = frames[-1][0]
             exact = math.floor(last) + 1 + (last % 1) / 2
             t = math.floor(last) + 1
@@ -432,28 +376,26 @@ def random_recording(rng: random.Random) -> list[tuple[float, int, bytes]]:
             deck = Deck(rng.randrange(1000)).hold(rng.choice(images), seconds)
             for frame in deck.frames:
                 at = exact if exact is not None else t + rng.uniform(0.1, 0.3)
-                frames.append((round(at, 3), share, encode(frame)))
+                frames.append((round(at, 3), share, image_bytes(frame)))
                 exact = None
                 t += 1.0
             if rng.random() < 0.4:
-                t += rng.choice([2.0, 5.0, 20.0])  # a gap within the share
+                t += rng.choice([2.0, 5.0, 20.0])
     return frames
 
 
 @pytest.mark.parametrize("seed", range(6))
 async def test_random_shares_and_gaps_match_ingest(tmp_path: Path, events: list, seed: int):
-    """Live, frames arrive one at a time, neighbours swapped at random when they are less than
-    the 2 s holdback apart; the moments are still exactly what ingest and detect make at stop."""
     ctx = deck_ctx(tmp_path, events)
     rng = random.Random(seed)
     frames = random_recording(rng)
     second = next(i for i, f in enumerate(frames) if f[1] == 2)
-    assert frames[second][0] - frames[second - 1][0] < 1.0  # a share ending where the next starts
+    assert frames[second][0] - frames[second - 1][0] < 1.0
     arrival = list(frames)
     for i in range(0, len(arrival) - 1, 2):
         if arrival[i + 1][0] - arrival[i][0] < 1.9 and rng.random() < 0.7:
             arrival[i], arrival[i + 1] = arrival[i + 1], arrival[i]
-    assert arrival != frames  # some do arrive out of order
+    assert arrival != frames
     driver = await Driver(ctx).start()
     for frame in arrival:
         await driver.deliver_shared(frame)

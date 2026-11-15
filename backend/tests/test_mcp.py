@@ -1,6 +1,3 @@
-"""The read-only MCP server (iris mcp): listing, reading and searching notes from the data
-folder, through the MCP protocol as an assistant calls it."""
-
 import base64
 import os
 import sqlite3
@@ -26,10 +23,8 @@ from iris.mcp_server import (
 from iris.models import (
     GENERIC_FAILURE,
     FailureKind,
-    FrameRef,
     Notes,
     NotesEdits,
-    NotesVisual,
     SessionStatus,
     SessionType,
     SourceKind,
@@ -38,6 +33,8 @@ from iris.notes_edits import generated_hash
 from iris.notes_text import MAX_PASSAGES_PER_SESSION, MAX_QUERY_WORDS
 from iris.store.db import SessionStore
 from iris.store.layout import session_paths, write_model
+from tests.builders import notes_visual, session_with_notes
+from tests.media import image_bytes
 
 GENERATED = "Intro.\n\n# Forces\nGravity pulls down.\n\n::figure{#v1}"
 
@@ -49,7 +46,7 @@ def settings(tmp_path: Path) -> Settings:
 
 @pytest.fixture
 def store(settings: Settings):
-    store = SessionStore(settings.db_path)  # as the app writes it
+    store = SessionStore(settings.db_path)
     yield store
     store.close()
 
@@ -63,28 +60,22 @@ def add_session(
     markdown: str | None = GENERATED,
     notes_title: str = "Loops and forces",
 ) -> str:
-    session = store.create(title, SourceKind.BROWSER_LIVE)
-    store.update(session.id, status=status)
-    paths = session_paths(settings.sessions_dir, session.id).ensure()
-    if markdown is not None:
-        notes = Notes(
-            session_id=session.id,
-            session_type=SessionType.LECTURE,
-            title=notes_title,
+    if markdown is None:
+        sid = store.create(title, SourceKind.BROWSER_LIVE).id
+        session_paths(settings.sessions_dir, sid).ensure()
+    else:
+        sid, _ = session_with_notes(
+            store,
+            settings,
+            title,
+            source=SourceKind.BROWSER_LIVE,
+            notes_title=notes_title,
             markdown=markdown,
-            visuals=[
-                NotesVisual(
-                    id="v1",
-                    moment_id="m1",
-                    frame=FrameRef(t=0, path="frames/0.jpg"),
-                    caption="Forces on a loop",
-                    path="visuals/v1.svg",
-                )
-            ],
-            format_version=2,
+            visuals=[notes_visual()],
+            session_type=SessionType.LECTURE,
         )
-        write_model(paths.notes, notes)
-    return session.id
+    store.update(sid, status=status)
+    return sid
 
 
 def save_edits(settings: Settings, sid: str, markdown: str, *, stale: bool = False) -> None:
@@ -122,9 +113,6 @@ async def search(settings: Settings, query: str) -> list[dict]:
     return result.structured_content["result"]
 
 
-# --- tools ----------------------------------------------------------------------------------
-
-
 async def test_every_tool_is_read_only(settings, store):
     async with Client(create_server(settings)) as client:
         tools = (await client.list_tools()).tools
@@ -134,14 +122,11 @@ async def test_every_tool_is_read_only(settings, store):
         assert tool.annotations.destructive_hint is False
 
 
-# --- list_sessions ---------------------------------------------------------------------------
-
-
 async def test_list_shows_both_titles_kind_and_whether_notes_can_be_read(settings, store):
     done = add_session(store, settings, "Physics")
     running = add_session(store, settings, status=SessionStatus.PROCESSING, markdown=None)
     sessions = await listed(settings)
-    assert [s["id"] for s in sessions] == [running, done]  # newest first
+    assert [s["id"] for s in sessions] == [running, done]
     assert sessions[1] | {"added_at": None} == {
         "id": done,
         "title": "Physics",
@@ -168,10 +153,7 @@ async def test_no_data_folder_says_where_it_looked(settings):
     message = await error_of(settings, "list_sessions")
     assert str(settings.data_dir.resolve()) in message
     assert "IRIS_DATA_DIR" in message
-    assert not settings.data_dir.exists()  # looking never creates it
-
-
-# --- get_notes -------------------------------------------------------------------------------
+    assert not settings.data_dir.exists()
 
 
 async def test_notes_have_a_header_and_figures_as_captions(settings, store):
@@ -186,9 +168,9 @@ async def test_notes_have_a_header_and_figures_as_captions(settings, store):
 
 async def test_notes_give_the_date_where_the_user_is(settings, store, monkeypatch):
     sid = add_session(store, settings)
-    with sqlite3.connect(settings.db_path) as conn:  # added 03:00 UTC on 2 November
+    with sqlite3.connect(settings.db_path) as conn:
         conn.execute("UPDATE sessions SET created_at = '2026-11-02T03:00:00+00:00'")
-    monkeypatch.setenv("TZ", "America/Los_Angeles")  # 20:00 on 1 November there
+    monkeypatch.setenv("TZ", "America/Los_Angeles")
     time.tzset()
     try:
         text = await text_of(settings, "get_notes", session_id=sid)
@@ -215,7 +197,7 @@ async def test_notes_made_again_after_the_edits_are_given_as_the_newest(settings
     assert "My own notes" not in text and "edits" not in text
     assert [r["session_id"] for r in await search(settings, "gravity")] == [sid]
     assert await search(settings, "torque") == []
-    assert session_paths(settings.sessions_dir, sid).notes_edits.exists()  # kept for the app
+    assert session_paths(settings.sessions_dir, sid).notes_edits.exists()
 
 
 async def test_damaged_edits_fall_back_to_the_generated_notes(settings, store):
@@ -260,16 +242,14 @@ async def test_a_file_that_cant_be_opened_never_breaks_the_other_sessions(settin
     save_edits(settings, bad, "# Mine\nGravity edited.")
     path = getattr(session_paths(settings.sessions_dir, bad), file)
     path.unlink()
-    path.mkdir()  # can't be read as a file, as with wrong permissions
+    path.mkdir()
     sessions = {s["id"]: s for s in await listed(settings)}
     assert sessions[good]["has_notes"] is True
-    # Edits that can't be opened are never passed over for the generated notes: they may be
-    # intact, and the user should see why rather than notes without their edits.
     assert sessions[bad]["has_notes"] is False
     assert {r["session_id"] for r in await search(settings, "gravity")} == {good}
     message = await error_of(settings, "get_notes", session_id=bad)
     assert "couldn't be opened" in message and "permissions" in message
-    assert "Making them again" not in message  # a re-run would cost money and not help
+    assert "Making them again" not in message
 
 
 async def test_damaged_notes_say_so(settings, store):
@@ -286,8 +266,6 @@ async def test_an_unknown_id_is_refused_without_touching_files(settings, store, 
     assert "There is no session" in message and "list_sessions" in message
 
 
-# --- get_figure ------------------------------------------------------------------------------
-
 SVG = (
     '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="20">'
     '<rect width="40" height="20" fill="#4b44d6"/></svg>'
@@ -295,11 +273,10 @@ SVG = (
 
 
 def set_figure(settings: Settings, sid: str, path: str, data: bytes | None) -> None:
-    """Point figure v1 at ``path`` and, unless ``data`` is None, write that file."""
     paths = session_paths(settings.sessions_dir, sid)
     notes = Notes.model_validate_json(paths.notes.read_text())
     notes.visuals[0].path = path
-    if path.endswith(".svg"):  # as Iris records a redraw that passed its check
+    if path.endswith(".svg"):
         notes.visuals[0].render_as, notes.visuals[0].verified = "svg", True
     write_model(paths.notes, notes)
     if data is not None:
@@ -311,10 +288,7 @@ async def figure(settings: Settings, sid: str, figure_id: str = "v1"):
 
 
 def encoded(width: int, height: int, ext: str) -> bytes:
-    """A real image of that size, as Iris's figure files are."""
-    ok, data = cv2.imencode(ext, np.full((height, width, 3), 120, np.uint8))
-    assert ok
-    return data.tobytes()
+    return image_bytes(np.full((height, width, 3), 120, np.uint8), ext)
 
 
 def size_of(image) -> tuple[int, int]:
@@ -331,7 +305,7 @@ async def test_a_redrawn_figure_comes_as_a_png_after_its_caption(settings, store
     assert caption.text == "[Figure v1: Forces on a loop]"
     assert origin.text == "Iris's redraw, checked against the screen."
     assert image.type == "image" and image.mime_type == "image/png"
-    width, height = size_of(image)  # drawn large, then fitted to Claude's limits
+    width, height = size_of(image)
     assert width <= MAX_IMAGE_EDGE_PX and width * height <= MAX_IMAGE_PIXELS
     assert width > MAX_IMAGE_EDGE_PX * 0.8
 
@@ -355,7 +329,7 @@ async def test_a_large_image_is_scaled_down_to_claudes_limits(settings, store, e
     [_, _, image] = (await figure(settings, sid)).content
     width, height = size_of(image)
     assert width <= MAX_IMAGE_EDGE_PX and width * height <= MAX_IMAGE_PIXELS
-    assert abs(width / height - 1.5) < 0.01  # same shape
+    assert abs(width / height - 1.5) < 0.01
 
 
 async def test_an_image_still_too_large_to_send_is_refused(settings, store, monkeypatch):
@@ -369,10 +343,10 @@ async def test_an_image_still_too_large_to_send_is_refused(settings, store, monk
 @pytest.mark.parametrize(
     ("width", "height", "fitted"),
     [
-        (1568, 700, None),  # fits both limits
-        (3136, 1000, (1568, 500)),  # long edge
-        (1500, 1500, (1072, 1072)),  # pixel count
-        (100, 20000, (7, 1568)),  # a tall figure fits its long edge too
+        (1568, 700, None),
+        (3136, 1000, (1568, 500)),
+        (1500, 1500, (1072, 1072)),
+        (100, 20000, (7, 1568)),
     ],
 )
 def test_fitted_size(width, height, fitted):
@@ -432,9 +406,6 @@ async def test_a_figure_of_a_session_without_notes_says_why(settings, store):
     sid = add_session(store, settings, status=SessionStatus.PROCESSING, markdown=None)
     message = await error_of(settings, "get_figure", session_id=sid, figure_id="v1")
     assert "aren't ready yet" in message
-
-
-# --- search ----------------------------------------------------------------------------------
 
 
 async def test_search_finds_passages_across_sessions_best_first(settings, store):
@@ -534,12 +505,7 @@ async def test_a_search_with_too_many_words_is_refused(settings, store):
     assert await search(settings, allowed) == []
 
 
-# --- read only -------------------------------------------------------------------------------
-
-
 def data_files(settings: Settings) -> dict[Path, int]:
-    # Without SQLite's -wal and -shm files: it creates them to read a WAL database, even
-    # read-only; they are its bookkeeping, not data.
     return {
         p: p.stat().st_mtime_ns
         for p in settings.data_dir.rglob("*")
@@ -550,7 +516,7 @@ def data_files(settings: Settings) -> dict[Path, int]:
 async def test_reading_everything_changes_no_file(settings, store):
     sid = add_session(store, settings)
     save_edits(settings, sid, "My notes.")
-    store.close()  # as when Iris is closed
+    store.close()
     before = data_files(settings)
     await listed(settings)
     await text_of(settings, "get_notes", session_id=sid)
@@ -558,14 +524,9 @@ async def test_reading_everything_changes_no_file(settings, store):
     assert data_files(settings) == before
 
 
-# --- the command -----------------------------------------------------------------------------
-
-
 async def test_iris_mcp_serves_over_stdio_and_ignores_the_folders_env_file(
     settings, store, tmp_path
 ):
-    """The command an assistant runs: stdout must carry only the protocol. It starts in the
-    assistant's chosen folder, whose .env (another project's) must not apply."""
     sid = add_session(store, settings, "Physics")
     project = tmp_path / "project"
     project.mkdir()

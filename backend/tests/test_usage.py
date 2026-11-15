@@ -1,9 +1,3 @@
-"""Model-call accounting: the call log, usage.json, prices, the API route and ``iris cost``.
-
-The OpenAI client is faked under ``iris.llm.client._client``, so calls go through the real
-``get_openai`` proxy that records them.
-"""
-
 import asyncio
 import base64
 import json
@@ -11,7 +5,6 @@ import logging
 import sqlite3
 import sys
 import threading
-import time
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
@@ -23,7 +16,6 @@ from openai.types.images_response import ImagesResponse
 
 from iris import cli
 from iris.config import PRICES_CHECKED, ModelPrice, Settings, get_settings
-from iris.llm import client as llm_client
 from iris.llm import usage
 from iris.llm.client import get_openai
 from iris.main import create_app
@@ -35,21 +27,22 @@ from iris.models import (
     SourceKind,
     Stage,
     UsageRecord,
-    Visual,
 )
 from iris.pipeline.context import StageContext
-from iris.pipeline.stages import render, select
+from iris.pipeline.stages import render
 from iris.store.db import SessionStore
 from iris.store.layout import SessionPaths, read_model, session_paths, write_model
+from tests.builders import figure_to_render, stage_ctx
+from tests.fakes import PipelineOpenAI, fake_openai, install_client
+from tests.media import make_media
+from tests.waiting import wait_until_idle
 
-SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 9 9"><rect width="9"/></svg>'
 IMAGE = b"\x89PNG generated"
 
-# Usage reported by the fakes, and what it costs at the default prices.
 CHAT_USAGE = {"prompt": 1000, "cached": 200, "completion": 500, "reasoning": 300}
-CHAT_COST = (800 * 5.00 + 200 * 0.50 + 500 * 30.00) / 1e6  # gpt-5.5
-IMAGE_COST = (100 * 5.00 + 1000 * 30.00) / 1e6  # gpt-image-2: text input + image output
-WHISPER_SECONDS = 1.2  # billed as 2 s
+CHAT_COST = (800 * 5.00 + 200 * 0.50 + 500 * 30.00) / 1e6
+IMAGE_COST = (100 * 5.00 + 1000 * 30.00) / 1e6
+WHISPER_SECONDS = 1.2
 WHISPER_COST = 2 * 0.0001
 
 
@@ -79,49 +72,18 @@ def image_response():
     )
 
 
-class FakeOpenAI:
-    """Answers each structured call by its response format, like the real models would."""
-
+class FakeOpenAI(PipelineOpenAI):
     def __init__(self):
-        self.calls: list[dict] = []
-        self.chat = SimpleNamespace(completions=SimpleNamespace(parse=self.parse))
+        super().__init__()
         self.images = SimpleNamespace(generate=self.generate)
-        self.audio = SimpleNamespace(transcriptions=SimpleNamespace(create=self.transcribe))
 
-    async def parse(self, **kwargs):
-        from tests.test_write import section
-
-        self.calls.append(kwargs)
-        schema = kwargs.get("response_format")
-        if schema is None:
-            result = None
-        elif schema is select.Decisions:
-            content = kwargs["messages"][1]["content"]
-            ids = [json.loads(p["text"])["moment_id"] for p in content[1:] if p["type"] == "text"]
-            figure = select.ElementDecision(
-                kind="figure",
-                content="A coloured slide",
-                build=0,
-                region=None,
-                caption="Colored slide",
-                render_as="svg",
-            )
-            result = select.Decisions(
-                decisions=[select.Decision(moment_id=i, keep=True, elements=[figure]) for i in ids]
-            )
-        elif schema is render.SvgDrawing:
-            result = render.SvgDrawing(svg=SVG)
-        elif schema is render.Check:
-            # The SVG redraw fails its check and the generated image passes, so render makes
-            # every kind of call.
-            candidate = kwargs["messages"][1]["content"][2]["image_url"]["url"]
-            passed = candidate.endswith(base64.b64encode(IMAGE).decode())
-            result = render.Check(matches=passed, problems=[] if passed else ["wrong shape"])
-        else:
-            payload = json.loads(kwargs["messages"][1]["content"])
-            ids = [r["id"] for r in payload["records"] if r["kind"] == "visual"]
-            result = section(ids)
+    def respond(self, result, kwargs):
         return chat_response(result, model=kwargs["model"])
+
+    def check(self, kwargs) -> render.Check:
+        candidate = kwargs["messages"][1]["content"][2]["image_url"]["url"]
+        passed = candidate.endswith(base64.b64encode(IMAGE).decode())
+        return render.Check(matches=passed, problems=[] if passed else ["wrong shape"])
 
     async def generate(self, **kwargs):
         self.calls.append(kwargs)
@@ -129,62 +91,38 @@ class FakeOpenAI:
 
     async def transcribe(self, **kwargs):
         self.calls.append(kwargs)
-        return {
-            "language": "english",
-            "segments": [{"start": 0, "end": 2, "text": "Ship the prototype. Alex will test it."}],
-            "usage": {"type": "duration", "seconds": WHISPER_SECONDS},
-        }
+        heard = await super().transcribe(**kwargs)
+        return {**heard, "usage": {"type": "duration", "seconds": WHISPER_SECONDS}}
 
 
 @pytest.fixture
 def fake(monkeypatch) -> FakeOpenAI:
     fake = FakeOpenAI()
-    monkeypatch.setattr(llm_client, "_client", lambda _key: fake)
+    install_client(monkeypatch, fake)
     return fake
 
 
 @pytest.fixture
 def ctx(tmp_path) -> StageContext:
-    return StageContext(
-        session_id="s1",
-        source=SourceKind.UPLOAD,
-        paths=SessionPaths(tmp_path / "s1").ensure(),
-        settings=Settings(data_dir=tmp_path, openai_api_key="test", render_attempts=1),
-    )
-
-
-def wait_idle(client: TestClient, sid: str, timeout: float = 10.0) -> dict:
-    runner = client.app.state.runner
-    deadline = time.monotonic() + timeout
-    while runner.is_running(sid):
-        assert time.monotonic() < deadline, "session never finished"
-        time.sleep(0.05)
-    return client.get(f"/api/sessions/{sid}").json()
-
-
-# --- The whole pipeline ---------------------------------------------------------------------------
+    return stage_ctx(tmp_path, openai_api_key="test", render_attempts=1)
 
 
 def test_pipeline_records_every_call_and_cached_rerun_costs_nothing(tmp_path, fake):
-    from tests.test_ingest import make_media
-
     settings = Settings(data_dir=tmp_path / "data", openai_api_key="test", render_attempts=1)
     with TestClient(create_app(settings)) as client:
         recording = make_media(tmp_path / "talk.mp4", seconds=2)
         sid = client.post(
             "/api/sessions", files={"file": ("talk.mp4", recording.read_bytes())}
         ).json()["id"]
-        session = wait_idle(client, sid)
+        session = wait_until_idle(client, sid)
         assert session["status"] == "done", session.get("error")
 
         body = client.get(f"/api/sessions/{sid}/usage").json()
         result = SessionUsage.model_validate(body)
         assert len(result.records) == len(fake.calls) > 0
-        # usage.json was refreshed after the last stage that made calls.
         summary = settings.sessions_dir / sid / "usage.json"
         assert read_model(summary, SessionUsage) == result
 
-        # Every call is attributed to its stage and purpose, and priced from the table.
         expected = {
             ("transcription", Stage.TRANSCRIBE, "whisper-1", WHISPER_COST),
             ("screen_reading", Stage.SELECT, "gpt-5.5", CHAT_COST),
@@ -199,7 +137,7 @@ def test_pipeline_records_every_call_and_cached_rerun_costs_nothing(tmp_path, fa
             assert cost == pytest.approx(next(c for p2, *_, c in expected if p2 == p)), (p, s, m)
 
         transcription = next(r for r in result.records if r.purpose == "transcription")
-        assert transcription.audio_seconds == 2  # 1.2 s, billed per second rounded up
+        assert transcription.audio_seconds == 2
         check = next(r for r in result.records if r.purpose == "figure_check")
         assert (check.input_tokens, check.cached_input_tokens) == (1000, 200)
         assert (check.output_tokens, check.reasoning_tokens) == (500, 300)
@@ -207,7 +145,6 @@ def test_pipeline_records_every_call_and_cached_rerun_costs_nothing(tmp_path, fa
         assert (image.images, image.output_image_tokens) == (1, 1000)
         assert all(r.latency_s >= 0 and r.unpriced is None for r in result.records)
 
-        # Totals add up per stage, per model and overall.
         total = sum(r.cost_usd for r in result.records)
         assert result.total.cost_usd == pytest.approx(total)
         assert list(result.by_stage) == ["transcribe", "select", "write", "render"]
@@ -220,22 +157,17 @@ def test_pipeline_records_every_call_and_cached_rerun_costs_nothing(tmp_path, fa
         )
         assert result.total.input_tokens == sum(r.input_tokens for r in result.records)
 
-        # A re-run reuses every cache: no new calls, no new cost.
         calls_before = len(fake.calls)
         assert client.post(f"/api/sessions/{sid}/run").status_code == 200
-        assert wait_idle(client, sid)["status"] == "done"
+        assert wait_until_idle(client, sid)["status"] == "done"
         assert len(fake.calls) == calls_before
         again = SessionUsage.model_validate(client.get(f"/api/sessions/{sid}/usage").json())
         assert again.records == result.records
         assert read_model(summary, SessionUsage) == result
         assert again.total.cost_usd == pytest.approx(total)
-        # The session list's cost matches, before and after the cached re-run.
         listed = next(s for s in client.get("/api/sessions").json() if s["id"] == sid)
         assert listed["cost_usd"] == pytest.approx(total)
         assert listed["cost_partial"] is False
-
-
-# --- Cost in the session list --------------------------------------------------------------------
 
 
 def call(cost: float | None = 0.25, stage: Stage = Stage.RENDER) -> UsageRecord:
@@ -273,7 +205,7 @@ def test_session_list_cost_counts_priced_calls_and_flags_unpriced(api):
     for record in (call(0.25), call(None), call(0.5, Stage.WRITE)):
         usage.append_record(paths.usage_log, record)
     row = listed(client, sid)
-    assert row["cost_usd"] == pytest.approx(0.75)  # never a guess for the unpriced call
+    assert row["cost_usd"] == pytest.approx(0.75)
     assert row["cost_partial"] is True
     one = client.get(f"/api/sessions/{sid}").json()
     assert (one["cost_usd"], one["cost_partial"]) == (row["cost_usd"], True)
@@ -283,9 +215,9 @@ def test_session_list_cost_is_none_without_model_calls(api):
     client, settings = api
     sid, paths = new_session(client, settings)
     assert (listed(client, sid)["cost_usd"], listed(client, sid)["cost_partial"]) == (None, False)
-    paths.usage_log.touch()  # an empty log is no calls either
+    paths.usage_log.touch()
     assert listed(client, sid)["cost_usd"] is None
-    usage.append_record(paths.usage_log, call(0.0))  # a call that cost nothing (e.g. it failed)
+    usage.append_record(paths.usage_log, call(0.0))
     assert listed(client, sid)["cost_usd"] == 0
 
 
@@ -301,10 +233,10 @@ def test_session_list_cost_adds_a_reruns_calls_reading_only_new_lines(api, monke
     monkeypatch.setattr(
         UsageRecord, "model_validate_json", lambda data: parsed.append(data) or validate(data)
     )
-    usage.append_record(paths.usage_log, call(0.5))  # a re-run that made a new call
+    usage.append_record(paths.usage_log, call(0.5))
     assert listed(client, sid)["cost_usd"] == pytest.approx(1.25)
-    assert len(parsed) == 1  # only the appended line was read
-    assert listed(client, sid)["cost_usd"] == pytest.approx(1.25)  # nothing appended
+    assert len(parsed) == 1
+    assert listed(client, sid)["cost_usd"] == pytest.approx(1.25)
     assert len(parsed) == 1
 
 
@@ -315,12 +247,11 @@ async def test_session_list_cost_is_current_while_processing(api, fake):
     ctx = StageContext(session_id=sid, source=SourceKind.UPLOAD, paths=paths, settings=settings)
     with usage.recording(ctx, Stage.SELECT):
         await get_openai(settings).chat.completions.parse(model="gpt-5.5", messages=[])
-        assert not paths.usage.exists()  # usage.json waits for the stage to end
+        assert not paths.usage.exists()
         row = listed(client, sid)
         assert row["status"] == "processing"
         assert row["cost_usd"] == pytest.approx(CHAT_COST)
 
-        # A line still being written (e.g. by another process) waits until it is complete.
         line = call(0.5).model_dump_json()
         with paths.usage_log.open("a") as f:
             f.write(line[:20])
@@ -335,15 +266,15 @@ def test_session_list_cost_skips_damage_and_recounts_a_replaced_log(api, caplog)
     sid, paths = new_session(client, settings)
     usage.append_record(paths.usage_log, call(0.25))
     with paths.usage_log.open("a") as f:
-        f.write('{"at": "2026-11-03T00:00:00Z", "purp')  # cut off by a crash
+        f.write('{"at": "2026-11-03T00:00:00Z", "purp')
     assert listed(client, sid)["cost_usd"] == pytest.approx(0.25)
-    usage.append_record(paths.usage_log, call(0.5))  # starts a new line after the damage
+    usage.append_record(paths.usage_log, call(0.5))
     with caplog.at_level(logging.WARNING, "iris.llm.usage"):
         assert listed(client, sid)["cost_usd"] == pytest.approx(0.75)
     assert "skipping unreadable line" in caplog.text
-    assert listed(client, sid)["cost_usd"] == pytest.approx(0.75)  # counted once
+    assert listed(client, sid)["cost_usd"] == pytest.approx(0.75)
 
-    paths.usage_log.unlink()  # replaced by a shorter log
+    paths.usage_log.unlink()
     usage.append_record(paths.usage_log, call(0.1))
     assert listed(client, sid)["cost_usd"] == pytest.approx(0.1)
 
@@ -355,7 +286,6 @@ def test_deleting_a_session_forgets_its_running_total(api):
         usage.append_record(paths.usage_log, call(0.25))
     assert listed(client, sid)["cost_usd"] == pytest.approx(0.75)
     assert client.delete(f"/api/sessions/{sid}").status_code == 204
-    # A new session folder's log at the same path is counted from zero, not added to the old one.
     paths.ensure()
     for _ in range(3):
         usage.append_record(paths.usage_log, call(0.1))
@@ -365,7 +295,7 @@ def test_deleting_a_session_forgets_its_running_total(api):
 def test_one_unreadable_log_does_not_break_the_session_list(api, caplog):
     client, settings = api
     broken, broken_paths = new_session(client, settings)
-    broken_paths.usage_log.mkdir()  # opening it fails with an OSError other than "not found"
+    broken_paths.usage_log.mkdir()
     fine, fine_paths = new_session(client, settings)
     usage.append_record(fine_paths.usage_log, call(0.25))
     with caplog.at_level(logging.WARNING, "iris.llm.usage"):
@@ -386,9 +316,9 @@ def test_a_read_error_after_opening_the_log_does_not_break_the_session_list(api,
         raise OSError(5, "Input/output error")
 
     monkeypatch.setattr(usage.os, "fstat", failing_read)
-    assert listed(client, sid)["cost_usd"] is None  # the list still loads
+    assert listed(client, sid)["cost_usd"] is None
     monkeypatch.undo()
-    assert listed(client, sid)["cost_usd"] == pytest.approx(0.25)  # counted once readable
+    assert listed(client, sid)["cost_usd"] == pytest.approx(0.25)
 
 
 def test_list_and_usage_agree_on_records_with_unicode_line_separators(api):
@@ -410,9 +340,6 @@ def test_rerun_returns_the_sessions_cost(api, monkeypatch):
     assert (body["cost_usd"], body["cost_partial"]) == (0.25, False)
 
 
-# --- Recording ------------------------------------------------------------------------------------
-
-
 async def test_unpriced_model_is_flagged_not_guessed(ctx, fake):
     with usage.recording(ctx, Stage.SELECT):
         await get_openai(ctx.settings).chat.completions.parse(model="mystery-1", messages=[])
@@ -427,7 +354,7 @@ async def test_unpriced_model_is_flagged_not_guessed(ctx, fake):
 
 
 async def test_usage_recording_failure_never_fails_the_stage(ctx, fake, monkeypatch, caplog):
-    write_model(ctx.paths.selection, Selection(visuals=[visual(ctx)]))
+    write_model(ctx.paths.selection, Selection(visuals=[figure_to_render(ctx)]))
 
     def broken(*_args):
         raise OSError("disk full")
@@ -454,8 +381,7 @@ async def test_unreadable_usage_in_a_response_is_logged_and_the_result_returned(
     async def parse(**_kwargs):
         return weird
 
-    fake = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(parse=parse)))
-    monkeypatch.setattr(llm_client, "_client", lambda _key: fake)
+    install_client(monkeypatch, fake_openai(parse=parse))
     with usage.recording(ctx, Stage.WRITE):
         assert await get_openai(ctx.settings).chat.completions.parse(model="gpt-5.5") is weird
     assert not ctx.paths.usage.exists()
@@ -465,8 +391,7 @@ async def test_failed_call_is_recorded_and_still_raises(ctx, monkeypatch):
     async def parse(**_kwargs):
         raise TimeoutError("took too long")
 
-    fake = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(parse=parse)))
-    monkeypatch.setattr(llm_client, "_client", lambda _key: fake)
+    install_client(monkeypatch, fake_openai(parse=parse))
     with usage.recording(ctx, Stage.WRITE), pytest.raises(TimeoutError):
         await get_openai(ctx.settings).chat.completions.parse(model="gpt-5.5")
     [record] = read_model(ctx.paths.usage, SessionUsage).records
@@ -491,19 +416,14 @@ async def test_with_options_client_is_metered(ctx, fake):
 
 async def test_other_client_attributes_pass_through(ctx, monkeypatch):
     fake = SimpleNamespace(api_key="k", chat=SimpleNamespace(other="x"))
-    monkeypatch.setattr(llm_client, "_client", lambda _key: fake)
+    install_client(monkeypatch, fake)
     proxied = get_openai(ctx.settings)
     assert proxied.api_key == "k"
     assert proxied.chat.other == "x"
 
 
 async def test_concurrent_stages_and_threads_keep_every_record(ctx, fake, tmp_path):
-    other = StageContext(
-        session_id="s2",
-        source=SourceKind.UPLOAD,
-        paths=SessionPaths(tmp_path / "s2").ensure(),
-        settings=ctx.settings,
-    )
+    other = stage_ctx(tmp_path, root="s2", settings=ctx.settings)
 
     async def stage(c: StageContext, s: Stage, n: int) -> None:
         with usage.recording(c, s):
@@ -545,11 +465,11 @@ def test_damaged_log_lines_are_skipped(ctx, caplog):
     )
     usage.append_record(ctx.paths.usage_log, record)
     with ctx.paths.usage_log.open("a") as f:
-        f.write('{"at": "2026-11-03T00:00:00Z", "purp')  # cut off by a crash
+        f.write('{"at": "2026-11-03T00:00:00Z", "purp')
     with caplog.at_level(logging.WARNING, "iris.llm.usage"):
         assert usage.read_usage(ctx.paths.usage_log).records == [record]
     assert "skipping unreadable line 2" in caplog.text
-    usage.append_record(ctx.paths.usage_log, record)  # appends after the damaged line
+    usage.append_record(ctx.paths.usage_log, record)
     assert usage.read_usage(ctx.paths.usage_log).total.calls == 2
 
 
@@ -573,9 +493,6 @@ async def test_stage_with_only_cache_hits_leaves_usage_untouched(ctx, fake):
     with usage.recording(ctx, Stage.WRITE):
         pass
     assert not ctx.paths.usage.exists() and not ctx.paths.usage_log.exists()
-
-
-# --- Reading usage from SDK responses -------------------------------------------------------------
 
 
 def test_measure_real_sdk_responses():
@@ -657,9 +574,6 @@ def test_audio_without_usage_is_billed_from_the_wav_sent():
     }
 
 
-# --- Pricing --------------------------------------------------------------------------------------
-
-
 PRICES = Settings().model_prices
 
 
@@ -668,11 +582,9 @@ PRICES = Settings().model_prices
     [
         ("gpt-5.5", {"input_tokens": 100_000}, 0.50),
         ("gpt-5.5", {"input_tokens": 1000, "cached_input_tokens": 1000}, 0.0005),
-        # Chat image tokens are ordinary input tokens.
         ("gpt-5.5", {"input_tokens": 1000, "input_image_tokens": 765}, 0.005),
         ("gpt-5.5", {"output_tokens": 1000, "reasoning_tokens": 900}, 0.03),
-        ("gpt-5.5-2026-04-23", {"output_tokens": 1000}, 0.03),  # dated snapshot
-        # Long context: more than 272K input tokens is billed at the long-context rates.
+        ("gpt-5.5-2026-04-23", {"output_tokens": 1000}, 0.03),
         ("gpt-5.5", {"input_tokens": 300_000, "output_tokens": 1000}, 3.0 + 0.045),
         (
             "gpt-image-2",
@@ -704,7 +616,6 @@ def test_price_call(model, m, cost):
     [
         ("gpt-transcribe", {"audio_seconds": 10}, "no price for model 'gpt-transcribe'"),
         ("gpt-5.5-turbo", {"input_tokens": 1}, "no price for model 'gpt-5.5-turbo'"),
-        # A token-billed model whose response gave no tokens, only a duration.
         ("gpt-4o-transcribe", {"audio_seconds": 10}, "gpt-4o-transcribe: no per-second audio"),
         ("gpt-image-2", {"output_tokens": 50, "output_image_tokens": 0}, "gpt-image-2: no output"),
         ("whisper-1", {"input_tokens": 10}, "whisper-1: no input"),
@@ -723,14 +634,11 @@ def test_price_table_overrides_merge_with_defaults(monkeypatch):
     assert prices["gpt-5.5"].output == 30.00
 
 
-# --- Controls -------------------------------------------------------------------------------------
-
-
 async def test_reasoning_effort_per_call_type(ctx, fake):
     ctx.settings = ctx.settings.model_copy(
         update={"check_reasoning_effort": "low", "notes_reasoning_effort": "high"}
     )
-    v = visual(ctx)
+    v = figure_to_render(ctx)
     await render.check(ctx, v, b"src", b"candidate")
     await render.draw_svg(ctx, v, b"src", [])
     from iris.pipeline.stages import write
@@ -740,17 +648,14 @@ async def test_reasoning_effort_per_call_type(ctx, fake):
 
 
 def test_render_cache_key_changes_only_when_an_effort_override_is_set(ctx):
-    v = visual(ctx)
+    v = figure_to_render(ctx)
     base = render._cache_key(ctx, v, b"src")
     ctx.settings = ctx.settings.model_copy(update={"select_reasoning_effort": "low"})
     assert render._cache_key(ctx, v, b"src") == base
     ctx.settings = ctx.settings.model_copy(update={"check_reasoning_effort": "medium"})
-    assert render._cache_key(ctx, v, b"src") == base  # same as the default: same key
+    assert render._cache_key(ctx, v, b"src") == base
     ctx.settings = ctx.settings.model_copy(update={"check_reasoning_effort": "low"})
     assert render._cache_key(ctx, v, b"src") != base
-
-
-# --- API and CLI ----------------------------------------------------------------------------------
 
 
 def test_usage_route(client: TestClient, settings):
@@ -814,7 +719,7 @@ def test_iris_cost_prints_a_table_per_stage(tmp_path, monkeypatch, capsys):
             "total",
         ]
         render_row = stage_table[3].split()
-        assert render_row[1] == "3"  # calls
+        assert render_row[1] == "3"
         assert render_row[-4:] == ["$0.3000", "+", "1", "unpriced"]
         assert "  no price for model 'x'" in lines
         assert f"Prices checked against OpenAI's pricing page on {PRICES_CHECKED}." in lines
@@ -841,7 +746,7 @@ def test_iris_cost_defaults_to_the_most_recent_session(tmp_path, monkeypatch, ca
         older = store.create("older", SourceKind.UPLOAD)
         newer = store.create("newer", SourceKind.UPLOAD)
         store.close()
-        with sqlite3.connect(get_settings().db_path) as conn:  # make the order unambiguous
+        with sqlite3.connect(get_settings().db_path) as conn:
             conn.execute(
                 "UPDATE sessions SET created_at = '2020-01-01T00:00:00+00:00' WHERE id = ?",
                 (older.id,),
@@ -859,26 +764,4 @@ def test_iris_cost_defaults_to_the_most_recent_session(tmp_path, monkeypatch, ca
 def test_iris_cost_with_no_calls():
     assert cli.format_usage("abc", usage.summarize([])) == (
         "session abc: $0.0000 over 0 model calls (none recorded)"
-    )
-
-
-# --- Helpers --------------------------------------------------------------------------------------
-
-
-def visual(ctx: StageContext) -> Visual:
-    import cv2
-    import numpy as np
-
-    from iris.models import FrameRef
-
-    cv2.imwrite(str(ctx.paths.visuals_dir / "v1.source.jpg"), np.full((20, 40, 3), 255, np.uint8))
-    return Visual(
-        id="v1",
-        moment_id="m1",
-        frame=FrameRef(t=0, path="frames/0.jpg"),
-        caption="Orbit",
-        path="visuals/v1.source.jpg",
-        source_path="visuals/v1.source.jpg",
-        description="Two bodies orbiting",
-        render_as="svg",
     )

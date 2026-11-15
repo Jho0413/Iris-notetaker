@@ -7,6 +7,8 @@ from fastapi.testclient import TestClient
 from iris import speech
 from iris.config import Settings
 from iris.main import create_app
+from iris.models import EventType
+from iris.store.layout import SessionPaths
 
 
 @pytest.fixture
@@ -20,8 +22,17 @@ def client(settings: Settings):
         yield c
 
 
+@pytest.fixture
+def events() -> list[tuple[EventType, dict]]:
+    return []
+
+
+@pytest.fixture
+def paths(tmp_path: Path) -> SessionPaths:
+    return SessionPaths(tmp_path / "s1").ensure()
+
+
 def loud_slices(samples: np.ndarray, rate: int) -> np.ndarray:
-    """A stand-in for Silero: a slice is voice (1.0) if any sample in it is loud."""
     n = round(speech.SLICE_S * rate)
     count = len(samples) // n
     peaks = np.abs(samples[: count * n].astype(np.int32)).reshape(count, n).max(axis=1)
@@ -30,13 +41,9 @@ def loud_slices(samples: np.ndarray, rate: int) -> np.ndarray:
 
 @pytest.fixture(autouse=True)
 def loud_is_voice(monkeypatch):
-    """Silero hears no voice in the tests' synthetic tones, so in tests anything loud is voice.
-    Tests of the real model call ``test_speech.SILERO`` (saved before this patch) directly."""
     monkeypatch.setattr(speech, "voice_probabilities", loud_slices)
 
 
 @pytest.fixture(autouse=True)
 def no_retry_waits(monkeypatch):
-    """Iris's retries of temporary API errors wait no time in tests (three retries, as by
-    default). Tests that need other delays pass ``api_retry_delays_s`` to ``Settings``."""
     monkeypatch.setenv("IRIS_API_RETRY_DELAYS_S", "[0, 0, 0]")

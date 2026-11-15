@@ -3,7 +3,6 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from iris.config import Settings
 from iris.llm.errors import UserFacingError
 from iris.models import (
     NOTHING_TO_WRITE,
@@ -13,34 +12,29 @@ from iris.models import (
     NotesDraft,
     Selection,
     SessionType,
-    SourceKind,
     Transcript,
     TranscriptSegment,
     Visual,
 )
-from iris.pipeline.context import StageContext
 from iris.pipeline.stages import assemble, write
-from iris.store.layout import SessionPaths, read_model, write_model
-
-
-def section(ids=(), text="## Decisions\n\nShip the prototype. Alex will test it."):
-    return write.WrittenSection(
-        session_type=SessionType.MEETING,
-        title="Prototype review",
-        blocks=[write.NoteBlock(markdown=text, visual_ids=list(ids))],
-    )
+from iris.store.layout import read_model, write_model
+from tests.builders import markdown_images, section, stage_ctx
+from tests.fakes import (
+    PipelineOpenAI,
+    answer_message,
+    chat_completion,
+    install_get_openai,
+    refusal_message,
+    sdk_client,
+)
+from tests.media import make_media
+from tests.waiting import wait_for_status
 
 
 @pytest.fixture
 def setup(tmp_path, monkeypatch):
     events = []
-    ctx = StageContext(
-        session_id="s1",
-        source=SourceKind.UPLOAD,
-        paths=SessionPaths(tmp_path).ensure(),
-        settings=Settings(data_dir=tmp_path),
-        emit=lambda kind, data: events.append((kind, data)),
-    )
+    ctx = stage_ctx(tmp_path, events=events)
     transcript = Transcript(
         segments=[
             TranscriptSegment(
@@ -192,40 +186,19 @@ def test_changed_style_rejected():
 
 @pytest.mark.parametrize("mode", ["ok", "refusal", "empty", "invalid"])
 async def test_real_sdk_response_parsing(tmp_path, monkeypatch, mode):
-    import httpx
-    from openai import AsyncOpenAI
     from pydantic import ValidationError
 
-    ctx = StageContext(
-        session_id="s", source=SourceKind.UPLOAD, paths=SessionPaths(tmp_path), settings=Settings()
-    )
+    ctx = stage_ctx(tmp_path)
 
     def handle(request):
         payload = json.loads(request.content)
         assert payload["response_format"]["json_schema"]["strict"]
         content = section().model_dump_json() if mode == "ok" else "{}"
-        message = {"role": "assistant", "content": content}
-        if mode == "refusal":
-            message = {"role": "assistant", "content": None, "refusal": "Cannot comply"}
-        choices = (
-            [] if mode == "empty" else [{"index": 0, "finish_reason": "stop", "message": message}]
-        )
-        return httpx.Response(
-            200,
-            json={
-                "id": "test",
-                "object": "chat.completion",
-                "created": 0,
-                "model": ctx.settings.notes_model,
-                "choices": choices,
-            },
-        )
+        message = refusal_message("Cannot comply") if mode == "refusal" else answer_message(content)
+        messages = [] if mode == "empty" else [message]
+        return chat_completion(*messages, model=ctx.settings.notes_model)
 
-    async with AsyncOpenAI(
-        api_key="test",
-        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handle)),
-        max_retries=0,
-    ) as client:
+    async with sdk_client(handle) as client:
         monkeypatch.setattr(write, "get_openai", lambda _: client)
         if mode == "ok":
             assert await write.generate_section(ctx, "{}") == section()
@@ -235,60 +208,10 @@ async def test_real_sdk_response_parsing(tmp_path, monkeypatch, mode):
 
 
 def test_upload_pipeline_reaches_export(client, tmp_path, monkeypatch):
-    from types import SimpleNamespace
-
     from iris.pipeline.stages import render, select, transcribe
-    from tests.test_api import wait_for_status
-    from tests.test_ingest import make_media
 
-    calls = []
-
-    async def parse(**kwargs):
-        schema = kwargs["response_format"]
-        calls.append(schema)
-        if schema is select.Decisions:
-            content = kwargs["messages"][1]["content"]
-            ids = [json.loads(p["text"])["moment_id"] for p in content[1:] if p["type"] == "text"]
-            figure = select.ElementDecision(
-                kind="figure",
-                content="A coloured slide",
-                build=0,
-                region=None,
-                caption="Colored slide",
-                render_as="svg",
-            )
-            result = select.Decisions(
-                decisions=[
-                    select.Decision(moment_id=mid, keep=True, elements=[figure]) for mid in ids
-                ]
-            )
-        elif schema is render.SvgDrawing:
-            svg = (
-                '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 9 9"><rect width="9"/></svg>'
-            )
-            result = render.SvgDrawing(svg=svg)
-        elif schema is render.Check:
-            result = render.Check(matches=True, problems=[])
-        else:
-            payload = json.loads(kwargs["messages"][1]["content"])
-            ids = [r["id"] for r in payload["records"] if r["kind"] == "visual"]
-            result = section(ids)
-        return SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(parsed=result, refusal=None))]
-        )
-
-    async def transcribe_audio(**kwargs):
-        return {
-            "language": "english",
-            "segments": [{"start": 0, "end": 2, "text": "Ship the prototype. Alex will test it."}],
-        }
-
-    fake = SimpleNamespace(
-        chat=SimpleNamespace(completions=SimpleNamespace(parse=parse)),
-        audio=SimpleNamespace(transcriptions=SimpleNamespace(create=transcribe_audio)),
-    )
-    for module in (write, select, transcribe, render):
-        monkeypatch.setattr(module, "get_openai", lambda _: fake)
+    fake = PipelineOpenAI()
+    install_get_openai(monkeypatch, fake, write, select, transcribe, render)
     recording = make_media(tmp_path / "talk.mp4", seconds=2)
     result = client.post("/api/sessions", files={"file": ("talk.mp4", recording.read_bytes())})
     assert result.status_code == 201
@@ -301,18 +224,12 @@ def test_upload_pipeline_reaches_export(client, tmp_path, monkeypatch):
     assert "[visual:" not in notes["markdown"]
     exported = client.get(f"/api/sessions/{sid}/export")
     assert exported.status_code == 200
-    from markdown_it import MarkdownIt
-
-    image_tokens = [
-        child
-        for token in MarkdownIt().parse(exported.text)
-        for child in (token.children or [])
-        if child.type == "image"
-    ]
+    image_tokens = markdown_images(exported.text)
     assert image_tokens, exported.text[:600]
     assert all(t.attrGet("src").startswith("data:image/png;base64,") for t in image_tokens)
-    assert calls[0] is select.Decisions
-    assert sorted(c.__name__ for c in calls[1:]) == ["Check", "SvgDrawing", "WrittenSection"]
+    schemas = [c["response_format"] for c in fake.calls]
+    assert schemas[0] is select.Decisions
+    assert sorted(c.__name__ for c in schemas[1:]) == ["Check", "SvgDrawing", "WrittenSection"]
 
 
 async def test_screen_content_is_evidence_and_visuals_are_placed_once(setup):
@@ -363,7 +280,6 @@ async def test_fixable_format_slips_are_repaired_not_failed(setup):
     assert draft.markdown == (
         ":::box[Decision]{color=grey}\nShip the prototype. Alex will test it.\n\n[visual:v1]\n\n:::"
     )
-    # The repaired section is what is cached, so a re-run reads it without a call.
     await write.run(ctx)
     assert generate.await_count == 1
 

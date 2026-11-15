@@ -1,48 +1,25 @@
-import cv2
-import numpy as np
 import pytest
 
-from iris.config import Settings
 from iris.models import (
     EventType,
-    FrameRef,
     Notes,
     NotesDraft,
     Renders,
     Selection,
     SessionType,
-    SourceKind,
-    Visual,
 )
-from iris.pipeline.context import StageContext
 from iris.pipeline.stages import assemble, render
-from iris.store.layout import SessionPaths, read_model, write_model
+from iris.store.layout import read_model, write_model
 from iris.svg import rasterize_svg, sanitize_svg
-
-SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 10"><rect width="20"/></svg>'
+from tests.builders import figure_to_render, stage_ctx
+from tests.fakes import SVG
 
 
 @pytest.fixture
 def setup(tmp_path, monkeypatch):
     events = []
-    ctx = StageContext(
-        session_id="s1",
-        source=SourceKind.UPLOAD,
-        paths=SessionPaths(tmp_path).ensure(),
-        settings=Settings(data_dir=tmp_path, render_attempts=2),
-        emit=lambda kind, data: events.append((kind, data)),
-    )
-    cv2.imwrite(str(tmp_path / "visuals/v1.source.jpg"), np.full((20, 40, 3), 255, np.uint8))
-    visual = Visual(
-        id="v1",
-        moment_id="m1",
-        frame=FrameRef(t=0, path="frames/0.jpg"),
-        caption="Orbit",
-        path="visuals/v1.source.jpg",
-        source_path="visuals/v1.source.jpg",
-        description="Two bodies orbiting",
-        render_as="svg",
-    )
+    ctx = stage_ctx(tmp_path, events=events, render_attempts=2)
+    visual = figure_to_render(ctx)
     write_model(ctx.paths.selection, Selection(visuals=[visual]))
     calls = []
     verdicts = []
@@ -104,7 +81,7 @@ async def test_falls_back_to_other_renderer_then_screenshot(setup):
     assert (r.path, r.render_as, r.attempts) == ("visuals/v1.png", "image", 3)
     assert [c[0] for c in calls if c[0] != "check"] == ["svg", "svg", "image"]
 
-    ctx.settings.image_quality = "low"  # new cache key
+    ctx.settings.image_quality = "low"
     calls.clear()
     verdicts.extend([bad("x")] * 4)
     await render.run(ctx)

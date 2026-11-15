@@ -1,22 +1,12 @@
-"""The notes format: the stack rule, validation, repair and reading notes from before it."""
-
 import pytest
 
 from iris import notes_format as nf
-from iris.models import FrameRef, Notes, NotesVisual, SessionType
+from iris.models import Notes, SessionType
+from tests.builders import notes_visual
 
 
 def messages(markdown: str, ids: set[str] = frozenset()) -> list[tuple[int, str]]:
     return [(p.line, p.message) for p in nf.validate(markdown, set(ids))]
-
-
-def visual(vid: str, path: str) -> NotesVisual:
-    return NotesVisual(
-        id=vid, moment_id="m1", frame=FrameRef(t=0, path="frames/0.jpg"), caption="c", path=path
-    )
-
-
-# --- Structure ------------------------------------------------------------------------------------
 
 
 def test_each_close_closes_the_most_recent_block_still_open():
@@ -66,26 +56,23 @@ def test_non_ascii_titles():
     assert nf.validate(md, set()) == []
 
 
-# --- Validation -----------------------------------------------------------------------------------
-
-
 def test_problems_name_the_line_in_plain_words():
     md = "\n".join(
         [
-            ":::warning[Careful]{color=red}",  # 1: unknown command
+            ":::warning[Careful]{color=red}",
             "x",
             ":::",
-            ":::box[A]{color=purple}",  # 4: unknown colour
+            ":::box[A]{color=purple}",
             ":::box[B]",
-            ":::box[C]",  # 6: too deep
+            ":::box[C]",
             "deep",
             ":::",
             ":::",
             ":::",
-            ":::",  # 11: closes nothing
-            "::figure{#v9}",  # 12: unknown figure
-            ":::box[Open]",  # 13: never closed
-            "::chart{#x}",  # 14: unreadable
+            ":::",
+            "::figure{#v9}",
+            ":::box[Open]",
+            "::chart{#x}",
         ]
     )
     found = messages(md, {"v1"})
@@ -127,9 +114,6 @@ def test_empty_notes_are_valid():
     assert nf.scan("").blocks == []
 
 
-# --- Repair ---------------------------------------------------------------------------------------
-
-
 def test_repair_fixes_colours_unclosed_blocks_and_stray_closes():
     md = ":::\n:::box[A]{color=purple}\nx\n:::step[S]\ny"
     repaired = nf.repair(md)
@@ -154,9 +138,6 @@ def test_signatures_are_the_blocks_by_command_title_and_colour():
     assert nf.signatures(md) == {("step", "A", "indigo"), ("box", "B", "blue"), ("box", None, None)}
 
 
-# --- Notes from before the format -----------------------------------------------------------------
-
-# The shapes of notes written before this format (copied from real sessions, shortened).
 LEGACY_WORKED = r"""**Problem:** Explain how the **apparent weight** changes around a loop.
 
 The key quantity is the reaction force $P$.
@@ -212,7 +193,7 @@ $W$ is constant.
 
 
 def test_upgrade_legacy_groups_cards_as_the_old_reading_view_did():
-    visuals = [visual("v000001", "visuals/v000001.svg")]
+    visuals = [notes_visual("v000001", "visuals/v000001.svg")]
     upgraded = nf.upgrade_legacy(LEGACY_WORKED, visuals)
     assert upgraded == UPGRADED_WORKED
     assert nf.validate(upgraded, {"v000001"}) == []
@@ -231,7 +212,7 @@ def test_upgrade_legacy_process_steps_with_figures_and_a_result():
         "---\n\n"
         "**Summary:** Done."
     )
-    upgraded = nf.upgrade_legacy(md, [visual("v1", "visuals/v1.png")])
+    upgraded = nf.upgrade_legacy(md, [notes_visual("v1", "visuals/v1.png")])
     assert upgraded == (
         "Intro.\n\n"
         "::figure{#v1}\n\n"
@@ -314,7 +295,6 @@ def test_split_sections_reads_other_line_breaks_as_lf(odd_break):
 
 
 def test_split_sections_keeps_a_line_separator_inside_its_line():
-    """U+2028 (from text pasted out of a PDF) is not a line break to the parser or to scan."""
     markdown = (
         "Copied\u2028from a PDF\n# Setup\n:::box[Tip]{color=green}\n# Inner\n:::\n# Next\nMore."
     )

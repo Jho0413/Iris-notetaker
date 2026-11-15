@@ -1,8 +1,6 @@
-"""The notes as text for assistants, and the word search over them (iris.notes_text)."""
-
 import pytest
 
-from iris.models import FrameRef, Notes, NotesVisual, SessionType
+from iris.models import Notes, SessionType
 from iris.notes_text import (
     MAX_PASSAGES_PER_SESSION,
     SNIPPET_CHARS,
@@ -14,24 +12,15 @@ from iris.notes_text import (
     snippet,
     with_figures_as_text,
 )
+from tests.builders import notes, notes_visual
 
 
 def notes_with(markdown: str) -> Notes:
-    return Notes(
-        session_id="s1",
+    return notes(
+        markdown,
+        [notes_visual(caption="Forces on a\nloop")],
         session_type=SessionType.LECTURE,
         title="Loops",
-        markdown=markdown,
-        visuals=[
-            NotesVisual(
-                id="v1",
-                moment_id="m1",
-                frame=FrameRef(t=0, path="frames/0.jpg"),
-                caption="Forces on a\nloop",
-                path="visuals/v1.svg",
-            )
-        ],
-        format_version=2,
     )
 
 
@@ -124,7 +113,7 @@ def test_a_session_gives_its_best_passages_first_and_only_a_few():
 
 
 def test_search_folds_case_and_unicode_forms():
-    decomposed = "Cafe\u0301 pricing"  # é as e + combining accent, as macOS may write it
+    decomposed = "Cafe\u0301 pricing"
     assert score(decomposed, query_words("CAFÉ")) == 1
     assert score("Straße", query_words("STRASSE")) == 1
     assert score("特征值的定义", query_words("特征值的定义")) == 1
@@ -147,7 +136,7 @@ def test_snippet_finds_a_match_that_case_folding_lengthens():
         ("image", True, "Iris's redraw, checked against the screen."),
         ("screenshot", True, "A crop of the screen, as it was shown."),
         ("screenshot", False, "no redraw of this figure passed Iris's check"),
-        ("svg", None, "Iris's redraw, checked against the screen."),  # older notes, as the app
+        ("svg", None, "Iris's redraw, checked against the screen."),
         ("screenshot", None, "A crop of the screen, as it was shown."),
     ],
 )

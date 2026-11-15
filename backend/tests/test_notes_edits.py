@@ -4,37 +4,27 @@ import pytest
 from fastapi.testclient import TestClient
 
 from iris.main import create_app
-from iris.models import FrameRef, Notes, NotesEdits, NotesVisual, SessionType, SourceKind
+from iris.models import Notes, NotesEdits, SessionType, SourceKind
 from iris.notes_edits import MAX_EDITED_CHARS, generated_hash, newest
 from iris.store.layout import read_model, session_paths, write_model
-from tests.test_export import images
+from tests.builders import markdown_images, notes_visual, session_with_notes
 
 GENERATED = ":::box[Problem]{color=indigo}\nFind $x$.\n:::\n\n::figure{#v1}"
 EDITED = ":::box[My problem]{color=teal}\nFind $x$, then $y$.\n:::\n\n::figure{#v1}"
 
 
 def make_notes(client, settings, markdown=GENERATED, format_version=2) -> tuple[str, Notes]:
-    session = client.app.state.store.create("Loops", SourceKind.UPLOAD)
-    paths = session_paths(settings.sessions_dir, session.id).ensure()
-    (paths.visuals_dir / "v1.jpg").write_bytes(b"image")
-    notes = Notes(
-        session_id=session.id,
-        session_type=SessionType.LECTURE,
-        title="Loops",
+    sid, written = session_with_notes(
+        client.app.state.store,
+        settings,
+        "Loops",
         markdown=markdown,
-        visuals=[
-            NotesVisual(
-                id="v1",
-                moment_id="m1",
-                frame=FrameRef(t=0, path="frames/0.jpg"),
-                caption="Forces",
-                path="visuals/v1.jpg",
-            )
-        ],
+        visuals=[notes_visual(path="visuals/v1.jpg", caption="Forces")],
+        session_type=SessionType.LECTURE,
         format_version=format_version,
     )
-    write_model(paths.notes, notes)
-    return session.id, notes
+    (session_paths(settings.sessions_dir, sid).visuals_dir / "v1.jpg").write_bytes(b"image")
+    return sid, written
 
 
 def save(client, sid, markdown, based_on):
@@ -134,7 +124,9 @@ def test_export_uses_the_edits(client, settings):
     save(client, sid, EDITED, generated_hash(notes))
     exported = client.get(f"/api/sessions/{sid}/export").text
     assert ":::box[My problem]{color=teal}" in exported
-    assert [i.attrGet("src") for i in images(exported)] == ["data:image/jpeg;base64,aW1hZ2U="]
+    assert [i.attrGet("src") for i in markdown_images(exported)] == [
+        "data:image/jpeg;base64,aW1hZ2U="
+    ]
 
 
 def test_a_rerun_keeps_the_edits_and_reports_them_stale_until_the_user_chooses(client, settings):
