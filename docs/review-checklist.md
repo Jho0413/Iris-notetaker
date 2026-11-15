@@ -159,4 +159,4 @@ to every change; the reviewer says which ones it checked. Principles are those i
   the code.
 - A change that alters a flow or a decision updates that page in `docs/`.
 - The docstrings that stay (MCP tools, FastAPI routes and the models that reach `schema.d.ts`,
-  interface contracts) match the code.
+  interface contracts) match the code, and new MCP tools, routes and API models have one.

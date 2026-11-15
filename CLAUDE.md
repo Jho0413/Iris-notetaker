@@ -81,8 +81,9 @@ the form that fits the change; don't invent states where there are none.
   in any form (`#`, `//`, `/* */`, JSDoc, HTML and CSS comments) and no docstrings, except the ones
   something reads (below), which new code writes too. Name things for what they mean to the user
   or the domain, and let a clear name or a smaller function carry what a comment would; a reason
-  still needed goes into such a name, or as a decision into the feature's `docs/` page. Tool directives stay, with nothing after them (shebangs, `# noqa`,
-  `# type: ignore`, `// eslint-disable`). Generated files (`schema.d.ts`) and config and example
+  still needed goes into such a name, or as a decision into the feature's `docs/` page. Tool
+  directives stay, with nothing after them (shebangs, `# noqa`, `# type: ignore`,
+  `// eslint-disable`). Generated files (`schema.d.ts`) and config and example
   files of any format (`.env.example`, `pyproject.toml`, `vite.config.ts`, `tsconfig*.json`,
   `electron-builder.yml`, `Makefile`, CI workflows) keep their comments. When you work on a file,
   remove its other comments and docstrings. The docstrings that stay:
