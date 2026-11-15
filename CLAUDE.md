@@ -76,19 +76,19 @@ the form that fits the change; don't invent states where there are none.
   one step (where the input comes from, how an error is handled), share the rest and pass that
   step in, as a small `Protocol` or a function argument, the way `Source` does for uploads and
   live recordings. An interface earns its place with two real implementations, not one.
-- **No comments** in hand-written code and tests (`backend/`, `frontend/src/`, `desktop/`). Name
-  things for what they mean to the user or the domain, and let a clear name or a smaller function
-  carry what a comment would, including a reason too detailed for a docs page. The why lives in
-  the feature's `docs/` page. Tool directives stay (`# noqa`, `# type: ignore`,
-  `// eslint-disable`). Generated files (`schema.d.ts`) and config and example files
-  (`.env.example`, `Makefile`, CI workflows) keep their comments. No comments in any form (`#`,
-  `//`, `/* */`, JSDoc, HTML and CSS comments) and no docstrings; when you work on a file, remove
-  the ones it has. The exceptions are docstrings something reads:
+- **No comments** in hand-written code and tests (`backend/`, `frontend/`, `desktop/`): no comments
+  in any form (`#`, `//`, `/* */`, JSDoc, HTML and CSS comments) and no docstrings. Name things
+  for what they mean to the user or the domain, and let a clear name or a smaller function carry
+  what a comment would; a reason still needed goes into such a name, or as a decision into the
+  feature's `docs/` page. Tool directives stay, with nothing after them (shebangs, `# noqa`,
+  `# type: ignore`, `// eslint-disable`). Generated files (`schema.d.ts`) and config and example
+  files (`.env.example`, `Makefile`, CI workflows) keep their comments. When you work on a file,
+  remove its comments and docstrings, all but those something reads:
   - MCP tool docstrings: the assistant reads them as the tools' descriptions;
   - docstrings of FastAPI routes and of the models the API sends or accepts (the ones that reach
     `schema.d.ts`): they become the OpenAPI schema;
   - the module or class docstring that states an interface's contract (today `sources/base.py`
-    and `live/lane.py`), without docstrings on its methods.
+    and `live/lane.py`), not its methods.
 
 ## Conventions
 
