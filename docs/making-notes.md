@@ -47,14 +47,25 @@ resumes from the stage it reached (principle 4).
 
 1. The uploaded file is saved in a new session folder, and a run starts.
 2. Ingest opens it with PyAV (which bundles FFmpeg, so nothing has to be installed) and puts audio
-   and video on one clock, starting at the recording's start.
+   and video on one clock, starting at the recording's start. Audio that starts later than the
+   video is led in with silence, so the two stay on that clock. Audio and video are decoded side
+   by side.
 3. The audio becomes one mono WAV file. The video becomes frames, taken at a steady rate and saved
    as JPEGs, with an index of when each was taken.
-4. A file with no audio, or one that can't be decoded, stops the run with a message saying what to
-   fix; trying again won't help.
+4. Frames are picked by their timestamps on a steady grid, not by counting frames, so a variable
+   frame rate or a gap in the video can't shift them; a frame stamped a hair early by rounding
+   still counts for its point on the grid. Every frame has to be decoded, but only the ones kept
+   are scaled and saved, which is where the cost would be. Each is turned the way the file says
+   it is shown, and scaled down (never up) to a set width; all of them take the first one's size.
+5. The frame index is the proof the frames are complete: it is removed before old frames are
+   cleared and written last, so whenever it exists, every frame it lists is on disk.
+6. A file with no audio, or one that can't be decoded, stops the run with a message saying what to
+   fix; trying again won't help. A file with no audio is refused before any video is decoded.
 
 *Why:* every source, upload or live, ends as the same audio and frames, so the stages after ingest
-are written once and never ask where a recording came from (principle 2).
+are written once and never ask where a recording came from (principle 2). A live recording's
+frames are picked, sized and saved by the same code, so they match what ingest would make
+([`recording-live.md`](recording-live.md#ingesting-a-recording)).
 
 ## Transcribe: the speech
 
@@ -117,21 +128,27 @@ machine with OpenCV and makes no model calls.
 1. Each frame is shrunk and blurred, so camera noise and compression don't count as change, and
    small changes (a cursor, a blinking caret, a clock) are ignored.
 2. Parts of the screen that keep changing, such as a call's video tiles or an embedded video, are
-   masked out.
+   masked out, unless the mask would cover most of the screen: that is a scroll or a new screen,
+   not a widget.
 3. A new picture only counts once it holds still for a moment. Animations and slide transitions
    never do, so they are never picked.
 4. If the new picture only adds to the old one (a bullet appears, a stroke is drawn), it is a
    **build** of the same moment. A scroll is a build too only while nearly all the earlier content
    stays in view; a larger scroll starts a new **moment**, as does anything else
-   (a new slide, a switch of app).
+   (a new slide, a switch of app). When matching a scroll, parts that stay still (a toolbar) are
+   ignored, and content scrolled off screen counts as lost. A new moment records where the screen
+   changed from the one before, unless the change covers most of it.
 5. A quick flash to something else and back, such as a menu or a peek at another slide, is thrown
    away.
-6. Each moment keeps its sharpest frame and its builds in order. (A live recording's shares are
-   handled in [`recording-live.md`](recording-live.md).)
+6. Each moment keeps its sharpest frame of the latest settled picture, and its builds in order. A
+   frame taken while something new is moving on screen is never the one kept. If nothing ever
+   settles, the last moment still gets a real frame, for select to judge. An unreadable frame is
+   skipped. (A live recording's shares are handled in [`recording-live.md`](recording-live.md).)
 
 *Why:* this is free local work, so the paid model calls only see the few moments worth reading
 (principle 3). Builds keep the order things were written in, so a worked example can be written
-up step by step.
+up step by step. Scene-cut tools only mark cuts: they can't tell a settled screen from a
+transition, or a build from a new slide, so detect is its own small state machine on OpenCV.
 
 ## Align and select: reading the screen
 
@@ -299,6 +316,9 @@ Prompts treat what was said and shown as data, never as instructions.
 ## Where to look
 
 - `backend/src/iris/sources/`: the sources and their ingest (`upload.py`, `browser_live.py`)
+- `backend/src/iris/media/`: what the sources and stages share about media: picking, sizing and
+  saving frames (`frames.py`), opening a recording's streams (`container.py`) and small image
+  steps (`images.py`)
 - `backend/src/iris/pipeline/__init__.py`: `PLAN`, the stage order
 - `backend/src/iris/pipeline/stages/`: one module per stage
 - `backend/src/iris/speech.py`: finding the speech to send
