@@ -46,11 +46,11 @@ from iris.models import (
     Visual,
 )
 from iris.pipeline import STAGES
-from iris.pipeline.stages import select, write
+from iris.pipeline.stages import render, select, write
 from iris.store.db import SessionStore
 from iris.store.layout import read_model, write_model
 from tests.api_errors import connection_error, status_error, timeout_error
-from tests.builders import aligned_moments, figure_to_render, section
+from tests.builders import aligned_moments, figure_to_render, section, stage_ctx
 from tests.fakes import Drawer, fake_openai, install_client, parsed_response
 from tests.media import make_audio, make_media, write_wav
 from tests.waiting import wait_for_stage, wait_for_status
@@ -294,6 +294,28 @@ async def test_a_blocking_error_fails_the_run_and_cancels_other_figures(tmp_path
         {"message": GENERIC_FAILURE, "kind": "general", "stage": "render"}
     ]
     runner.store.close()
+
+
+async def test_an_unexpected_error_in_one_figure_lets_the_others_finish_then_fails_the_stage(
+    tmp_path, monkeypatch
+):
+    ctx = stage_ctx(tmp_path, openai_api_key="test")
+    with_figures(ctx, monkeypatch, "v1", "v2", "v3")
+    (ctx.paths.root / "visuals/v1.source.jpg").unlink()
+    drawer = Drawer(monkeypatch)
+    drawer.hold = {"v2": asyncio.Event(), "v3": asyncio.Event()}
+    loop = asyncio.get_running_loop()
+    for held in drawer.hold.values():
+        loop.call_later(0.05, held.set)
+
+    with pytest.raises(FileNotFoundError):
+        await asyncio.wait_for(render.run(ctx), 5)
+
+    assert drawer.cancelled == []
+    renders = read_model(ctx.paths.renders, Renders).visuals
+    assert [r.id for r in renders] == ["v2", "v3"]
+    cached = [json.loads(p.read_text())["id"] for p in ctx.paths.render_cache_dir.glob("*.json")]
+    assert sorted(cached) == ["v2", "v3"]
 
 
 async def test_a_blocking_error_cancels_the_stage_running_beside_it(tmp_path, monkeypatch):

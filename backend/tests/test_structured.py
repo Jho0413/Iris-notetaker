@@ -149,6 +149,15 @@ async def test_a_fresh_answer_that_fails_its_check_is_raised_and_not_stored(tmp_
     assert not path.exists()
 
 
+async def test_a_bad_answer_is_raised_at_once_and_not_stored(tmp_path):
+    path = tmp_path / "k.json"
+    model = Model(ValueError("m: refused: no"))
+    with pytest.raises(ValueError, match="refused"):
+        await cached(path, model)
+    assert model.calls == 1
+    assert not path.exists()
+
+
 async def test_a_temporary_error_is_retried(tmp_path):
     model = Model(connection_error(), Answer(text="fresh"))
     assert await cached(tmp_path / "k.json", model) == "FRESH"

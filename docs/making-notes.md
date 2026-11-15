@@ -269,7 +269,7 @@ A rewritten group is checked before it replaces anything:
 - A section dropped only as a repeat may shrink or empty, but by no more than the text of the
   section that keeps the point. A section another edit also rewrites keeps the usual limits, so
   one repeat can't excuse deleting the rest of its group.
-- Maths may only go where it appears elsewhere in the notes.
+- Maths may be dropped only where it still appears elsewhere in the notes.
 
 Two edits could each lean on the other's copy and lose a point from both. So when edits are
 planned, a section a dropped repeat relies on is never rewritten by another edit, and a figure

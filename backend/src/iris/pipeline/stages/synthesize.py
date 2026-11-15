@@ -55,7 +55,7 @@ MIN_REWRITE_KEPT_RATIO = 0.4
 MAX_REWRITE_GROWTH_RATIO = 1.5
 MAX_REWRITE_GROWTH_CHARS = 2_000
 
-DECISION_ACTION_AND_UNCERTAINTY_WORDS = re.compile(
+PROTECTED_WORDING = re.compile(
     r"\b(decid\w*|decision\w*|agree\w*|action items?|owner\w*|deadline\w*|due\b|todo|"
     r"follow[- ]?ups?|next steps?|open questions?|unclear|uncertain\w*|unsure|not sure|tbd|"
     r"to be confirmed|unresolved|unknown)\b|^\s*[-*+] \[[ xX]\]",
@@ -240,8 +240,8 @@ def _distinct_math(markdown: str) -> set[str]:
     return {" ".join(m.split()) for m in MATH.findall(markdown)}
 
 
-def _count_decision_action_and_uncertainty_words(markdown: str) -> int:
-    return sum(1 for _ in DECISION_ACTION_AND_UNCERTAINTY_WORDS.finditer(markdown))
+def _protected_wording_count(markdown: str) -> int:
+    return sum(1 for _ in PROTECTED_WORDING.finditer(markdown))
 
 
 def _text_length(markdown: str) -> int:
@@ -418,9 +418,7 @@ def validate_rewrite(rewrite: Rewrite, group: Group, sections: list[str]) -> dic
         or new_len > MAX_REWRITE_GROWTH_RATIO * old_len + MAX_REWRITE_GROWTH_CHARS
     ):
         raise ValueError("rewrite changed the length of its sections too much")
-    if _count_decision_action_and_uncertainty_words(
-        new_text
-    ) < _count_decision_action_and_uncertainty_words(old_text):
+    if _protected_wording_count(new_text) < _protected_wording_count(old_text):
         raise ValueError("rewrite dropped a decision, action item or uncertainty")
     outside = join_sections([s for i, s in enumerate(sections) if i not in group.indexes])
     if _distinct_math(old_text) - _distinct_math(new_text) - _distinct_math(outside):

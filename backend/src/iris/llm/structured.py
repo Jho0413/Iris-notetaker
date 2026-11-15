@@ -3,8 +3,10 @@ import hashlib
 import json
 from collections.abc import Awaitable, Callable, Sequence
 from pathlib import Path
+from typing import Literal
 
-from openai.types.chat import ChatCompletionContentPartParam
+from openai.types.chat import ChatCompletionContentPartImageParam, ChatCompletionContentPartParam
+from openai.types.chat.chat_completion_content_part_image_param import ImageURL
 from pydantic import BaseModel
 
 from iris.config import Effort, Settings
@@ -39,11 +41,13 @@ def data_url(data: bytes, mime: str) -> str:
     return f"data:{mime};base64,{base64.b64encode(data).decode()}"
 
 
-def image_part(data: bytes, mime: str, detail: str | None = None) -> ChatCompletionContentPartParam:
-    image_url = {"url": data_url(data, mime)}
+def image_part(
+    data: bytes, mime: str, detail: Literal["auto", "low", "high"] | None = None
+) -> ChatCompletionContentPartImageParam:
+    image_url: ImageURL = {"url": data_url(data, mime)}
     if detail is not None:
         image_url["detail"] = detail
-    return {"type": "image_url", "image_url": image_url}  # type: ignore[return-value, typeddict-item]
+    return {"type": "image_url", "image_url": image_url}
 
 
 def parsed[M: BaseModel](completion, what: str) -> M:

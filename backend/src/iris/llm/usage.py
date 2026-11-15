@@ -18,7 +18,6 @@ from iris.config import PRICES_CHECKED, ModelPrice
 from iris.models import Session, SessionUsage, Stage, UsageRecord, UsageTotals
 from iris.store.layout import write_model
 
-MAX_ERROR_CHARS = 500
 if TYPE_CHECKING:
     from iris.pipeline.context import StageContext
 
@@ -40,6 +39,7 @@ TOKEN_FIELDS = (
     "output_image_tokens",
     "images",
 )
+MAX_ERROR_CHARS = 500
 
 
 @dataclass
