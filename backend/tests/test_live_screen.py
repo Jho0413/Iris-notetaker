@@ -385,6 +385,33 @@ async def test_unreadable_first_frames_and_a_size_change_within_a_share_match_in
     ]
 
 
+async def test_a_share_with_no_readable_frame_between_two_shares_matches_ingest(
+    tmp_path: Path, events: list
+):
+    ctx = deck_ctx(tmp_path, events)
+    driver = await Driver(ctx).start()
+    await driver.deliver(*slides(0, SLIDE_A, 10, seed=0))
+    await driver.deliver((10.0, UNREADABLE_JPEG), (11.0, UNREADABLE_JPEG), share=2)
+    await driver.deliver(*slides(12, SLIDE_B, 10, seed=1), share=3)
+    timeline = await driver.stop()
+
+    index = assert_matches_ingest(ctx, timeline)
+    assert index.share_starts == [12.0]
+
+
+async def test_a_first_share_with_no_readable_frame_matches_ingest(tmp_path: Path, events: list):
+    ctx = deck_ctx(tmp_path, events)
+    small = cv2.resize(SLIDE_B, (SLIDE_B.shape[1] // 2, SLIDE_B.shape[0] // 2))
+    driver = await Driver(ctx).start()
+    await driver.deliver((0.0, UNREADABLE_JPEG), (1.0, UNREADABLE_JPEG))
+    await driver.deliver(*slides(2, small, 10, seed=1), share=2)
+    timeline = await driver.stop()
+
+    index = assert_matches_ingest(ctx, timeline)
+    assert index.frames[0].t == 2.0
+    assert (index.width, index.height) == (small.shape[1], small.shape[0])
+
+
 def random_recording(rng: random.Random) -> list[tuple[float, int, bytes]]:
     images = [SLIDE_A, SLIDE_B, SLIDE_C]
     frames: list[tuple[float, int, bytes]] = []

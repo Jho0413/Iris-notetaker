@@ -55,8 +55,9 @@ resumes from the stage it reached (principle 4).
 4. Frames are picked by their timestamps on a steady grid, not by counting frames, so a variable
    frame rate or a gap in the video can't shift them; a frame stamped a hair early by rounding
    still counts for its point on the grid. Every frame has to be decoded, but only the ones kept
-   are scaled and saved, which is where the cost would be. Each is turned the way the file says
-   it is shown, and scaled down (never up) to a set width; all of them take the first one's size.
+   are scaled and saved, which is where the cost would be. Each is scaled down (never up) to a set
+   width and then turned the way the file says it is shown, since turning the smaller picture is
+   cheaper; all of them take the first one's size.
 5. The frame index is the proof the frames are complete: it is removed before old frames are
    cleared and written last, so whenever it exists, every frame it lists is on disk.
 6. A file with no audio, or one that can't be decoded, stops the run with a message saying what to
