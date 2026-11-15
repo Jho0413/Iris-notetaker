@@ -58,7 +58,8 @@ they do as events that clients follow as it happens.
    notes and leaves the edits alone ([`ui.md`](ui.md#reading-and-editing-notes)).
 6. The notes or the transcript, asked for before they are made, answer "not ready". When they
    are there but damaged, or the file can't be opened, the full error is logged and the answer
-   is a plain "couldn't be read", never a raw error.
+   is a plain "couldn't be read", never a raw error. Damaged edits are passed over and the
+   generated notes shown; edits that can't be opened are refused, since they may be intact.
 7. Deleting a session removes its row first, so live input or a request for notes arriving
    meanwhile is refused instead of starting work on it again; then its live processing stops,
    and only then does its folder go.

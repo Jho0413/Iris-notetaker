@@ -69,7 +69,7 @@ engine at a scratch data folder (`IRIS_DATA_DIR`). It plays a file the way the b
 1. The audio is re-encoded as one WebM/Opus stream with short clusters, as the browser's recorder
    writes it, and sent in pieces of about five seconds. Only the first piece carries the stream
    header, as with the browser's own pieces. The stream is written through a small buffer, so
-   it is known exactly how far into it each moment of audio reaches, and pieces are cut there.
+   it is known closely how far into it each moment of audio reaches, and pieces are cut there.
 2. Once a second it sends the latest picture the video has shown by then, scaled as the browser
    scales a screen, as one screen share from start to end. A screen recording often stores a
    picture only when the screen changes, so a picture is sent again until the next one shows. A
@@ -79,7 +79,7 @@ engine at a scratch data folder (`IRIS_DATA_DIR`). It plays a file the way the b
    file's), then it asks for notes.
 4. It follows the session's progress and reports when the first transcript, moment, figure and
    notes section arrived, how many sections were written before notes were asked for, how long
-   making notes took, what live work was kept, and the cost before and after.
+   making notes took, what live work was kept, the total cost and what making notes added.
 
 To use them on the desktop app's data, set the folder:
 `IRIS_DATA_DIR="$HOME/Library/Application Support/Iris" uv run iris show <id>`. In the app, the

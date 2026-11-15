@@ -258,9 +258,11 @@ async def replay(
                 await post(f"audio?seq={seq}", data)
 
         async def send_frames() -> None:
-            with ThreadPoolExecutor(1) as pool:
+            with ThreadPoolExecutor(1) as frame_decoder_thread:
                 frames = file_frames(file, until=webm.duration_s)
-                while (item := await loop.run_in_executor(pool, next, frames, None)) is not None:
+                while (
+                    item := await loop.run_in_executor(frame_decoder_thread, next, frames, None)
+                ) is not None:
                     t, jpeg = item
                     await until(t)
                     await post(f"frame?t={t:.3f}&share=1", jpeg)
