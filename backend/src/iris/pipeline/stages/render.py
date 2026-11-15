@@ -1,25 +1,3 @@
-"""Render: rebuild each figure as a professional visual, verified against what was shown.
-
-Each visual has a requested renderer chosen while reading the screen:
-  - svg: a reasoning model draws the figure as SVG (exact labels, numbers and geometry);
-  - image: an image model draws a polished illustration from the brief;
-  - screenshot: the source is already clean, so the crop is used as is.
-Every svg or image result is checked by a vision model against the source crop and description.
-A failed check, a refusal or unusable output is retried with the problems as feedback, then the
-other renderer is tried. If nothing passes, the source crop is used and the failure is recorded, so
-notes are never blocked and never show an unverified redraw.
-
-An API error while redrawing, or any other error
-that isn't unusable output, gives the source crop at once, with no retries of our own: it is marked
-unverified, the reason goes to the log and to ``problems`` in renders.json, and it is not cached,
-so a later run tries the redraw again. A blocking error (a rejected key, exhausted credit, a
-missing model) fails the stage, and the figures still rendering are cancelled.
-
-Reads:  selection.json, visuals/<id>.source.jpg
-Writes: visuals/<id>.<svg|png|jpg>, renders.json (Renders), render_cache/<hash>.json + files
-Emits:  VISUAL_RENDERED per visual.
-"""
-
 import asyncio
 import base64
 import hashlib
@@ -33,9 +11,9 @@ from typing import Literal
 import openai
 from pydantic import BaseModel
 
-from iris.llm import usage
+from iris.llm import structured, usage
 from iris.llm.client import get_openai
-from iris.llm.errors import ErrorKind, classify, describe, first_error
+from iris.llm.errors import ErrorKind, classify, describe, gather_units
 from iris.models import EventType, RenderAs, RenderedVisual, Renders, Selection, Visual
 from iris.pipeline.context import StageContext
 from iris.store.layout import read_model, write_model
@@ -90,7 +68,8 @@ fails if it:
 List each problem concretely, as an instruction to fix it.
 """
 
-MAX_PROBLEM_CHARS = 500  # an error's description in renders.json
+
+EVENT_FIELDS_FREE_OF_MODEL_TEXT = {"id", "path", "render_as", "verified"}
 
 RENDERERS: dict[RenderAs, tuple[RenderAs, ...]] = {
     "svg": ("svg", "image"),
@@ -108,60 +87,41 @@ class Check(BaseModel):
     problems: list[str]
 
 
-# --- model calls -------------------------------------------------------------------------------
-
-
-def _data_url(data: bytes, mime: str) -> str:
-    return f"data:{mime};base64,{base64.b64encode(data).decode()}"
-
-
 def _brief(visual: Visual) -> str:
     return json.dumps(
         {"caption": visual.caption, "description": visual.description}, ensure_ascii=False
     )
 
 
-def _parsed[M: BaseModel](completion, what: str) -> M:
-    if not completion.choices:
-        raise ValueError(f"{what}: no response")
-    message = completion.choices[0].message
-    if message.refusal:
-        raise ValueError(f"{what}: refused: {message.refusal}")
-    if message.parsed is None:
-        raise ValueError(f"{what}: no parsed response")
-    return message.parsed
-
-
 def _effort(ctx: StageContext, call: Literal["diagram", "check"]) -> str:
-    """Per-call reasoning effort (``IRIS_DIAGRAM_/CHECK_REASONING_EFFORT``), else the default."""
     s = ctx.settings
-    override = s.diagram_reasoning_effort if call == "diagram" else s.check_reasoning_effort
-    return override or s.reasoning_effort
+    return structured.effort(
+        s, s.diagram_reasoning_effort if call == "diagram" else s.check_reasoning_effort
+    )
 
 
 async def draw_svg(
     ctx: StageContext, visual: Visual, source: bytes, feedback: list[str]
 ) -> tuple[bytes, bytes]:
-    """Returns (svg file bytes, png preview for checking)."""
     content = [
         {"type": "text", "text": _brief(visual)},
-        {"type": "image_url", "image_url": {"url": _data_url(source, "image/jpeg")}},
+        structured.image_part(source, "image/jpeg"),
     ]
     if feedback:
         content.append(
             {"type": "text", "text": json.dumps({"feedback_from_previous_attempt": feedback})}
         )
     with usage.purpose("svg"):
-        completion = await get_openai(ctx.settings).chat.completions.parse(
+        drawing = await structured.parse(
+            ctx.settings,
             model=ctx.settings.diagram_model,
-            messages=[
-                {"role": "system", "content": SVG_PROMPT},
-                {"role": "user", "content": content},
-            ],
-            response_format=SvgDrawing,
-            reasoning_effort=_effort(ctx, "diagram"),
+            prompt=SVG_PROMPT,
+            content=content,
+            schema=SvgDrawing,
+            effort=_effort(ctx, "diagram"),
+            what="diagram model",
         )
-    svg = sanitize_svg(_parsed(completion, "diagram model").svg)
+    svg = sanitize_svg(drawing.svg)
     png = await asyncio.to_thread(rasterize_svg, svg)
     return svg.encode(), png
 
@@ -169,12 +129,6 @@ async def draw_svg(
 async def draw_image(
     ctx: StageContext, visual: Visual, source: bytes, feedback: list[str]
 ) -> tuple[bytes, bytes]:
-    """Returns (png file bytes, the same png for checking).
-
-    Generated from the brief alone: given the sketch, the image model stays too close to its rough
-    shapes (plain circles and boxes for real objects). The sketch is still the reference when the
-    result is checked.
-    """
     extra = ""
     if feedback:
         extra = "\nA previous attempt had these problems; avoid them:\n- " + "\n- ".join(feedback)
@@ -194,30 +148,19 @@ async def draw_image(
 
 async def check(ctx: StageContext, visual: Visual, source: bytes, candidate: bytes) -> Check:
     with usage.purpose("figure_check"):
-        completion = await get_openai(ctx.settings).chat.completions.parse(
+        result = await structured.parse(
+            ctx.settings,
             model=ctx.settings.vision_model,
-            messages=[
-                {"role": "system", "content": CHECK_PROMPT},
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": _brief(visual)},
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": _data_url(source, "image/jpeg")},
-                        },
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": _data_url(candidate, "image/png")},
-                        },
-                    ],
-                },
+            prompt=CHECK_PROMPT,
+            content=[
+                {"type": "text", "text": _brief(visual)},
+                structured.image_part(source, "image/jpeg"),
+                structured.image_part(candidate, "image/png"),
             ],
-            response_format=Check,
-            reasoning_effort=_effort(ctx, "check"),
+            schema=Check,
+            effort=_effort(ctx, "check"),
+            what="vision model",
         )
-    result = _parsed(completion, "vision model")
-    # A check that lists problems has not passed, whatever its flag says.
     return Check(matches=result.matches and not result.problems, problems=result.problems)
 
 
@@ -228,7 +171,10 @@ DRAWERS: dict[RenderAs, tuple[Drawer, str]] = {
 }
 
 
-# --- one visual --------------------------------------------------------------------------------
+def _per_call_efforts_unless_default(ctx: StageContext) -> dict[str, list[str]]:
+    efforts = [_effort(ctx, "diagram"), _effort(ctx, "check")]
+    keyed_like_older_caches = efforts == [ctx.settings.reasoning_effort] * 2
+    return {} if keyed_like_older_caches else {"efforts": efforts}
 
 
 def _cache_key(ctx: StageContext, visual: Visual, source: bytes) -> str:
@@ -238,13 +184,7 @@ def _cache_key(ctx: StageContext, visual: Visual, source: bytes) -> str:
         "models": [s.diagram_model, s.image_model, s.vision_model, s.image_quality],
         "effort": s.reasoning_effort,
         "attempts": s.render_attempts,
-        # Only when they differ from the default, so existing caches stay valid.
-        **(
-            {"efforts": efforts}
-            if (efforts := [_effort(ctx, "diagram"), _effort(ctx, "check")])
-            != [s.reasoning_effort] * 2
-            else {}
-        ),
+        **_per_call_efforts_unless_default(ctx),
         "visual": visual.model_dump(mode="json", exclude={"id", "path", "source_path"}),
         "source": hashlib.sha256(source).hexdigest(),
     }
@@ -287,7 +227,7 @@ async def render_visual(ctx: StageContext, visual: Visual) -> RenderedVisual:
                 verdict = await check(ctx, visual, source, preview)
             except Exception as exc:
                 kind = classify(exc)
-                if kind is ErrorKind.BAD_OUTPUT:  # unusable output (bad svg, refusal): try again
+                if kind is ErrorKind.BAD_OUTPUT:
                     feedback = problems = [str(exc)]
                     continue
                 if kind is ErrorKind.BLOCKING:
@@ -301,7 +241,6 @@ async def render_visual(ctx: StageContext, visual: Visual) -> RenderedVisual:
             break
 
     if result is None:
-        # Screenshot: requested, or nothing passed. The crop is the source itself.
         result = ("screenshot", source, "jpg")
     renderer, data, ext = result
     cache_dir.mkdir(exist_ok=True)
@@ -323,16 +262,14 @@ async def render_visual(ctx: StageContext, visual: Visual) -> RenderedVisual:
 def _error_fallback(
     ctx: StageContext, visual: Visual, source_rel: str, attempts: int, exc: Exception
 ) -> RenderedVisual:
-    """The source crop, unverified and not cached, after an error while redrawing that isn't
-    unusable output: an API error, or (``INTERNAL``) anything else, such as a bug, whose
-    traceback is logged so it isn't mistaken for an outage."""
     reason = describe(exc)
+    might_be_a_bug = not isinstance(exc, openai.APIError)
     log.warning(
         "session %s: redrawing %s failed (%s); using the source crop",
         ctx.session_id,
         visual.id,
         reason,
-        exc_info=not isinstance(exc, openai.APIError),
+        exc_info=might_be_a_bug,
     )
     path = _publish(ctx, ctx.paths.root / source_rel, visual.id, "jpg")
     return RenderedVisual(
@@ -341,14 +278,12 @@ def _error_fallback(
         render_as="screenshot",
         verified=False,
         attempts=attempts,
-        problems=[f"Redraw failed: {reason}"[:MAX_PROBLEM_CHARS]],
+        problems=[f"Redraw failed: {reason}"[: usage.MAX_ERROR_CHARS]],
     )
 
 
 def rendered_event(rendered: RenderedVisual) -> dict:
-    """VISUAL_RENDERED's data: which file and how it was made. Never ``problems``: it holds model
-    output and error text, which stay in renders.json."""
-    return rendered.model_dump(mode="json", include={"id", "path", "render_as", "verified"})
+    return rendered.model_dump(mode="json", include=EVENT_FIELDS_FREE_OF_MODEL_TEXT)
 
 
 async def run(ctx: StageContext) -> None:
@@ -364,20 +299,15 @@ async def run(ctx: StageContext) -> None:
         ordered = [done[v.id] for v in selection.visuals if v.id in done]
         write_model(ctx.paths.renders, Renders(visuals=ordered))
 
-    # A figure only raises on a blocking error (others give the source crop); then the stage has
-    # failed, and the task group cancels the figures still rendering.
-    try:
-        async with asyncio.TaskGroup() as group:
-            for visual in selection.visuals:
-                group.create_task(one(visual))
-    except BaseExceptionGroup as error:
-        raise first_error(error) from None
+    outcomes = await gather_units(one(visual) for visual in selection.visuals)
+    for outcome in outcomes:
+        if isinstance(outcome, Exception):
+            raise outcome
     write_model(ctx.paths.renders, Renders(visuals=[done[v.id] for v in selection.visuals]))
     remove_stale(ctx, {r.path for r in done.values()})
 
 
 def remove_stale(ctx: StageContext, keep: set[str]) -> None:
-    """Delete rendered visuals left by earlier runs. Source crops belong to select."""
     for path in ctx.paths.visuals_dir.glob("v*.*"):
         rel = f"visuals/{path.name}"
         if (

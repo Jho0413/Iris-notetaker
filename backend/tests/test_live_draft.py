@@ -13,6 +13,7 @@ from iris import pipeline
 from iris.config import Settings
 from iris.live import Lane, LiveProcessor, LiveTimeline, draft
 from iris.live.draft import DraftLane
+from iris.llm import structured
 from iris.models import (
     BoardElement,
     EventType,
@@ -222,10 +223,10 @@ def test_parts_close_at_a_moment_boundary_and_stay_within_budget():
     contents = [content(0, 0, 49), content(1, 49, 100)]
     transcript, selection = Transcript(segments=segments), Selection(visuals=[], contents=contents)
     parts = write.plan_parts(transcript, selection, BUDGET)
-    assert all(len(write._json(p.records)) <= BUDGET for p in parts)
+    assert all(len(structured.payload_json(p.records)) <= BUDGET for p in parts)
     assert max(r["start"] for r in parts[0].records) < 49
     assert min(r["start"] for r in parts[1].records) == 49
-    assert len(write._json([*parts[0].records, parts[1].records[0]])) <= BUDGET
+    assert len(structured.payload_json([*parts[0].records, parts[1].records[0]])) <= BUDGET
 
 
 def test_a_moment_longer_than_the_budget_is_still_split():

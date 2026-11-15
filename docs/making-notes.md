@@ -138,7 +138,9 @@ up step by step.
 1. **Align** gives each moment the speech said while it was on screen.
 2. **Select** sends the moments to a vision model in small batches, each with its frame, its
    builds (when and where each addition appeared) and its speech. A short summary of what earlier
-   batches already captured goes along, so nothing is listed twice.
+   batches already captured goes along, so nothing is listed twice. The speech sent with a batch
+   has a size limit: speech longer than that is sampled from its start, middle and end, so one
+   screen left up through a long talk can't make a call too big.
 3. For each moment the model decides whether it is worth keeping. Blank screens, talking heads,
    desktops, menus and loading screens are dropped.
 4. A kept moment is read into elements in reading order: maths as LaTeX, text and tables as
@@ -150,7 +152,10 @@ up step by step.
 6. The model's answer is checked against what was asked: every moment decided exactly once, and
    every figure given a caption and a way to redraw it; an answer that doesn't fit is refused
    whole. A crop that falls outside the frame is replaced by the whole frame, never cut short.
-   Each batch's result is cached.
+   Each batch's result is cached under everything about its moments, not only what was sent, so
+   a change to speech left out of the sample still reads the batch again.
+7. A session where nothing settled on screen still gets a selection, an empty one, with no model
+   call.
 
 *Why:* the model sees the speech next to the screen, so it can resolve a smudged symbol or an
 abbreviation from what was said. Reading in batches keeps each call bounded on a long session.
@@ -160,13 +165,22 @@ abbreviation from what was said. Reading in batches keeps each call bounded on a
 1. The speech and the screen content are merged into one timeline and cut into parts that each
    fit one model call. Where a part ends depends only on what came before it, never on what comes
    later, so a live session cuts the same parts while recording as an upload does afterwards.
-2. Each part is written as one section, in the style the content calls for: a meeting gets
+   A part ends between moments where it can, rather than in the middle of one, as long as it is
+   still at least half full. Speech too long for one part is split into pieces that keep its
+   original times, never made-up ones; nothing said or shown is dropped.
+2. With no speech and nothing read from the screen, there is nothing to write up, and the run
+   stops saying so.
+3. Each part is written as one section, in the style the content calls for: a meeting gets
    decisions and action items, a lecture concepts and examples, a demo the workflow. Anything
    unfolding in stages, such as a worked example, is written step by step.
-3. Each section must keep the session's title and type and place each of its figures exactly
-   once; an answer naming a figure it wasn't given is refused. Small slips the format can fix
-   without guessing are repaired; anything else fails.
-4. Each finished section is cached and the notes draft is saved as it grows.
+4. Each section must keep the session's title and type and place each of its figures exactly
+   once; an answer naming a figure it wasn't given is refused. A figure that belongs to a step is
+   placed inside the step, at its end. Small slips the format can fix without guessing are
+   repaired; anything else fails.
+5. Each finished section is cached and the notes draft is saved as it grows. A section's cache
+   entry depends only on its own evidence, whether parts come before and after it, the language
+   and the first section's title and type, never on how many parts there are, so a section
+   written live is found again when notes are made.
 
 *Why:* writing forwards in bounded sections keeps every call small and cacheable, and lets a live
 session write most of its notes before it ends. What forward writing can't see (a slide shown
@@ -187,14 +201,19 @@ flowchart LR
 ```
 
 1. Each figure is redrawn the way select chose: a reasoning model writes SVG, or an image model
-   draws from the brief. A figure chosen as the source crop is used as is.
+   draws from the brief. A figure chosen as the source crop is used as is. The image model gets
+   the brief alone, not the source crop: given the rough sketch, it stays too close to its
+   shapes, drawing plain circles and boxes for real things. The crop is still what its redraw is
+   checked against.
 2. A vision model checks every redraw against the source crop and the brief: are the labels,
-   values and parts all there and right?
+   values and parts all there and right? A check that lists any problem has not passed, whatever
+   its yes or no says.
 3. A failed check, or unusable output (an invalid SVG, a refusal), is tried again with the
    problems as feedback, then the other way is tried.
 4. If nothing passes, the source crop is shown, recorded as unverified. Any other error on a figure,
    even a temporary one, gives the source crop at once (uncached, so a later run tries again);
-   a blocking error (such as a missing key) stops the run.
+   a blocking error (such as a missing key) stops the run, and the figures still being redrawn
+   are stopped with it.
 
 *Why:* a wrong redraw is worse than a screenshot (principle 1). Source crops stay on disk, so any
 figure can be checked or redrawn later.
@@ -212,20 +231,60 @@ figure can be checked or redrawn later.
    speaker later corrected, drop a repeated point, drop a duplicate figure (the only edit allowed
    for notes written in one part). A figure is only dropped if the comparison and the model
    agree; edits naming unknown sections or figures are dropped.
-5. Only the sections an edit touches are rewritten. A rewrite is kept only if nothing is lost: no
-   figure, maths, decision or action item.
+5. Only the sections an edit touches are rewritten, in groups of sections that edits connect.
+   A rewrite is kept only if nothing is lost: no figure, maths, decision or action item. A group
+   whose rewrite fails keeps its sections as written; the other groups still apply. Dropping a
+   duplicate figure needs no rewrite: its marker is simply removed.
 6. Assemble runs again on the result. If synthesis fails, or its edits no longer match the notes
    draft (a re-run of an earlier stage changed it), the notes as written are used.
 
 *Why:* synthesis is a polish, so it may only improve the notes, never lose a figure's content or a
 fact that isn't kept elsewhere, and never stop a session from finishing.
 
+### Spotting repeats
+
+Two pictures count as the same only when three tests agree: their perceptual hashes are close,
+small blurred copies of them barely differ on average, and almost none of their points differ
+strongly. The last test is what tells apart two slides on one template: different text changes a
+few points a lot, not many points a little. Figures are held to stricter limits than slides,
+because one added line of working makes a different figure, and two crops of one figure must
+also have about the same shape.
+
+Each picture is compared with the first picture of a group, not the last one added, so a slow
+build (each stage like the next) doesn't chain its first and last stages together. Figures from
+the same moment are never paired: they are separate builds of one screen. A picture that can't
+be read is skipped, since the comparison only gives hints.
+
+### What a rewrite may change
+
+A rewritten group is checked before it replaces anything:
+
+- Every figure marker it was given is still there exactly once, on a line of its own, apart from
+  the duplicates being dropped. No images or HTML appear, and its boxes and steps are whole, each
+  title and colour still somewhere in the notes.
+- Its text keeps at least a set share of what it replaces and grows by no more than a set amount,
+  so a rewrite can't quietly summarise a section away or pad it.
+- Words that mark a decision, an action item, an open question or uncertainty, and checklist
+  items, are counted: a rewrite may rephrase around them but never has fewer of them.
+- A section dropped only as a repeat may shrink or empty, but by no more than the text of the
+  section that keeps the point. A section another edit also rewrites keeps the usual limits, so
+  one repeat can't excuse deleting the rest of its group.
+- Maths may be dropped only where it still appears elsewhere in the notes.
+
+Two edits could each lean on the other's copy and lose a point from both. So when edits are
+planned, a section a dropped repeat relies on is never rewritten by another edit, and a figure
+kept by one edit can't be dropped by another. Once all rewrites are in, any equation missing from
+the whole notes undoes the latest rewrite that held it, until every equation is back. An edit
+whose sections together are too long to rewrite in one call is skipped.
+
 ## Model output is untrusted
 
 Every model answer is checked against its type before it is used. Select and write refuse an
 answer naming moments or figures they weren't given; assemble and synthesis drop unknown ids.
-Every model-written SVG goes through `sanitize_svg`. Prompts treat what was said and shown as
-data, never as instructions.
+Figures are numbered, and their files named, in Iris's own order, never from anything the model
+wrote. Every model-written SVG goes through `sanitize_svg`. Progress events never carry
+model-written text: the problems a check found stay in the figure's render record on disk.
+Prompts treat what was said and shown as data, never as instructions.
 
 ## Limits
 

@@ -5,6 +5,7 @@ import cv2
 import numpy as np
 import pytest
 
+from iris.llm import structured
 from iris.models import (
     Alignment,
     Box,
@@ -30,7 +31,7 @@ def setup(tmp_path, monkeypatch):
     ctx = stage_ctx(tmp_path, events=events, selection_batch_size=2)
     items = aligned_moments(ctx, 3, "Revenue chart")
     parse = AsyncMock()
-    monkeypatch.setattr(select, "get_openai", lambda _: fake_openai(parse=parse))
+    monkeypatch.setattr(structured, "get_openai", lambda _: fake_openai(parse=parse))
     return ctx, items, events, parse
 
 
@@ -151,7 +152,7 @@ async def test_empty_alignment_needs_no_api(setup):
 async def test_refusal_is_an_explicit_failure(setup):
     ctx, _, _, parse = setup
     parse.return_value = response(refusal="Cannot process")
-    with pytest.raises(ValueError, match="refused selection"):
+    with pytest.raises(ValueError, match="vision model selection: refused"):
         await select.run(ctx)
     assert not ctx.paths.selection.exists()
 
@@ -260,7 +261,7 @@ async def test_selection_through_sdk_parser(setup, monkeypatch, valid):
         return chat_completion(message, model=ctx.settings.vision_model)
 
     async with sdk_client(handle) as client:
-        monkeypatch.setattr(select, "get_openai", lambda _: client)
+        monkeypatch.setattr(structured, "get_openai", lambda _: client)
         if valid:
             await select.run(ctx)
             assert read_model(ctx.paths.selection, Selection).visuals[0].caption == "Revenue chart"
