@@ -35,6 +35,7 @@ from iris.pipeline.context import StageContext
 from iris.pipeline.stages import render, select
 from iris.store.db import SessionStore
 from iris.store.layout import SessionPaths, read_model, session_paths, write_model
+from tests.media import make_media
 
 SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 9 9"><rect width="9"/></svg>'
 IMAGE = b"\x89PNG generated"
@@ -152,7 +153,6 @@ def wait_idle(client: TestClient, sid: str, timeout: float = 10.0) -> dict:
 
 
 def test_pipeline_records_every_call_and_cached_rerun_costs_nothing(tmp_path, fake):
-    from tests.test_ingest import make_media
 
     settings = Settings(data_dir=tmp_path / "data", openai_api_key="test", render_attempts=1)
     with TestClient(create_app(settings)) as client:

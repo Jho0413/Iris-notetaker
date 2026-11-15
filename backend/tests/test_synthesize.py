@@ -37,6 +37,7 @@ from iris.pipeline.stages import assemble, synthesize
 from iris.store.db import SessionStore
 from iris.store.layout import SessionPaths, read_model, session_paths, write_model
 from tests.api_errors import connection_error, status_error
+from tests.media import image_bytes
 
 
 def slide(title: str, body: list[str], accent: tuple[int, int, int]) -> np.ndarray:
@@ -79,9 +80,7 @@ def chart(kind: str, size: tuple[int, int] = (300, 200)) -> np.ndarray:
 def save(root: Path, rel: str, image: np.ndarray, quality: int = 90) -> str:
     path = root / rel
     path.parent.mkdir(parents=True, exist_ok=True)
-    ok, buf = cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, quality])
-    assert ok
-    path.write_bytes(buf.tobytes())
+    path.write_bytes(image_bytes(image, quality=quality))
     return rel
 
 

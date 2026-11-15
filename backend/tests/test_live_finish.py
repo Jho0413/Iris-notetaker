@@ -4,7 +4,6 @@ from functools import cache
 from pathlib import Path
 from types import SimpleNamespace
 
-import cv2
 import numpy as np
 import pytest
 from fastapi.testclient import TestClient
@@ -38,11 +37,10 @@ from iris.pipeline import PLAN, STAGES
 from iris.pipeline.context import StageContext
 from iris.pipeline.stages import render, select, synthesize
 from iris.store.layout import SessionPaths, read_model, session_paths
-from tests.test_detect import slide
+from tests.media import WEBM_RATE, image_bytes, slide, tone
 from tests.test_live import post_audio, post_frame, start, stop
 from tests.test_write import section
 
-RATE = 48_000
 SECONDS = 120
 SCREENS = [
     (0, "Agenda", "rect"),
@@ -53,9 +51,9 @@ SCREENS = [
 
 
 def speech(seconds: int = SECONDS) -> np.ndarray:
-    t = np.arange(seconds * RATE) / RATE
+    t = np.arange(seconds * WEBM_RATE) / WEBM_RATE
     loud = (t % 1.2) < 0.7
-    return (0.3 * loud * np.sin(2 * np.pi * 440 * t)).astype(np.float32)
+    return (loud * tone(t)).astype(np.float32)
 
 
 @pytest.fixture(scope="module")
@@ -66,9 +64,7 @@ def recording() -> list[tuple[float, bytes]]:
 @cache
 def screen_at(t: float) -> bytes:
     _, title, shape = [screen for screen in SCREENS if screen[0] <= t][-1]
-    ok, buf = cv2.imencode(".jpg", slide(title, shape=shape))
-    assert ok
-    return buf.tobytes()
+    return image_bytes(slide(title, shape=shape))
 
 
 class FakeOpenAI:

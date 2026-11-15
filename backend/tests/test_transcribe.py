@@ -16,23 +16,9 @@ from iris.pipeline.stages import transcribe
 from iris.pipeline.stages.transcribe import encode_wav, plan_chunks, transcribe_chunk
 from iris.store.layout import SessionPaths, read_model
 from tests.api_errors import status_error
+from tests.media import SPEECH_RATE, make_audio, tone, wav_seconds, write_wav
 
-RATE = 16_000
 SMALL = {"target_s": 3.0, "max_s": 5.0, "search_s": 1.0}
-
-
-def make_audio(pattern: list[tuple[str, float]], seed: int = 0) -> np.ndarray:
-    rng = np.random.default_rng(seed)
-    parts = []
-    for kind, dur in pattern:
-        n = int(dur * RATE)
-        noise = rng.normal(0, 20, n)
-        if kind == "tone":
-            t = np.arange(n) / RATE
-            parts.append(8000 * np.sin(2 * np.pi * 440 * t) + noise)
-        else:
-            parts.append(noise)
-    return np.concatenate(parts).astype(np.int16)
 
 
 def bursts_pattern(n: int = 16) -> list[tuple[str, float]]:
@@ -53,12 +39,8 @@ def burst_times(pattern: list[tuple[str, float]]) -> list[tuple[float, float]]:
 
 
 def is_quiet(samples: np.ndarray, i: int, margin_s: float = 0.05) -> bool:
-    m = int(margin_s * RATE)
+    m = int(margin_s * SPEECH_RATE)
     return bool(np.abs(samples[max(0, i - m) : i + m].astype(np.int32)).max() < 200)
-
-
-def write_wav(path: Path, samples: np.ndarray) -> None:
-    path.write_bytes(encode_wav(samples, RATE))
 
 
 def find_bursts(samples: np.ndarray, rate: int) -> list[tuple[float, float]]:
@@ -126,22 +108,22 @@ def use_client(monkeypatch, client) -> None:
 
 def test_plan_chunks_cuts_in_silences_and_respects_max():
     samples = make_audio(bursts_pattern(30))
-    chunks = plan_chunks(samples, RATE, **SMALL)
+    chunks = plan_chunks(samples, SPEECH_RATE, **SMALL)
     assert len(chunks) > 3
     assert chunks[0][0] == 0 and chunks[-1][1] == len(samples)
     for (_, e1), (s2, _) in zip(chunks, chunks[1:], strict=False):
         assert e1 == s2
     for s, e in chunks:
-        assert 0 < e - s <= SMALL["max_s"] * RATE
+        assert 0 < e - s <= SMALL["max_s"] * SPEECH_RATE
     for _, cut in chunks[:-1]:
-        assert is_quiet(samples, cut), cut / RATE
+        assert is_quiet(samples, cut), cut / SPEECH_RATE
 
 
 def test_plan_chunks_finds_the_one_pause_in_the_window():
     samples = make_audio([("tone", 3.6), ("silence", 0.4), ("tone", 2.0)])
-    chunks = plan_chunks(samples, RATE, **SMALL)
+    chunks = plan_chunks(samples, SPEECH_RATE, **SMALL)
     assert len(chunks) == 2
-    cut = chunks[0][1] / RATE
+    cut = chunks[0][1] / SPEECH_RATE
     assert 3.6 < cut < 4.0
 
 
@@ -149,27 +131,27 @@ def test_plan_chunks_prefers_the_pause_closest_to_target():
     samples = make_audio(
         [("tone", 2.0), ("silence", 0.4), ("tone", 0.7), ("silence", 0.4), ("tone", 4.0)]
     )
-    cut = plan_chunks(samples, RATE, **SMALL)[0][1] / RATE
+    cut = plan_chunks(samples, SPEECH_RATE, **SMALL)[0][1] / SPEECH_RATE
     assert 3.1 < cut < 3.5
 
 
 def test_plan_chunks_without_silence_still_respects_max():
     samples = make_audio([("tone", 20.0)])
-    chunks = plan_chunks(samples, RATE, target_s=3.0, max_s=3.5, search_s=1.0)
+    chunks = plan_chunks(samples, SPEECH_RATE, target_s=3.0, max_s=3.5, search_s=1.0)
     assert sum(e - s for s, e in chunks) == len(samples)
-    assert all(e - s <= 3.5 * RATE for s, e in chunks)
+    assert all(e - s <= 3.5 * SPEECH_RATE for s, e in chunks)
 
 
 def test_plan_chunks_short_audio_is_one_chunk():
     samples = make_audio([("tone", 2.0), ("silence", 1.0)])
-    assert plan_chunks(samples, RATE, **SMALL) == [(0, len(samples))]
-    assert plan_chunks(samples, RATE) == [(0, len(samples))]
+    assert plan_chunks(samples, SPEECH_RATE, **SMALL) == [(0, len(samples))]
+    assert plan_chunks(samples, SPEECH_RATE) == [(0, len(samples))]
 
 
 def test_plan_chunks_empty_and_bad_args():
-    assert plan_chunks(np.zeros(0, dtype=np.int16), RATE) == []
+    assert plan_chunks(np.zeros(0, dtype=np.int16), SPEECH_RATE) == []
     with pytest.raises(ValueError):
-        plan_chunks(np.zeros(10, dtype=np.int16), RATE, target_s=5, max_s=4)
+        plan_chunks(np.zeros(10, dtype=np.int16), SPEECH_RATE, target_s=5, max_s=4)
 
 
 class Recorder:
@@ -390,7 +372,7 @@ async def test_stage_resends_chunk_if_audio_changed(ctx, monkeypatch):
 
 async def test_failing_chunk_fails_stage_but_keeps_others_cached(ctx, monkeypatch):
     write_wav(ctx.paths.audio, make_audio(bursts_pattern(20)))
-    n_chunks = len(plan_chunks(make_audio(bursts_pattern(20)), RATE, **SMALL))
+    n_chunks = len(plan_chunks(make_audio(bursts_pattern(20)), SPEECH_RATE, **SMALL))
     use_client(monkeypatch, fake_client(fail_on_call=2))
 
     with pytest.raises(transcribe.TranscribeError, match=r"1 of \d+ transcription chunks failed"):
@@ -446,8 +428,7 @@ async def test_a_blocking_error_in_one_stretch_cancels_the_chunks_other_stretch(
 
 
 def sent_seconds(call: dict) -> float:
-    with wave.open(io.BytesIO(call["file"][1])) as w:
-        return w.getnframes() / w.getframerate()
+    return wav_seconds(call["file"][1])
 
 
 async def test_a_chunk_without_speech_is_not_sent_and_is_cached_empty(ctx, monkeypatch):
@@ -529,8 +510,8 @@ async def test_a_text_only_models_line_runs_from_the_first_speech_to_the_last(ct
 async def test_8_khz_audio_is_sent_at_its_own_rate(ctx, monkeypatch):
     rate = 8_000
     t = np.arange(3 * rate) / rate
-    tone = np.concatenate([np.zeros(rate), 8000 * np.sin(2 * np.pi * 440 * t), np.zeros(5 * rate)])
-    ctx.paths.audio.write_bytes(encode_wav(tone.astype(np.int16), rate))
+    samples = np.concatenate([np.zeros(rate), tone(t, 8000), np.zeros(5 * rate)])
+    ctx.paths.audio.write_bytes(encode_wav(samples.astype(np.int16), rate))
     client = fake_client()
     use_client(monkeypatch, client)
     await transcribe.run(ctx)
@@ -547,8 +528,7 @@ class TextOnlyTranscriptions:
 
     async def create(self, **kwargs):
         self.calls.append(kwargs)
-        with wave.open(io.BytesIO(kwargs["file"][1])) as w:
-            dur = w.getnframes() / w.getframerate()
+        dur = wav_seconds(kwargs["file"][1])
         return SimpleNamespace(
             text=f" chunk of {dur:.2f}s ", languages=[SimpleNamespace(code="en")], usage=None
         )
@@ -571,8 +551,8 @@ async def test_text_only_model_gives_one_segment_per_short_chunk(ctx, monkeypatc
     await transcribe.run(ctx)
 
     target, max_s = transcribe.chunk_lengths_for("gpt-transcribe")
-    chunks = plan_chunks(samples, RATE, target, max_s)
-    assert len(chunks) >= 3 and all(e - s <= max_s * RATE for s, e in chunks)
+    chunks = plan_chunks(samples, SPEECH_RATE, target, max_s)
+    assert len(chunks) >= 3 and all(e - s <= max_s * SPEECH_RATE for s, e in chunks)
     assert all(c["response_format"] == "json" for c in fake.calls)
     assert all("timestamp_granularities" not in c for c in fake.calls)
     assert len(fake.calls) == len(chunks)
@@ -580,7 +560,7 @@ async def test_text_only_model_gives_one_segment_per_short_chunk(ctx, monkeypatc
     transcript = read_model(ctx.paths.transcript, Transcript)
     assert transcript.language == "en"
     assert [(s.start, s.end) for s in transcript.segments] == [
-        pytest.approx((s / RATE, e / RATE)) for s, e in chunks
+        pytest.approx((s / SPEECH_RATE, e / SPEECH_RATE)) for s, e in chunks
     ]
     for seg in transcript.segments:
         assert seg.text == f"chunk of {seg.end - seg.start:.2f}s"
@@ -590,15 +570,17 @@ async def test_text_only_model_gives_one_segment_per_short_chunk(ctx, monkeypatc
 
 @pytest.mark.parametrize("seconds", [10, 12, 15])
 def test_remaining_audio_within_max_is_one_chunk(seconds):
-    samples = np.zeros(seconds * RATE, dtype=np.int16)
-    assert plan_chunks(samples, RATE, target_s=10, max_s=15, search_s=2) == [(0, len(samples))]
+    samples = np.zeros(seconds * SPEECH_RATE, dtype=np.int16)
+    assert plan_chunks(samples, SPEECH_RATE, target_s=10, max_s=15, search_s=2) == [
+        (0, len(samples))
+    ]
 
 
-@pytest.mark.parametrize("sample_count", [10 * RATE + 1, 12 * RATE, 22 * RATE])
+@pytest.mark.parametrize("sample_count", [10 * SPEECH_RATE + 1, 12 * SPEECH_RATE, 22 * SPEECH_RATE])
 def test_final_chunk_never_exceeds_max(sample_count):
     samples = np.zeros(sample_count, dtype=np.int16)
-    chunks = plan_chunks(samples, RATE, target_s=10, max_s=10, search_s=5)
+    chunks = plan_chunks(samples, SPEECH_RATE, target_s=10, max_s=10, search_s=5)
     assert chunks[0][0] == 0
     assert chunks[-1][1] == sample_count
-    assert all(0 < end - start <= 10 * RATE for start, end in chunks)
+    assert all(0 < end - start <= 10 * SPEECH_RATE for start, end in chunks)
     assert all(left[1] == right[0] for left, right in zip(chunks, chunks[1:], strict=False))

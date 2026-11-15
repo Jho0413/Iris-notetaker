@@ -14,8 +14,9 @@ from iris.main import create_app
 from iris.models import FrameRef, Moment, MomentContent, SourceKind, TranscriptSegment
 from iris.pipeline.context import StageContext
 from iris.store.layout import session_paths
+from tests.media import make_webm, solid_jpeg, split
 from tests.test_api import wait_for_status
-from tests.test_live import jpeg, make_webm, post_audio, post_frame, split, start
+from tests.test_live import post_audio, post_frame, start
 
 
 def seg(start: float, end: float, text: str = "x") -> TranscriptSegment:
@@ -414,7 +415,7 @@ def test_first_chunk_after_a_restart_starts_a_processor(
     old = registry(client).get(sid)
     assert old is not None
     registry(client)._processors.clear()
-    assert post_frame(client, sid, 1.0, jpeg((0, 0, 255))) == 204
+    assert post_frame(client, sid, 1.0, solid_jpeg((0, 0, 255))) == 204
     new = registry(client).get(sid)
     assert new is not None and new is not old
     assert lanes[Lane.SCREEN].wakes >= 1
@@ -448,7 +449,7 @@ def test_delete_refuses_live_input_before_stopping_processing(
     assert client.delete(f"/api/sessions/{sid}").status_code == 204
     assert rows_while_cancelling == [None]
     assert live.get(sid) is None
-    assert post_frame(client, sid, 2.0, jpeg((0, 255, 0))) == 404
+    assert post_frame(client, sid, 2.0, solid_jpeg((0, 255, 0))) == 404
     assert live.get(sid) is None
 
 

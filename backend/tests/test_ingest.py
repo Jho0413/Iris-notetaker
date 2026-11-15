@@ -1,8 +1,6 @@
 import wave
-from fractions import Fraction
 from pathlib import Path
 
-import av
 import cv2
 import numpy as np
 import pytest
@@ -14,73 +12,12 @@ from iris.models import UNREADABLE_UPLOAD, UPLOAD_WITHOUT_AUDIO, FrameIndex, Sou
 from iris.pipeline.context import StageContext
 from iris.sources.upload import UploadSource, extract_audio, extract_frames
 from iris.store.layout import SessionPaths, read_model
-
-W, H, FPS = 320, 240, 10
-SECONDS = 6
-COLOURS = [(0, 0, 255), (0, 255, 0), (255, 0, 0), (0, 255, 255), (255, 0, 255), (255, 255, 0)]
-
-
-def make_media(
-    path: Path,
-    *,
-    video: bool = True,
-    audio: bool = True,
-    rotation: int | None = None,
-    audio_start: float = 0.0,
-    seconds: int = SECONDS,
-) -> Path:
-    with av.open(str(path), "w") as out:
-        vs = as_ = None
-        if video:
-            vs = out.add_stream("mpeg4", rate=FPS)
-            vs.width, vs.height, vs.pix_fmt = W, H, "yuv420p"
-            if rotation is not None:
-                vs.set_display_rotation(rotation)
-        if audio:
-            codec = "pcm_s16le" if path.suffix == ".wav" else "aac"
-            as_ = out.add_stream(codec, rate=48_000)
-            as_.layout = "stereo"
-        if vs is not None:
-            for i in range(seconds * FPS):
-                img = np.empty((H, W, 3), np.uint8)
-                img[:] = COLOURS[(i // FPS) % len(COLOURS)]
-                if rotation is not None:
-                    img[H // 2 :] = 0
-                frame = av.VideoFrame.from_ndarray(img, format="bgr24")
-                frame.pts = i
-                frame.time_base = Fraction(1, FPS)
-                out.mux(vs.encode(frame))
-            out.mux(vs.encode())
-        if as_ is not None:
-            write_sine(out, as_, seconds - audio_start, audio_start)
-    return path
-
-
-def write_sine(out, stream, seconds: float, start: float) -> None:
-    rate, n = 48_000, 1024
-    offset = round(start * rate)
-    for k in range(round(seconds * rate) // n):
-        t = (np.arange(n) + k * n) / rate
-        s = (0.3 * np.sin(2 * np.pi * 440 * t)).astype(np.float32)
-        fmt = "s16" if stream.codec_context.name == "pcm_s16le" else "fltp"
-        data = np.stack([s, s])
-        if fmt == "s16":
-            data = (data.T * 32767).astype(np.int16).reshape(1, -1)
-        frame = av.AudioFrame.from_ndarray(data, format=fmt, layout="stereo")
-        frame.sample_rate = rate
-        frame.pts = offset + k * n
-        frame.time_base = Fraction(1, rate)
-        out.mux(stream.encode(frame))
-    out.mux(stream.encode())
+from tests.media import COLOURS, MEDIA_SECONDS, VIDEO_H, VIDEO_W, make_media, mean_bgr
 
 
 @pytest.fixture(scope="module")
 def media(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return make_media(tmp_path_factory.mktemp("media") / "talk.mp4")
-
-
-def mean_bgr(path: Path) -> np.ndarray:
-    return cv2.imread(str(path)).reshape(-1, 3).mean(axis=0)
 
 
 def make_ctx(root: Path, src: Path, **settings) -> StageContext:
@@ -98,7 +35,9 @@ def test_frames_sampled_once_per_second(media: Path, tmp_path: Path):
     index = extract_frames(media, tmp_path / "frames", fps=1.0, max_width=1280)
     assert index.fps == 1.0
     assert [f.t for f in index.frames] == pytest.approx([0, 1, 2, 3, 4, 5])
-    assert [f.path for f in index.frames] == [f"frames/{s * 1000:09d}.jpg" for s in range(SECONDS)]
+    assert [f.path for f in index.frames] == [
+        f"frames/{s * 1000:09d}.jpg" for s in range(MEDIA_SECONDS)
+    ]
     assert index.frames[1].path == "frames/000001000.jpg"
     for ref, colour in zip(index.frames, COLOURS, strict=True):
         assert mean_bgr(tmp_path / ref.path) == pytest.approx(np.array(colour), abs=12)
@@ -106,8 +45,8 @@ def test_frames_sampled_once_per_second(media: Path, tmp_path: Path):
 
 def test_frames_at_two_fps(media: Path, tmp_path: Path):
     index = extract_frames(media, tmp_path / "frames", fps=2.0, max_width=1280)
-    assert [f.t for f in index.frames] == pytest.approx([i / 2 for i in range(2 * SECONDS)])
-    assert len(list((tmp_path / "frames").glob("*.jpg"))) == 2 * SECONDS
+    assert [f.t for f in index.frames] == pytest.approx([i / 2 for i in range(2 * MEDIA_SECONDS)])
+    assert len(list((tmp_path / "frames").glob("*.jpg"))) == 2 * MEDIA_SECONDS
 
 
 def test_frames_downscaled_keeping_aspect(media: Path, tmp_path: Path):
@@ -119,15 +58,15 @@ def test_frames_downscaled_keeping_aspect(media: Path, tmp_path: Path):
 
 def test_frames_not_upscaled(media: Path, tmp_path: Path):
     index = extract_frames(media, tmp_path / "frames", fps=1.0, max_width=1280)
-    assert (index.width, index.height) == (W, H)
+    assert (index.width, index.height) == (VIDEO_W, VIDEO_H)
 
 
 def test_frames_rotated_upright(tmp_path: Path):
     src = make_media(tmp_path / "phone.mp4", rotation=90, seconds=1)
     index = extract_frames(src, tmp_path / "frames", fps=1.0, max_width=1280)
-    assert (index.width, index.height) == (H, W)
+    assert (index.width, index.height) == (VIDEO_H, VIDEO_W)
     img = cv2.imread(str(tmp_path / index.frames[0].path))
-    left, right = img[:, : H // 2 - 4].mean(), img[:, H // 2 + 4 :].mean()
+    left, right = img[:, : VIDEO_H // 2 - 4].mean(), img[:, VIDEO_H // 2 + 4 :].mean()
     assert left > 50 > right
 
 
@@ -142,9 +81,9 @@ def test_audio_is_16k_mono_s16(media: Path, tmp_path: Path):
     duration = extract_audio(media, dest, rate=16_000)
     with wave.open(str(dest)) as w:
         assert (w.getnchannels(), w.getsampwidth(), w.getframerate()) == (1, 2, 16_000)
-        assert w.getnframes() / 16_000 == pytest.approx(SECONDS, abs=0.1)
+        assert w.getnframes() / 16_000 == pytest.approx(MEDIA_SECONDS, abs=0.1)
         samples = np.frombuffer(w.readframes(w.getnframes()), np.int16)
-    assert duration == pytest.approx(SECONDS, abs=0.1)
+    assert duration == pytest.approx(MEDIA_SECONDS, abs=0.1)
     assert np.abs(samples[16_000:32_000]).max() > 5000
     assert not (tmp_path / "audio.wav.tmp").exists()
 
@@ -194,7 +133,7 @@ async def test_ingest_writes_audio_and_frames(media: Path, tmp_path: Path):
 
     index = read_model(ctx.paths.frame_index, FrameIndex)
     assert (index.fps, index.width, index.height) == (1.0, 160, 120)
-    assert len(index.frames) == SECONDS
+    assert len(index.frames) == MEDIA_SECONDS
     assert all((ctx.paths.root / f.path).exists() for f in index.frames)
     assert not stale.exists()
     assert not ctx.paths.root.joinpath("frames.json.tmp").exists()

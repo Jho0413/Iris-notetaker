@@ -35,6 +35,7 @@ from iris.notes_edits import generated_hash
 from iris.notes_text import MAX_PASSAGES_PER_SESSION, MAX_QUERY_WORDS
 from iris.store.db import SessionStore
 from iris.store.layout import session_paths, write_model
+from tests.media import image_bytes
 
 GENERATED = "Intro.\n\n# Forces\nGravity pulls down.\n\n::figure{#v1}"
 
@@ -294,9 +295,7 @@ async def figure(settings: Settings, sid: str, figure_id: str = "v1"):
 
 
 def encoded(width: int, height: int, ext: str) -> bytes:
-    ok, data = cv2.imencode(ext, np.full((height, width, 3), 120, np.uint8))
-    assert ok
-    return data.tobytes()
+    return image_bytes(np.full((height, width, 3), 120, np.uint8), ext)
 
 
 def size_of(image) -> tuple[int, int]:

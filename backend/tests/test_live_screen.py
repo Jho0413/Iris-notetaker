@@ -15,8 +15,16 @@ from iris.pipeline.context import StageContext
 from iris.pipeline.stages.detect import detect_moments, moment_event
 from iris.sources.browser_live import finalize_frames, store_frame
 from iris.store.layout import SessionPaths, read_model
-from tests.test_detect import SLIDE_A, SLIDE_B, SLIDE_C, Deck, three_slides
-from tests.test_live import COLOURS, jpeg
+from tests.media import (
+    COLOURS,
+    SLIDE_A,
+    SLIDE_B,
+    SLIDE_C,
+    Deck,
+    image_bytes,
+    solid_jpeg,
+    three_slides,
+)
 
 
 def make_ctx(tmp_path: Path, events: list, **settings) -> StageContext:
@@ -77,12 +85,6 @@ class Driver:
         return self.timeline
 
 
-def encode(image: np.ndarray) -> bytes:
-    ok, buf = cv2.imencode(".jpg", image)
-    assert ok
-    return buf.tobytes()
-
-
 def frame_files(paths: SessionPaths) -> dict[str, bytes]:
     return {p.name: p.read_bytes() for p in sorted(paths.frames_dir.glob("*.jpg"))}
 
@@ -90,14 +92,14 @@ def frame_files(paths: SessionPaths) -> dict[str, bytes]:
 async def test_shuffled_frames_within_the_holdback_match_ingest(ctx: StageContext):
     frames = {
         0.0: b"\xff\xd8\xff truncated",
-        1.02: jpeg(COLOURS[1], (640, 480)),
-        1.6: jpeg(COLOURS[2], (640, 480)),
-        2.05: jpeg(COLOURS[3], (640, 480)),
-        3.5: jpeg(COLOURS[4], (320, 240)),
-        4.3: jpeg(COLOURS[5], (640, 480)),
-        5.0: jpeg(COLOURS[0], (640, 240)),
-        6.1: jpeg(COLOURS[1], (640, 480)),
-        7.0: jpeg(COLOURS[2], (640, 480)),
+        1.02: solid_jpeg(COLOURS[1], (640, 480)),
+        1.6: solid_jpeg(COLOURS[2], (640, 480)),
+        2.05: solid_jpeg(COLOURS[3], (640, 480)),
+        3.5: solid_jpeg(COLOURS[4], (320, 240)),
+        4.3: solid_jpeg(COLOURS[5], (640, 480)),
+        5.0: solid_jpeg(COLOURS[0], (640, 240)),
+        6.1: solid_jpeg(COLOURS[1], (640, 480)),
+        7.0: solid_jpeg(COLOURS[2], (640, 480)),
     }
     deliveries = [[1.02, 0.0], [2.05, 1.6], [4.3], [3.5], [6.1, 5.0], [7.0]]
     driver = await Driver(ctx).start()
@@ -133,8 +135,8 @@ async def test_a_frame_later_than_the_holdback_is_skipped(
 ):
     driver = await Driver(ctx).start()
     for t in (0.0, 1.0, 2.4, 4.0, 6.0):
-        await driver.deliver((t, jpeg(COLOURS[0])))
-    await driver.deliver((late, jpeg(COLOURS[1])))
+        await driver.deliver((t, solid_jpeg(COLOURS[0])))
+    await driver.deliver((late, solid_jpeg(COLOURS[1])))
     assert (Lane.SCREEN in driver.timeline.skipped_input) is recorded
     timeline = await driver.stop()
 
@@ -148,7 +150,7 @@ async def test_a_frame_later_than_the_holdback_is_skipped(
 async def test_zero_holdback_feeds_frames_as_they_arrive(tmp_path: Path, events: list):
     ctx = make_ctx(tmp_path, events, live_frame_holdback_s=0)
     driver = await Driver(ctx).start()
-    await driver.deliver((0.0, jpeg(COLOURS[0])))
+    await driver.deliver((0.0, solid_jpeg(COLOURS[0])))
     assert [f.t for f in read_model(ctx.paths.live_frame_index, FrameIndex).frames] == [0.0]
     await driver.stop()
 
@@ -159,10 +161,10 @@ async def test_the_frame_index_is_saved_periodically_not_per_frame(ctx: StageCon
 
     driver = await Driver(ctx).start()
     for t in range(13):
-        await driver.deliver((float(t), jpeg(COLOURS[0])))
+        await driver.deliver((float(t), solid_jpeg(COLOURS[0])))
     assert saved() == [0.0]
     for t in range(13, 33):
-        await driver.deliver((float(t), jpeg(COLOURS[0])))
+        await driver.deliver((float(t), solid_jpeg(COLOURS[0])))
     assert saved() == [float(t) for t in range(31)]
     await driver.stop()
     assert saved() == [float(t) for t in range(33)]
@@ -195,7 +197,7 @@ async def test_a_fresh_lane_replays_the_captured_frames(ctx: StageContext):
     stale = ctx.paths.frames_dir / "999999999.jpg"
     stale.write_bytes(b"old")
     for t in (0.0, 1.0, 2.0, 3.0):
-        store_frame(ctx.paths, t, 1, jpeg(COLOURS[int(t)]))
+        store_frame(ctx.paths, t, 1, solid_jpeg(COLOURS[int(t)]))
     driver = await Driver(ctx).start()
     assert [f.t for f in read_model(ctx.paths.live_frame_index, FrameIndex).frames] == [0.0, 1.0]
     await driver.stop()
@@ -210,7 +212,7 @@ def deck_ctx(tmp_path: Path, events: list) -> StageContext:
 
 async def run_deck(ctx: StageContext, deck: Deck, seed: int = 0) -> tuple[LiveTimeline, list]:
     driver = await Driver(ctx).start()
-    data = [(float(i), encode(f)) for i, f in enumerate(deck.frames)]
+    data = [(float(i), image_bytes(f)) for i, f in enumerate(deck.frames)]
     rng = random.Random(seed)
     published_live = []
     for i in range(0, len(data), 2):
@@ -247,7 +249,7 @@ async def test_a_brief_flash_does_not_close_a_moment(tmp_path: Path, events: lis
 
 def slides(start: float, img: np.ndarray, seconds: int, seed: int) -> list[tuple[float, bytes]]:
     deck = Deck(seed).hold(img, seconds)
-    return [(float(start + i), encode(f)) for i, f in enumerate(deck.frames)]
+    return [(float(start + i), image_bytes(f)) for i, f in enumerate(deck.frames)]
 
 
 def assert_matches_ingest(ctx: StageContext, timeline: LiveTimeline) -> FrameIndex:
@@ -319,9 +321,9 @@ async def test_an_earlier_share_s_frame_at_the_same_time_is_skipped_once_the_nex
     ctx: StageContext,
 ):
     driver = await Driver(ctx).start()
-    await driver.deliver((9.0, jpeg(COLOURS[0])))
-    await driver.deliver(*((t, jpeg(COLOURS[1])) for t in (10.0, 12.0)), share=2)
-    await driver.deliver((10.0, jpeg(COLOURS[2])))
+    await driver.deliver((9.0, solid_jpeg(COLOURS[0])))
+    await driver.deliver(*((t, solid_jpeg(COLOURS[1])) for t in (10.0, 12.0)), share=2)
+    await driver.deliver((10.0, solid_jpeg(COLOURS[2])))
     assert Lane.SCREEN in driver.timeline.skipped_input
     await driver.stop()
 
@@ -359,7 +361,7 @@ async def test_a_frame_from_before_closed_to_is_skipped(ctx: StageContext):
     driver = await Driver(ctx).start()
     await driver.transcribed(20.0)
     assert driver.timeline.closed_to == 20.0
-    await driver.deliver((12.0, jpeg(COLOURS[0])))
+    await driver.deliver((12.0, solid_jpeg(COLOURS[0])))
     assert Lane.SCREEN in driver.timeline.skipped_input
     timeline = await driver.stop()
     assert timeline.moments == []
@@ -382,7 +384,7 @@ def random_recording(rng: random.Random) -> list[tuple[float, int, bytes]]:
             deck = Deck(rng.randrange(1000)).hold(rng.choice(images), seconds)
             for frame in deck.frames:
                 at = exact if exact is not None else t + rng.uniform(0.1, 0.3)
-                frames.append((round(at, 3), share, encode(frame)))
+                frames.append((round(at, 3), share, image_bytes(frame)))
                 exact = None
                 t += 1.0
             if rng.random() < 0.4:

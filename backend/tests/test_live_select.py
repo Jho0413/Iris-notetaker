@@ -29,8 +29,7 @@ from iris.pipeline.stages import align, render, select
 from iris.sources.browser_live import store_frame
 from iris.store.layout import SessionPaths, read_model, write_model
 from tests.api_errors import connection_error
-from tests.test_detect import three_slides
-from tests.test_live_screen import encode
+from tests.media import image_bytes, three_slides
 
 
 class FakeVision:
@@ -565,7 +564,7 @@ async def test_screen_and_select_lanes_through_the_processor(
     processor = LiveProcessor(ctx, lanes=lambda c, tl: [ScreenLane(c, tl), SelectLane(c, tl)])
     processor.start()
     for i, frame in enumerate(three_slides().frames):
-        store_frame(ctx.paths, float(i), 1, encode(frame))
+        store_frame(ctx.paths, float(i), 1, image_bytes(frame))
         processor.notify_screen()
         await asyncio.sleep(0)
     timeline = await processor.finish()

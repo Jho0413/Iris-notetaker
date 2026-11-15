@@ -1,6 +1,5 @@
 import asyncio
 import hashlib
-import io
 import json
 import random
 import threading
@@ -35,7 +34,7 @@ from iris.sources.browser_live import (
 )
 from iris.store.layout import SessionPaths, read_model, write_model
 from tests.api_errors import connection_error, status_error
-from tests.test_live import split
+from tests.media import split, tone, wav_seconds
 
 RATE = 16_000
 SECONDS = 12
@@ -59,7 +58,7 @@ def speech_webm(words=WORDS, seconds: int = SECONDS) -> bytes:
     loud = np.zeros(len(t), bool)
     for a, b in words:
         loud |= (starts >= a) & (starts < b)
-    return encode_webm([(0.3 * loud * np.sin(2 * np.pi * 440 * t)).astype(np.float32)]).data
+    return encode_webm([(loud * tone(t)).astype(np.float32)]).data
 
 
 @pytest.fixture(scope="module")
@@ -77,11 +76,6 @@ def settings(tmp_path: Path, **overrides) -> Settings:
         "live_audio_gap_wait_s": 30.0,
     }
     return Settings(**{**values, **overrides})
-
-
-def wav_seconds(data: bytes) -> float:
-    with wave.open(io.BytesIO(data)) as w:
-        return w.getnframes() / w.getframerate()
 
 
 class FakeTranscriber:

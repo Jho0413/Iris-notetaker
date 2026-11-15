@@ -21,6 +21,7 @@ from iris.models import (
 from iris.pipeline.context import StageContext
 from iris.pipeline.stages import assemble, write
 from iris.store.layout import SessionPaths, read_model, write_model
+from tests.media import make_media
 
 
 def section(ids=(), text="## Decisions\n\nShip the prototype. Alex will test it."):
@@ -239,7 +240,6 @@ def test_upload_pipeline_reaches_export(client, tmp_path, monkeypatch):
 
     from iris.pipeline.stages import render, select, transcribe
     from tests.test_api import wait_for_status
-    from tests.test_ingest import make_media
 
     calls = []
 

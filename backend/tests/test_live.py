@@ -1,7 +1,6 @@
 import json
 import random
 import time
-import wave
 from datetime import UTC, datetime
 from fractions import Fraction
 from pathlib import Path
@@ -14,7 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from iris.config import Settings
-from iris.live.replay import encode_webm, file_frames
+from iris.live.replay import file_frames
 from iris.llm.errors import UserFacingError
 from iris.llm.usage import append_record
 from iris.main import create_app
@@ -26,6 +25,7 @@ from iris.models import (
     UsageRecord,
 )
 from iris.pipeline.context import StageContext
+from iris.pipeline.stages.transcribe import read_wav
 from iris.sources.browser_live import (
     CLUSTER_ID,
     BrowserLiveSource,
@@ -44,31 +44,17 @@ from iris.sources.browser_live import (
     store_frame,
 )
 from iris.store.layout import SessionPaths, read_model, session_paths
+from tests.media import (
+    COLOURS,
+    TONE_SECONDS,
+    WEBM_SECONDS,
+    make_media,
+    make_webm,
+    mean_bgr,
+    solid_jpeg,
+    split,
+)
 from tests.test_api import wait_for_status
-from tests.test_ingest import make_media
-
-RATE = 48_000
-SECONDS = 6
-TONE_SECONDS = {0, 2, 4}
-COLOURS = [(0, 0, 255), (0, 255, 0), (255, 0, 0), (0, 255, 255), (255, 0, 255), (255, 255, 0)]
-
-
-def make_webm(seconds: int = SECONDS) -> bytes:
-    t = np.arange(seconds * RATE) / RATE
-    loud = np.isin(t.astype(int), list(TONE_SECONDS))
-    return encode_webm([(0.3 * loud * np.sin(2 * np.pi * 440 * t)).astype(np.float32)]).data
-
-
-def split(data: bytes, size: int = 4000) -> list[bytes]:
-    return [data[i : i + size] for i in range(0, len(data), size)]
-
-
-def jpeg(colour: tuple[int, int, int], size: tuple[int, int] = (320, 240)) -> bytes:
-    img = np.empty((size[1], size[0], 3), np.uint8)
-    img[:] = colour
-    ok, buf = cv2.imencode(".jpg", img)
-    assert ok
-    return buf.tobytes()
 
 
 @pytest.fixture(scope="module")
@@ -76,10 +62,10 @@ def webm() -> bytes:
     return make_webm()
 
 
-def read_wav(path: Path) -> np.ndarray:
-    with wave.open(str(path)) as w:
-        assert (w.getnchannels(), w.getsampwidth(), w.getframerate()) == (1, 2, 16_000)
-        return np.frombuffer(w.readframes(w.getnframes()), np.int16)
+def read_16k_wav(path: Path) -> np.ndarray:
+    samples, rate = read_wav(path)
+    assert rate == 16_000
+    return samples
 
 
 def loud(samples: np.ndarray, second: int, rate: int = 16_000) -> bool:
@@ -119,9 +105,11 @@ def write_chunks(paths: SessionPaths, chunks: list[bytes], skip: set[int] = froz
 def test_audio_from_shuffled_chunks_matches_the_recording(paths: SessionPaths, webm: bytes):
     write_chunks(paths, split(webm))
     duration = finalize_audio(audio_chunks(paths), paths.audio, 16_000)
-    samples = read_wav(paths.audio)
-    assert duration == pytest.approx(SECONDS, abs=0.1)
-    assert [loud(samples, s) for s in range(SECONDS)] == [s in TONE_SECONDS for s in range(SECONDS)]
+    samples = read_16k_wav(paths.audio)
+    assert duration == pytest.approx(WEBM_SECONDS, abs=0.1)
+    assert [loud(samples, s) for s in range(WEBM_SECONDS)] == [
+        s in TONE_SECONDS for s in range(WEBM_SECONDS)
+    ]
     assert not paths.root.joinpath("audio.wav.tmp").exists()
 
 
@@ -133,14 +121,14 @@ def test_missing_chunks_become_silence_and_keep_later_audio_in_place(
     full_paths = SessionPaths(tmp_path / "full").ensure()
     write_chunks(full_paths, chunks)
     finalize_audio(audio_chunks(full_paths), full_paths.audio, 16_000)
-    full = read_wav(full_paths.audio)
+    full = read_16k_wav(full_paths.audio)
 
     lossy_paths = SessionPaths(tmp_path / "lossy").ensure()
     write_chunks(lossy_paths, chunks, skip=lost)
     duration = finalize_audio(audio_chunks(lossy_paths), lossy_paths.audio, 16_000)
-    lossy = read_wav(lossy_paths.audio)
+    lossy = read_16k_wav(lossy_paths.audio)
 
-    assert duration == pytest.approx(SECONDS, abs=0.1)
+    assert duration == pytest.approx(WEBM_SECONDS, abs=0.1)
     differs = np.abs(envelope(full) - envelope(lossy)) > 3000
     assert np.count_nonzero(differs) * 0.01 < 1.2 * len(lost)
     assert loud(lossy, 0) and loud(lossy, 4) and not loud(lossy, 5)
@@ -163,8 +151,8 @@ def test_header_only_first_chunk_then_a_gap(paths: SessionPaths, webm: bytes, pa
     chunks = [webm[:header_end], *split(webm[header_end:], 2000)]
     write_chunks(paths, chunks, skip={1})
     duration = finalize_audio(audio_chunks(paths), paths.audio, 16_000)
-    samples = read_wav(paths.audio)
-    assert duration == pytest.approx(SECONDS, abs=0.1)
+    samples = read_16k_wav(paths.audio)
+    assert duration == pytest.approx(WEBM_SECONDS, abs=0.1)
     assert loud(samples, 2) and loud(samples, 4) and not loud(samples, 5)
 
 
@@ -209,14 +197,10 @@ async def test_ingest_requires_audio_and_its_first_chunk(tmp_path: Path, webm: b
     assert raised.value.message == UNREADABLE_LIVE_AUDIO
 
 
-def mean_bgr(path: Path) -> np.ndarray:
-    return cv2.imread(str(path)).reshape(-1, 3).mean(axis=0)
-
-
 def test_frames_sampled_on_the_grid_by_timestamp(paths: SessionPaths):
     captured = {0.0: 0, 1.02: 1, 1.6: 1, 2.05: 2, 4.3: 4, 5.0: 5}
     for t in reversed(list(captured)):
-        store_frame(paths, t, 1, jpeg(COLOURS[captured[t]]))
+        store_frame(paths, t, 1, solid_jpeg(COLOURS[captured[t]]))
     index = finalize_frames(paths, fps=1.0, max_width=1280)
     assert [f.t for f in index.frames] == [0.0, 1.02, 2.05, 4.3, 5.0]
     assert [f.path for f in index.frames][:2] == ["frames/000000000.jpg", "frames/000001020.jpg"]
@@ -228,8 +212,8 @@ def test_frames_sampled_on_the_grid_by_timestamp(paths: SessionPaths):
 
 
 def test_frames_downscaled_and_letterboxed_to_one_size(paths: SessionPaths):
-    store_frame(paths, 0.0, 1, jpeg(COLOURS[0], (640, 480)))
-    store_frame(paths, 1.0, 1, jpeg(COLOURS[1], (640, 240)))
+    store_frame(paths, 0.0, 1, solid_jpeg(COLOURS[0], (640, 480)))
+    store_frame(paths, 1.0, 1, solid_jpeg(COLOURS[1], (640, 240)))
     store_frame(paths, 2.0, 1, b"\xff\xd8\xff truncated")
     index = finalize_frames(paths, fps=1.0, max_width=320)
     assert (index.width, index.height) == (320, 240)
@@ -240,11 +224,11 @@ def test_frames_downscaled_and_letterboxed_to_one_size(paths: SessionPaths):
 
 
 def test_each_share_is_sized_from_its_own_first_frame(paths: SessionPaths):
-    store_frame(paths, 0.0, 1, jpeg(COLOURS[0], (160, 120)))
-    store_frame(paths, 1.0, 1, jpeg(COLOURS[1], (320, 120)))
+    store_frame(paths, 0.0, 1, solid_jpeg(COLOURS[0], (160, 120)))
+    store_frame(paths, 1.0, 1, solid_jpeg(COLOURS[1], (320, 120)))
     store_frame(paths, 9.2, 2, b"\xff\xd8\xff truncated")
-    store_frame(paths, 10.0, 2, jpeg(COLOURS[2], (1280, 800)))
-    store_frame(paths, 11.0, 2, jpeg(COLOURS[3], (640, 400)))
+    store_frame(paths, 10.0, 2, solid_jpeg(COLOURS[2], (1280, 800)))
+    store_frame(paths, 11.0, 2, solid_jpeg(COLOURS[3], (640, 400)))
     index = finalize_frames(paths, fps=1.0, max_width=640)
     assert index.share_starts == [10.0]
     assert (index.width, index.height) == (160, 120)
@@ -255,13 +239,13 @@ def test_each_share_is_sized_from_its_own_first_frame(paths: SessionPaths):
 
 def test_shares_come_from_the_frames_share_numbers(paths: SessionPaths):
     for t, share, data in [
-        (0.0, 1, jpeg(COLOURS[0])),
-        (1.0, 1, jpeg(COLOURS[0])),
+        (0.0, 1, solid_jpeg(COLOURS[0])),
+        (1.0, 1, solid_jpeg(COLOURS[0])),
         (5.0, 2, b"\xff\xd8\xff truncated"),
-        (8.0, 3, jpeg(COLOURS[1])),
-        (9.0, 3, jpeg(COLOURS[1])),
-        (9.5, 4, jpeg(COLOURS[2])),
-        (10.0, 4, jpeg(COLOURS[2])),
+        (8.0, 3, solid_jpeg(COLOURS[1])),
+        (9.0, 3, solid_jpeg(COLOURS[1])),
+        (9.5, 4, solid_jpeg(COLOURS[2])),
+        (10.0, 4, solid_jpeg(COLOURS[2])),
     ]:
         store_frame(paths, t, share, data)
     index = finalize_frames(paths, fps=1.0, max_width=320)
@@ -291,8 +275,8 @@ def test_frames_of_two_shares_at_the_same_time_are_both_kept(paths: SessionPaths
 
 def test_frames_captured_before_share_numbers_are_one_share(paths: SessionPaths):
     (paths.live_frames_dir).mkdir(parents=True, exist_ok=True)
-    (paths.live_frames_dir / "000001500.jpg").write_bytes(jpeg(COLOURS[0]))
-    store_frame(paths, 2.5, 1, jpeg(COLOURS[0]))
+    (paths.live_frames_dir / "000001500.jpg").write_bytes(solid_jpeg(COLOURS[0]))
+    store_frame(paths, 2.5, 1, solid_jpeg(COLOURS[0]))
     assert [(f.t, f.share) for f in captured_frames(paths)] == [(1.5, 1), (2.5, 1)]
     assert finalize_frames(paths, fps=1.0, max_width=320).share_starts == []
 
@@ -300,7 +284,7 @@ def test_frames_captured_before_share_numbers_are_one_share(paths: SessionPaths)
 def test_finalize_frames_is_repeatable_and_removes_stale_frames(paths: SessionPaths):
     stale = paths.frames_dir / "999999999.jpg"
     stale.write_bytes(b"old")
-    store_frame(paths, 0.5, 1, jpeg(COLOURS[0]))
+    store_frame(paths, 0.5, 1, solid_jpeg(COLOURS[0]))
     first = finalize_frames(paths, fps=1.0, max_width=1280)
     assert not stale.exists()
     assert finalize_frames(paths, fps=1.0, max_width=1280) == first
@@ -340,7 +324,7 @@ def test_live_input_is_validated(client: TestClient):
     assert post_audio(client, sid, 1, b"") == 400
     assert post_frame(client, sid, 1.0, b"not a jpeg") == 415
     for t in ("nan", "inf", "-1", "86401"):
-        assert post_frame(client, sid, t, jpeg(COLOURS[0])) == 422  # type: ignore[arg-type]
+        assert post_frame(client, sid, t, solid_jpeg(COLOURS[0])) == 422  # type: ignore[arg-type]
     big = b"\xff\xd8\xff" + bytes(16 * 1024 * 1024)
     assert post_frame(client, sid, 1.0, big) == 413
     assert post_audio(client, "nope", 0, b"x") == 404
@@ -350,10 +334,10 @@ def test_live_input_is_validated(client: TestClient):
 def test_frames_need_their_share(client: TestClient, settings: Settings):
     sid = start(client)
     for share in ("0", "-1", "10000", "x"):
-        assert post_frame(client, sid, 1.0, jpeg(COLOURS[0]), share) == 422  # type: ignore[arg-type]
+        assert post_frame(client, sid, 1.0, solid_jpeg(COLOURS[0]), share) == 422  # type: ignore[arg-type]
     url = f"/api/live/{sid}/frame?t=1"
-    assert client.post(url, content=jpeg(COLOURS[0])).status_code == 422
-    assert post_frame(client, sid, 1.0, jpeg(COLOURS[0]), share=2) == 204
+    assert client.post(url, content=solid_jpeg(COLOURS[0])).status_code == 422
+    assert post_frame(client, sid, 1.0, solid_jpeg(COLOURS[0]), share=2) == 204
     paths = session_paths(settings.sessions_dir, sid)
     assert [(f.t, f.share) for f in captured_frames(paths)] == [(1.0, 2)]
 
@@ -402,7 +386,7 @@ def test_end_with_allowed_gaps(client: TestClient, webm: bytes, settings: Settin
     assert r.json()["cost_usd"] == pytest.approx(0.01)
     wait_for_status(client, sid, {"done", "failed"})
     audio = settings.sessions_dir / sid / "audio.wav"
-    assert len(read_wav(audio)) / 16_000 == pytest.approx(SECONDS, abs=0.1)
+    assert len(read_16k_wav(audio)) / 16_000 == pytest.approx(WEBM_SECONDS, abs=0.1)
 
 
 def stop(client: TestClient, sid: str) -> int:
@@ -419,7 +403,7 @@ def test_stop_keeps_the_recording_without_making_notes(client: TestClient, webm:
     runner = client.app.state.runner  # type: ignore[attr-defined]
     assert not runner.is_running(sid)
     assert post_audio(client, sid, 1, chunks[1]) == 409
-    assert post_frame(client, sid, 1.0, jpeg(COLOURS[0])) == 409
+    assert post_frame(client, sid, 1.0, solid_jpeg(COLOURS[0])) == 409
     assert client.get(f"/api/sessions/{sid}").json()["status"] == "stopped"
 
 
@@ -451,7 +435,7 @@ def test_make_notes_from_a_stopped_recording(client: TestClient, webm: bytes, se
     assert stop(client, sid) == 409
     wait_for_status(client, sid, {"done", "failed"})
     audio = settings.sessions_dir / sid / "audio.wav"
-    assert len(read_wav(audio)) / 16_000 == pytest.approx(SECONDS, abs=0.1)
+    assert len(read_16k_wav(audio)) / 16_000 == pytest.approx(WEBM_SECONDS, abs=0.1)
 
 
 def test_discard_a_stopped_recording(client: TestClient, settings: Settings):
@@ -500,7 +484,7 @@ def test_make_notes_after_an_engine_restart(settings: Settings, webm: bytes):
         assert r.json()["status"] == "processing"
         wait_for_status(client, sid, {"done", "failed"})
     audio = settings.sessions_dir / sid / "audio.wav"
-    assert len(read_wav(audio)) / 16_000 == pytest.approx(SECONDS, abs=0.1)
+    assert len(read_16k_wav(audio)) / 16_000 == pytest.approx(WEBM_SECONDS, abs=0.1)
 
 
 def wait_until_idle(client: TestClient, sid: str, timeout: float = 10.0) -> None:
@@ -569,7 +553,7 @@ def test_live_session_produces_notes_like_an_upload(
         assert post_audio(client, sid, seq, chunks[seq]) == 204
     frame_times = [0.0, 1.01, 2.0, 3.02, 4.0, 5.0]
     for i in [3, 0, 5, 1, 4, 2, 0, 5]:
-        assert post_frame(client, sid, frame_times[i], jpeg(COLOURS[i // 3 * 3])) == 204
+        assert post_frame(client, sid, frame_times[i], solid_jpeg(COLOURS[i // 3 * 3])) == 204
 
     r = client.post(f"/api/live/{sid}/end", json={"audio_chunks": len(chunks)})
     assert r.status_code == 200
@@ -577,8 +561,8 @@ def test_live_session_produces_notes_like_an_upload(
     assert session["status"] == "done", session.get("error")
 
     root = settings.sessions_dir / sid
-    samples = read_wav(root / "audio.wav")
-    assert len(samples) / 16_000 == pytest.approx(SECONDS, abs=0.1)
+    samples = read_16k_wav(root / "audio.wav")
+    assert len(samples) / 16_000 == pytest.approx(WEBM_SECONDS, abs=0.1)
     index = read_model(root / "frames.json", FrameIndex)
     assert [f.t for f in index.frames] == frame_times
     assert all((root / f.path).exists() for f in index.frames)

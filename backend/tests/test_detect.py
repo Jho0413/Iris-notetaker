@@ -10,72 +10,16 @@ from iris.pipeline.context import StageContext
 from iris.pipeline.stages import detect
 from iris.pipeline.stages.detect import DetectParams, MomentDetector
 from iris.store.layout import SessionPaths, read_model, write_model
-
-W, H = 640, 360
-BULLET_Y = 280
-
-
-def slide(title: str, bullets: int = 2, shape: str = "rect") -> np.ndarray:
-    img = np.full((H, W, 3), 255, np.uint8)
-    cv2.putText(img, title, (40, 70), cv2.FONT_HERSHEY_SIMPLEX, 1.6, (20, 20, 20), 3)
-    for i in range(bullets):
-        y = 140 + i * 55 if i < 2 else BULLET_Y
-        cv2.circle(img, (75, y - 10), 7, (40, 40, 40), -1)
-        cv2.putText(
-            img, f"{title} point {i + 1}", (95, y), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 0), 2
-        )
-    if shape == "rect":
-        cv2.rectangle(img, (470, 130), (600, 300), (200, 80, 30), -1)
-    elif shape == "circle":
-        cv2.circle(img, (530, 220), 70, (30, 160, 30), -1)
-    else:
-        pts = np.array([[530, 130], [610, 300], [450, 300]], np.int32)
-        cv2.fillPoly(img, [pts], (30, 30, 200))
-    return img
-
-
-SLIDE_A = slide("Agenda", shape="rect")
-SLIDE_B = slide("Results", shape="circle")
-SLIDE_C = slide("Next steps", shape="tri")
-
-
-class Deck:
-    def __init__(self, seed: int = 0):
-        self.frames: list[np.ndarray] = []
-        self.transitions: set[float] = set()
-        self.rng = np.random.default_rng(seed)
-
-    @property
-    def t(self) -> float:
-        return float(len(self.frames))
-
-    def _add(self, img: np.ndarray) -> None:
-        noise = self.rng.normal(0, 4, img.shape)
-        self.frames.append(np.clip(img.astype(np.float32) + noise, 0, 255).astype(np.uint8))
-
-    def hold(self, img: np.ndarray, seconds: int, overlay=None) -> "Deck":
-        for i in range(seconds):
-            frame = img.copy()
-            if overlay is not None:
-                overlay(frame, i, self.rng)
-            self._add(frame)
-        return self
-
-    def fade(self, a: np.ndarray, b: np.ndarray) -> "Deck":
-        self.transitions.add(self.t)
-        self._add(cv2.addWeighted(a, 0.5, b, 0.5, 0))
-        return self
-
-    def refs(self) -> list[FrameRef]:
-        return [
-            FrameRef(t=float(i), path=f"frames/{i * 1000:09d}.jpg") for i in range(len(self.frames))
-        ]
-
-    def detect(self, params: DetectParams | None = None) -> list[Moment]:
-        det = MomentDetector(params)
-        out = [det.feed(r.t, r, f) for r, f in zip(self.refs(), self.frames, strict=True)]
-        out.append(det.finish(self.t))
-        return [m for m in out if m is not None]
+from tests.media import (
+    BULLET_Y,
+    SLIDE_A,
+    SLIDE_B,
+    SLIDE_H,
+    SLIDE_W,
+    Deck,
+    slide,
+    three_slides,
+)
 
 
 def cursor(frame: np.ndarray, i: int, _rng) -> None:
@@ -88,13 +32,6 @@ def cursor(frame: np.ndarray, i: int, _rng) -> None:
 
 def thumbnails(frame: np.ndarray, _i: int, rng) -> None:
     frame[290:350, 500:630] = rng.integers(0, 255, (60, 130, 3), dtype=np.uint8)
-
-
-def three_slides(overlay_b=None, overlay_all=None) -> Deck:
-    d = Deck()
-    d.hold(SLIDE_A, 10, overlay_all).fade(SLIDE_A, SLIDE_B)
-    d.hold(SLIDE_B, 10, overlay_b or overlay_all).fade(SLIDE_B, SLIDE_C)
-    return d.hold(SLIDE_C, 10, overlay_all)
 
 
 def assert_not_transition(moments: list[Moment], deck: Deck) -> None:
@@ -150,7 +87,7 @@ def test_builds_record_each_addition_and_its_region():
 
 
 def test_small_handwritten_addition_is_a_build():
-    board = np.full((H, W, 3), 255, np.uint8)
+    board = np.full((SLIDE_H, SLIDE_W, 3), 255, np.uint8)
     cv2.putText(board, "3x^2 + 18x - 1", (40, 70), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 0), 2)
     line = board.copy()
     cv2.putText(line, "= 3(x+3)^2 - 28", (60, 160), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 0), 2)
@@ -162,13 +99,13 @@ def test_small_handwritten_addition_is_a_build():
 
 
 def test_scrolling_a_canvas_continues_the_moment():
-    canvas = np.full((H + 200, W, 3), 255, np.uint8)
+    canvas = np.full((SLIDE_H + 200, SLIDE_W, 3), 255, np.uint8)
     cv2.putText(canvas, "two black holes", (60, 120), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 0), 2)
     cv2.circle(canvas, (300, 220), 50, (0, 0, 0), 2)
-    cv2.putText(canvas, "LIGO", (60, H + 30), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 0), 2)
+    cv2.putText(canvas, "LIGO", (60, SLIDE_H + 30), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 0), 2)
 
     def view(top: int) -> np.ndarray:
-        img = canvas[top : top + H].copy()
+        img = canvas[top : top + SLIDE_H].copy()
         img[:30] = 40
         cv2.putText(img, "toolbar", (250, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
         return img
@@ -177,15 +114,15 @@ def test_scrolling_a_canvas_continues_the_moment():
     [moment] = deck.detect()
     assert [b.t for b in moment.builds] == [0, 8]
     assert moment.builds[1].region is not None
-    assert moment.builds[1].region.y > H - 120
+    assert moment.builds[1].region.y > SLIDE_H - 120
 
 
 def test_scrolling_content_off_screen_is_a_new_moment():
-    canvas = np.full((H * 3, W, 3), 255, np.uint8)
+    canvas = np.full((SLIDE_H * 3, SLIDE_W, 3), 255, np.uint8)
     for i, word in enumerate(["first", "second", "third", "fourth", "fifth"]):
         y = 80 + i * 200
         cv2.putText(canvas, word, (60, y), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 0, 0), 3)
-    deck = Deck().hold(canvas[:H], 8).hold(canvas[300 : 300 + H], 8)
+    deck = Deck().hold(canvas[:SLIDE_H], 8).hold(canvas[300 : 300 + SLIDE_H], 8)
     assert len(deck.detect()) == 2
 
 
@@ -275,7 +212,9 @@ async def test_run_reads_frames_and_writes_moments(ctx: StageContext, events: li
     refs = deck.refs()
     for ref, frame in zip(refs, deck.frames, strict=True):
         cv2.imwrite(str(ctx.paths.root / ref.path), frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
-    write_model(ctx.paths.frame_index, FrameIndex(fps=1.0, width=W, height=H, frames=refs))
+    write_model(
+        ctx.paths.frame_index, FrameIndex(fps=1.0, width=SLIDE_W, height=SLIDE_H, frames=refs)
+    )
 
     await detect.run(ctx)
 
@@ -328,7 +267,9 @@ def test_unsettled_tail_keeps_established_representative():
 async def test_single_frame_stage_writes_and_emits_fallback(ctx, events):
     ref = FrameRef(t=0, path="frames/000000000.jpg")
     cv2.imwrite(str(ctx.paths.root / ref.path), SLIDE_A)
-    write_model(ctx.paths.frame_index, FrameIndex(fps=1, width=W, height=H, frames=[ref]))
+    write_model(
+        ctx.paths.frame_index, FrameIndex(fps=1, width=SLIDE_W, height=SLIDE_H, frames=[ref])
+    )
     await detect.run(ctx)
     moments = read_model(ctx.paths.moments, Moments).moments
     assert len(moments) == 1
@@ -394,7 +335,7 @@ def test_detect_moments_ends_moments_where_shares_end(tmp_path):
     refs = write_frames(
         tmp_path, [*zip(range(10), a, strict=True), *zip(range(40, 50), again, strict=True)]
     )
-    index = FrameIndex(fps=1.0, width=W, height=H, frames=refs, share_starts=[40.0])
+    index = FrameIndex(fps=1.0, width=SLIDE_W, height=SLIDE_H, frames=refs, share_starts=[40.0])
     spans = [(m.start, m.end) for m in detect.detect_moments(tmp_path, index)]
     assert spans == [(0.0, 10.0), (40.0, 50.0)]
     tight = write_frames(
@@ -404,7 +345,9 @@ def test_detect_moments_ends_moments_where_shares_end(tmp_path):
             *((t + 10.1, img) for t, img in enumerate(again)),
         ],
     )
-    continued = FrameIndex(fps=1.0, width=W, height=H, frames=tight, share_starts=[10.1])
+    continued = FrameIndex(
+        fps=1.0, width=SLIDE_W, height=SLIDE_H, frames=tight, share_starts=[10.1]
+    )
     spans = [(m.start, m.end) for m in detect.detect_moments(tmp_path / "tight", continued)]
     assert spans == [(0.3, 10.1), (10.1, 20.1)]
     one_share = index.model_copy(update={"share_starts": []})

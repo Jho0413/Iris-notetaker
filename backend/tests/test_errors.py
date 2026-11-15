@@ -57,8 +57,8 @@ from iris.pipeline.stages import render, select, write
 from iris.store.db import SessionStore
 from iris.store.layout import read_model, write_model
 from tests.api_errors import connection_error, status_error, timeout_error
+from tests.media import make_audio, make_media, write_wav
 from tests.test_api import wait_for_status
-from tests.test_ingest import make_media
 from tests.test_write import section
 
 SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 10"><rect width="20"/></svg>'
@@ -371,7 +371,6 @@ async def test_a_blocking_error_cancels_the_stage_running_beside_it(tmp_path, mo
 
 async def test_a_blocking_error_in_one_chunk_cancels_the_others(tmp_path, monkeypatch):
     from iris.pipeline.stages import transcribe
-    from tests.test_transcribe import make_audio, write_wav
 
     runner, sid, ctx = runner_session(tmp_path)
     write_wav(ctx.paths.audio, make_audio([("tone", 60.0)]))
