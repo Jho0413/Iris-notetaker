@@ -1,5 +1,3 @@
-"""Saving, restoring and exporting the user's edited notes, and keeping them through re-runs."""
-
 from datetime import UTC, datetime
 
 import pytest
@@ -66,9 +64,8 @@ def test_save_then_read_restore_and_the_generated_notes_are_kept(client, setting
 
     got = client.get(f"/api/sessions/{sid}/notes").json()
     assert got["markdown"] == EDITED and got["edited"]["saved_at"]
-    assert paths.notes.read_text() == on_disk  # an edit never touches the generated notes
+    assert paths.notes.read_text() == on_disk
 
-    # One saved version: the latest save replaces the last.
     assert save(client, sid, EDITED + "\n\nMore.", stamp).status_code == 200
     assert read_model(paths.notes_edits, NotesEdits).markdown.endswith("More.")
     assert client.get(f"/api/sessions/{sid}/notes").json()["markdown"].endswith("More.")
@@ -77,7 +74,7 @@ def test_save_then_read_restore_and_the_generated_notes_are_kept(client, setting
     got = client.get(f"/api/sessions/{sid}/notes").json()
     assert got["markdown"] == GENERATED and got["edited"] is None
     assert not paths.notes_edits.exists()
-    assert client.delete(f"/api/sessions/{sid}/notes/edits").status_code == 204  # idempotent
+    assert client.delete(f"/api/sessions/{sid}/notes/edits").status_code == 204
 
 
 @pytest.mark.parametrize(
@@ -109,10 +106,20 @@ def test_bad_requests(client, settings):
     assert client.put(url, json=extra).status_code == 422
     assert save(client, "nope", "x", stamp).status_code == 404
     assert client.delete("/api/sessions/nope/notes/edits").status_code == 404
-    # A session without notes yet has nothing to edit.
     other = client.app.state.store.create("Empty", SourceKind.UPLOAD)
     session_paths(settings.sessions_dir, other.id).ensure()
     assert save(client, other.id, "x", stamp).status_code == 404
+
+
+def test_notes_not_made_yet_are_not_ready_to_read_or_save_even_while_processing(
+    client, settings, monkeypatch
+):
+    session = client.app.state.store.create("Empty", SourceKind.UPLOAD)
+    session_paths(settings.sessions_dir, session.id).ensure()
+    monkeypatch.setattr(client.app.state.runner, "is_running", lambda _: True)
+    for r in (client.get(f"/api/sessions/{session.id}/notes"), save(client, session.id, "x", "s")):
+        assert r.status_code == 404
+        assert r.json()["detail"] == "notes not ready"
 
 
 def test_no_saving_or_restoring_while_the_session_is_processing(client, settings, monkeypatch):
@@ -135,7 +142,6 @@ def test_a_rerun_keeps_the_edits_and_reports_them_stale_until_the_user_chooses(c
     paths = session_paths(settings.sessions_dir, sid)
     save(client, sid, EDITED, generated_hash(notes))
 
-    # A re-run writes new generated notes (assemble writes notes.json, never notes_edits.json).
     rerun = notes.model_copy(update={"markdown": GENERATED + "\n\nNew paragraph."})
     write_model(paths.notes, rerun)
     got = client.get(f"/api/sessions/{sid}/notes").json()
@@ -143,11 +149,9 @@ def test_a_rerun_keeps_the_edits_and_reports_them_stale_until_the_user_chooses(c
     assert got["edited"]["stale"] is True
     assert got["generated_hash"] == generated_hash(rerun)
 
-    # "Keep my edits": the same markdown saved against the new notes.
     kept = save(client, sid, got["markdown"], got["generated_hash"]).json()
     assert kept["markdown"] == EDITED and kept["edited"]["stale"] is False
 
-    # Re-run again, then "Use the new notes".
     write_model(paths.notes, notes)
     assert client.get(f"/api/sessions/{sid}/notes").json()["edited"]["stale"] is True
     client.delete(f"/api/sessions/{sid}/notes/edits")
@@ -185,7 +189,6 @@ def test_after_a_rerun_renumbers_a_figure_keep_is_refused_until_the_edits_are_fi
     sid, notes = make_notes(client, settings)
     paths = session_paths(settings.sessions_dir, sid)
     save(client, sid, EDITED, generated_hash(notes))
-    # A re-run from select numbers the figures afresh: v1 is now v2.
     renumbered = notes.model_copy(
         update={
             "markdown": GENERATED.replace("#v1", "#v2"),
@@ -201,22 +204,49 @@ def test_after_a_rerun_renumbers_a_figure_keep_is_refused_until_the_edits_are_fi
     assert "no figure" in kept.json()["detail"]
     assert client.get(f"/api/sessions/{sid}/notes").json()["edited"]["stale"] is True
 
-    # Fixed in the editor (the missing figure removed, or the new one placed): saved, not stale.
     fixed = save(client, sid, EDITED.replace("#v1", "#v2"), got["generated_hash"]).json()
     assert fixed["edited"]["stale"] is False
 
 
 def test_edits_that_cant_be_opened_are_never_passed_over(settings):
-    """They may be intact (wrong permissions after a restore): serving the generated notes would
-    let the next save replace them, so reading fails instead."""
     with TestClient(create_app(settings), raise_server_exceptions=False) as client:
         sid, notes = make_notes(client, settings)
         assert save(client, sid, EDITED, generated_hash(notes)).status_code == 200
         path = session_paths(settings.sessions_dir, sid).notes_edits
         path.unlink()
-        path.mkdir()  # can't be opened as a file, as with wrong permissions
+        path.mkdir()
         assert client.get(f"/api/sessions/{sid}/notes").status_code == 500
         assert client.get(f"/api/sessions/{sid}/export").status_code == 500
+
+
+def damage(path):
+    path.write_text("{not json")
+
+
+def make_unopenable(path):
+    path.unlink()
+    path.mkdir()
+
+
+@pytest.mark.parametrize("spoil", [damage, make_unopenable], ids=["damaged", "unopenable"])
+@pytest.mark.parametrize(
+    "ask",
+    [
+        lambda client, sid, stamp: client.get(f"/api/sessions/{sid}/notes"),
+        lambda client, sid, stamp: client.get(f"/api/sessions/{sid}/export"),
+        lambda client, sid, stamp: save(client, sid, EDITED, stamp),
+    ],
+    ids=["read", "export", "save"],
+)
+def test_notes_that_cant_be_read_are_refused_in_plain_words_and_logged(
+    client, settings, caplog, spoil, ask
+):
+    sid, notes = make_notes(client, settings)
+    spoil(session_paths(settings.sessions_dir, sid).notes)
+    r = ask(client, sid, generated_hash(notes))
+    assert r.status_code == 500
+    assert r.json()["detail"] == "the notes couldn't be read"
+    assert f"can't read the notes of session {sid}" in caplog.text
 
 
 def test_the_newest_version_is_the_edits_until_the_notes_are_made_again():

@@ -1,6 +1,8 @@
 import asyncio
+import logging
 import shutil
 import unicodedata
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
@@ -19,6 +21,8 @@ from iris.notes_edits import MAX_EDITED_CHARS, as_read, read_notes
 from iris.notes_format import validate
 from iris.sources.upload import save_upload
 from iris.store.layout import SessionPaths, read_model, session_paths, write_model
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
@@ -61,7 +65,6 @@ def get_session(session: SessionDep, settings: SettingsDep) -> Session:
     return _with_cost(session, settings)
 
 
-# Longest session name, in characters; the UI's field stops at the same length.
 TITLE_MAX_CHARS = 200
 
 
@@ -83,8 +86,8 @@ def rename_session(
     sets the session's title (the notes keep their own), so the name stays through re-runs, and
     the exported file is named after it."""
     store.update(session.id, title=body.title)
-    renamed = store.get(session.id)  # read back, so the reply's updated_at is the new one
-    if renamed is None:  # deleted meanwhile
+    renamed = store.get(session.id)
+    if renamed is None:
         raise HTTPException(404, "session not found")
     return _with_cost(renamed, settings)
 
@@ -93,10 +96,8 @@ def rename_session(
 async def delete_session(session: SessionDep, paths: PathsDep, store: StoreDep, runner: RunnerDep):
     if runner.is_running(session.id):
         raise HTTPException(409, "session is processing")
-    # Remove the row before any await, so live input or an end request arriving meanwhile is
-    # refused (404) instead of restarting processing on a session being deleted.
     store.delete(session.id)
-    await runner.live.cancel(session.id)  # stop live processing before its files go
+    await runner.live.cancel(session.id)
     await asyncio.to_thread(shutil.rmtree, paths.root, ignore_errors=True)
     forget_total(paths.usage_log)
 
@@ -117,19 +118,23 @@ async def rerun(
     return await asyncio.to_thread(_with_cost, session, settings)
 
 
+def _readable[T](paths: SessionPaths, what: str, read: Callable[[], T]) -> T:
+    try:
+        return read()
+    except FileNotFoundError:
+        raise HTTPException(404, f"{what} not ready") from None
+    except (OSError, ValueError):
+        log.exception("can't read the %s of session %s", what, paths.root.name)
+        raise HTTPException(500, f"the {what} couldn't be read") from None
+
+
 @router.get("/{session_id}/transcript", response_model=Transcript)
 def get_transcript(paths: PathsDep) -> Transcript:
-    if not paths.transcript.exists():
-        raise HTTPException(404, "transcript not ready")
-    return read_model(paths.transcript, Transcript)
+    return _readable(paths, "transcript", lambda: read_model(paths.transcript, Transcript))
 
 
 def _notes(paths: SessionPaths) -> Notes:
-    """The notes as a reader gets them: the user's edits when there are any (iris.notes_edits)."""
-    try:
-        return read_notes(paths)
-    except FileNotFoundError:
-        raise HTTPException(404, "notes not ready") from None
+    return _readable(paths, "notes", lambda: read_notes(paths))
 
 
 @router.get("/{session_id}/notes", response_model=Notes)
@@ -157,11 +162,9 @@ def save_notes_edits(
     The markdown is checked like the writer's (``iris.notes_format.validate``): 422 names the
     first problem in plain words. 409 while the session is processing.
     """
-    if not paths.notes.exists():
-        raise HTTPException(404, "notes not ready")
+    generated = _readable(paths, "notes", lambda: read_model(paths.notes, Notes))
     if runner.is_running(session.id):
         raise HTTPException(409, "session is processing")
-    generated = read_model(paths.notes, Notes)
     if problems := validate(body.markdown, {v.id for v in generated.visuals}):
         first = problems[0]
         raise HTTPException(422, f"Line {first.line}: {first.message}")
@@ -191,19 +194,10 @@ def export_notes(session: SessionDep, paths: PathsDep) -> PlainTextResponse:
 
 
 def _attachment_header(title: str, fallback: str) -> str:
-    """``Content-Disposition`` for a download named after ``title`` (RFC 6266 / RFC 5987).
-
-    Header values must be ASCII, so ``filename`` carries an ASCII approximation (accents
-    folded, quotes, backslashes and other unsafe characters replaced) and ``filename*`` the
-    full UTF-8 name, which browsers prefer. ``fallback`` names the file if nothing is left.
-    """
     stem = _clean_filename(title)
-    if all(c.isspace() or unicodedata.category(c) == "Cf" for c in stem):  # blank/invisible
+    if _looks_blank(stem):
         stem = fallback
-    # NFKD folds accents off letters, but also turns full-width forms into ASCII "/", "\\"
-    # and '"', so the folded name is cleaned again.
-    folded = unicodedata.normalize("NFKD", stem).encode("ascii", "ignore").decode()
-    ascii_stem = _clean_filename(folded).replace('"', "_")
+    ascii_stem = _ascii_filename(stem)
     if not any(c.isalnum() for c in ascii_stem):
         ascii_stem = fallback
     return (
@@ -216,8 +210,16 @@ _BIDI_CONTROLS = frozenset(
 )
 
 
+def _looks_blank(name: str) -> bool:
+    return all(c.isspace() or unicodedata.category(c) == "Cf" for c in name)
+
+
+def _ascii_filename(name: str) -> str:
+    folded = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode()
+    return _clean_filename(folded).replace('"', "_")
+
+
 def _clean_filename(name: str) -> str:
-    """Replace path separators, drop bidi controls, turn control characters into spaces."""
     out = []
     for c in name:
         if c in "/\\":
