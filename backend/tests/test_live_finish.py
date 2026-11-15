@@ -40,6 +40,7 @@ from iris.store.layout import SessionPaths, read_model, session_paths
 from tests.media import WEBM_RATE, image_bytes, slide, tone
 from tests.test_live import post_audio, post_frame, start, stop
 from tests.test_write import section
+from tests.waiting import wait_for_done
 
 SECONDS = 120
 SCREENS = [
@@ -182,17 +183,6 @@ def wait_until_caught_up(client: TestClient, sid: str, kinds: set[str], timeout:
             last, quiet_since = n, time.monotonic()
         if kinds <= seen and time.monotonic() - quiet_since > 1.0:
             return
-        time.sleep(0.05)
-
-
-def wait_for_done(client: TestClient, sid: str, timeout: float = 30.0) -> dict:
-    deadline = time.monotonic() + timeout
-    while True:
-        session = client.get(f"/api/sessions/{sid}").json()
-        runner = client.app.state.runner  # type: ignore[attr-defined]
-        if session["status"] in {"done", "failed"} and not runner.is_running(sid):
-            return session
-        assert time.monotonic() < deadline, "the session did not finish"
         time.sleep(0.05)
 
 

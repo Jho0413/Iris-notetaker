@@ -1,4 +1,3 @@
-import time
 from urllib.parse import unquote
 
 import pytest
@@ -7,16 +6,7 @@ from fastapi.testclient import TestClient
 from iris.config import Settings
 from iris.models import UNREADABLE_UPLOAD, Notes, SessionType, SourceKind
 from iris.store.layout import read_model, session_paths, write_model
-
-
-def wait_for_status(client: TestClient, sid: str, statuses: set[str], timeout: float = 5.0) -> dict:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        session = client.get(f"/api/sessions/{sid}").json()
-        if session["status"] in statuses:
-            return session
-        time.sleep(0.05)
-    raise AssertionError(f"session {sid} never reached {statuses}")
+from tests.waiting import wait_for_status
 
 
 def test_health(client: TestClient):

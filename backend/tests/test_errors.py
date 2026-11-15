@@ -1,7 +1,6 @@
 import asyncio
 import json
 import sqlite3
-import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -58,8 +57,8 @@ from iris.store.db import SessionStore
 from iris.store.layout import read_model, write_model
 from tests.api_errors import connection_error, status_error, timeout_error
 from tests.media import make_audio, make_media, write_wav
-from tests.test_api import wait_for_status
 from tests.test_write import section
+from tests.waiting import wait_for_stage, wait_for_status
 
 SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 10"><rect width="20"/></svg>'
 
@@ -661,13 +660,6 @@ def test_a_stored_message_not_on_the_list_is_served_as_the_generic_one(tmp_path)
             UPLOAD_WITHOUT_AUDIO,
             "general",
         )
-
-
-def wait_for_stage(client: TestClient, sid: str, stage: str, timeout: float = 5.0) -> None:
-    deadline = time.monotonic() + timeout
-    while client.get(f"/api/sessions/{sid}").json()["current_stage"] != stage:
-        assert time.monotonic() < deadline, f"session {sid} never reached {stage}"
-        time.sleep(0.05)
 
 
 def test_a_run_cut_off_by_a_restart_can_be_tried_again_from_its_stage(tmp_path, monkeypatch):

@@ -4,7 +4,6 @@ import json
 import os
 import runpy
 import sys
-import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -18,6 +17,7 @@ from iris.config import Settings
 from iris.launch_secrets import MAX_LINE_BYTES, SecretsError, read_secrets, settings_with_secrets
 from iris.main import create_app
 from iris.parent import pid_alive, watch_parent
+from tests.waiting import wait_until
 
 TOKEN = "s3cret-token-0123456789abcdef"
 
@@ -299,15 +299,6 @@ def test_pid_alive(monkeypatch):
     assert pid_alive(4242)
 
 
-def _wait_for(predicate, timeout_s: float = 2.0) -> bool:
-    until = time.monotonic() + timeout_s
-    while time.monotonic() < until:
-        if predicate():
-            return True
-        time.sleep(0.01)
-    return predicate()
-
-
 def test_server_shuts_down_when_the_parent_disappears(monkeypatch, tmp_path):
     alive = {"value": True}
     polls: list[int] = []
@@ -321,10 +312,10 @@ def test_server_shuts_down_when_the_parent_disappears(monkeypatch, tmp_path):
     monkeypatch.setattr(iris.parent, "request_shutdown", lambda: shutdowns.append(True))
     with _client(tmp_path, parent_pid=4242, parent_poll_s=0.01) as c:
         assert c.get("/api/health").status_code == 200
-        assert _wait_for(lambda: len(polls) >= 3)
+        wait_until(lambda: len(polls) >= 3, 2.0, "the parent was never polled")
         assert shutdowns == []
         alive["value"] = False
-        assert _wait_for(lambda: shutdowns == [True])
+        wait_until(lambda: shutdowns == [True], 2.0, "no shutdown was requested")
     assert shutdowns == [True]
 
 

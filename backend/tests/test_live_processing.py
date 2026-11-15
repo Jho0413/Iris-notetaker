@@ -15,8 +15,8 @@ from iris.models import FrameRef, Moment, MomentContent, SourceKind, TranscriptS
 from iris.pipeline.context import StageContext
 from iris.store.layout import session_paths
 from tests.media import make_webm, solid_jpeg, split
-from tests.test_api import wait_for_status
 from tests.test_live import post_audio, post_frame, start
+from tests.waiting import settle, wait_for_status
 
 
 def seg(start: float, end: float, text: str = "x") -> TranscriptSegment:
@@ -28,16 +28,11 @@ def moment(i: int, start: float, end: float) -> Moment:
     return Moment(id=f"m{i:03d}", start=start, end=end, frame=frame)
 
 
-async def settle() -> None:
-    for _ in range(5):
-        await asyncio.sleep(0)
-
-
 async def test_waiters_wake_when_a_watermark_passes():
     tl = LiveTimeline()
     waiter = asyncio.create_task(tl.wait_until(lambda: tl.transcribed_through(20)))
     await tl.publish_transcript([seg(0, 9)], transcribed_to=10)
-    await settle()
+    await settle(5)
     assert not waiter.done()
     await tl.publish_transcript([seg(10, 19)], transcribed_to=20, language="en")
     await asyncio.wait_for(waiter, 1)
@@ -187,9 +182,9 @@ async def test_input_wakes_only_its_lane_and_finish_flushes_every_lane(tmp_path:
     processor.start()
     processor.start()
     processor.notify_audio()
-    await settle()
+    await settle(5)
     processor.notify_screen()
-    await settle()
+    await settle(5)
     assert lanes[Lane.AUDIO].wakes == 1
     assert lanes[Lane.SCREEN].wakes == 1
     assert lanes[Lane.SELECT].wakes == 0
@@ -205,9 +200,9 @@ async def test_a_failing_lane_does_not_stop_the_others(tmp_path: Path):
     processor = LiveProcessor(ctx(tmp_path), factory)
     processor.start()
     processor.notify_screen()
-    await settle()
+    await settle(5)
     processor.notify_audio()
-    await settle()
+    await settle(5)
     assert "lane broke" in processor.timeline.failed[Lane.SCREEN]
     assert lanes[Lane.AUDIO].wakes == 1
 
@@ -262,7 +257,7 @@ class EarlyLane(LiveLane):
 async def test_a_lane_that_returns_before_notes_are_asked_for_has_failed(tmp_path: Path):
     processor = LiveProcessor(ctx(tmp_path), lambda c, tl: [EarlyLane(c, tl)])
     processor.start()
-    await settle()
+    await settle(5)
     assert "before notes were asked for" in processor.timeline.failed[Lane.AUDIO]
     timeline = await asyncio.wait_for(processor.finish(), 1)
     assert not timeline.complete
@@ -290,7 +285,7 @@ async def test_a_cancelled_lane_releases_its_waiters(tmp_path: Path):
     processor.start()
     tl = processor.timeline
     waiter = asyncio.create_task(tl.wait_until(lambda: tl.transcribed_through(1e9)))
-    await settle()
+    await settle(5)
     made[0].future.cancel()
     await asyncio.wait_for(waiter, 1)
     assert Lane.AUDIO in tl.failed
@@ -323,7 +318,7 @@ async def test_cancelling_finish_cancels_the_lanes(tmp_path: Path):
     processor = LiveProcessor(ctx(tmp_path), lambda c, tl: [SlowFlushLane(c, tl)])
     processor.start()
     job = asyncio.create_task(processor.finish())
-    await settle()
+    await settle(5)
     job.cancel()
     with pytest.raises(asyncio.CancelledError):
         await job
@@ -347,7 +342,7 @@ async def test_registry_cancel_and_shutdown_stop_lanes(tmp_path: Path):
     registry = LiveRegistry(lambda sid: ctx(tmp_path), lanes=factory)
     processor = registry.ensure("s1")
     assert processor is not None
-    await settle()
+    await settle(5)
     await registry.cancel("s1")
     assert registry.get("s1") is None
     assert all(task.done() for task in processor._tasks.values())

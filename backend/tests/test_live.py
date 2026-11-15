@@ -1,6 +1,5 @@
 import json
 import random
-import time
 from datetime import UTC, datetime
 from fractions import Fraction
 from pathlib import Path
@@ -54,7 +53,7 @@ from tests.media import (
     solid_jpeg,
     split,
 )
-from tests.test_api import wait_for_status
+from tests.waiting import wait_for_status, wait_until_idle
 
 
 @pytest.fixture(scope="module")
@@ -485,14 +484,6 @@ def test_make_notes_after_an_engine_restart(settings: Settings, webm: bytes):
         wait_for_status(client, sid, {"done", "failed"})
     audio = settings.sessions_dir / sid / "audio.wav"
     assert len(read_16k_wav(audio)) / 16_000 == pytest.approx(WEBM_SECONDS, abs=0.1)
-
-
-def wait_until_idle(client: TestClient, sid: str, timeout: float = 10.0) -> None:
-    runner = client.app.state.runner  # type: ignore[attr-defined]
-    deadline = time.monotonic() + timeout
-    while runner.is_running(sid):
-        assert time.monotonic() < deadline, "pipeline did not finish"
-        time.sleep(0.05)
 
 
 def fake_openai(monkeypatch) -> None:

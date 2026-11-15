@@ -5,7 +5,6 @@ import logging
 import sqlite3
 import sys
 import threading
-import time
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
@@ -36,6 +35,7 @@ from iris.pipeline.stages import render, select
 from iris.store.db import SessionStore
 from iris.store.layout import SessionPaths, read_model, session_paths, write_model
 from tests.media import make_media
+from tests.waiting import wait_until_idle
 
 SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 9 9"><rect width="9"/></svg>'
 IMAGE = b"\x89PNG generated"
@@ -143,15 +143,6 @@ def ctx(tmp_path) -> StageContext:
     )
 
 
-def wait_idle(client: TestClient, sid: str, timeout: float = 10.0) -> dict:
-    runner = client.app.state.runner
-    deadline = time.monotonic() + timeout
-    while runner.is_running(sid):
-        assert time.monotonic() < deadline, "session never finished"
-        time.sleep(0.05)
-    return client.get(f"/api/sessions/{sid}").json()
-
-
 def test_pipeline_records_every_call_and_cached_rerun_costs_nothing(tmp_path, fake):
 
     settings = Settings(data_dir=tmp_path / "data", openai_api_key="test", render_attempts=1)
@@ -160,7 +151,7 @@ def test_pipeline_records_every_call_and_cached_rerun_costs_nothing(tmp_path, fa
         sid = client.post(
             "/api/sessions", files={"file": ("talk.mp4", recording.read_bytes())}
         ).json()["id"]
-        session = wait_idle(client, sid)
+        session = wait_until_idle(client, sid)
         assert session["status"] == "done", session.get("error")
 
         body = client.get(f"/api/sessions/{sid}/usage").json()
@@ -205,7 +196,7 @@ def test_pipeline_records_every_call_and_cached_rerun_costs_nothing(tmp_path, fa
 
         calls_before = len(fake.calls)
         assert client.post(f"/api/sessions/{sid}/run").status_code == 200
-        assert wait_idle(client, sid)["status"] == "done"
+        assert wait_until_idle(client, sid)["status"] == "done"
         assert len(fake.calls) == calls_before
         again = SessionUsage.model_validate(client.get(f"/api/sessions/{sid}/usage").json())
         assert again.records == result.records

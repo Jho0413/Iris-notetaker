@@ -31,6 +31,7 @@ from iris.pipeline.context import StageContext
 from iris.pipeline.stages import write
 from iris.store.layout import SessionPaths, read_model, session_paths, write_model
 from tests.api_errors import connection_error, status_error
+from tests.waiting import eventually
 
 BUDGET = 2000
 WORDS = "the derivative measures how fast the function changes at a point "
@@ -122,14 +123,6 @@ def audio_only() -> LiveTimeline:
     tl = LiveTimeline()
     tl.absent.update({Lane.SCREEN, Lane.SELECT})
     return tl
-
-
-async def eventually(predicate, timeout: float = 3.0) -> None:
-    deadline = time.monotonic() + timeout
-    while not predicate():
-        if time.monotonic() > deadline:
-            raise AssertionError("condition not reached")
-        await asyncio.sleep(0.01)
 
 
 async def idle(seconds: float = 0.1) -> None:

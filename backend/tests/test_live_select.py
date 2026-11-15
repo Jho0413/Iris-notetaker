@@ -30,6 +30,7 @@ from iris.sources.browser_live import store_frame
 from iris.store.layout import SessionPaths, read_model, write_model
 from tests.api_errors import connection_error
 from tests.media import image_bytes, three_slides
+from tests.waiting import eventually, settle
 
 
 class FakeVision:
@@ -138,12 +139,6 @@ def speech(i: int) -> TranscriptSegment:
     return TranscriptSegment(start=10.0 * i + 1, end=10.0 * i + 9, text=f"About figure {i}")
 
 
-async def until(predicate, timeout: float = 5.0) -> None:
-    async with asyncio.timeout(timeout):
-        while not predicate():
-            await asyncio.sleep(0)
-
-
 class Driver:
     def __init__(self, ctx: StageContext):
         self.ctx = ctx
@@ -179,18 +174,13 @@ class Driver:
         return self.timeline
 
 
-async def settle() -> None:
-    for _ in range(20):
-        await asyncio.sleep(0)
-
-
 async def test_a_moment_waits_for_the_transcript_past_its_end_plus_pad(
     ctx: StageContext, vision: FakeVision, renderer: FakeRenderer
 ):
     driver = Driver(ctx).start()
     await driver.close(0)
     await driver.transcribe(0, to=14.9)
-    await settle()
+    await settle(20)
     assert vision.calls == []
     await driver.transcribe(to=15.0)
     await driver.selected(10)
@@ -242,7 +232,7 @@ async def test_with_every_moment_read_selected_to_follows_closed_to(
     assert vision.calls == []
     await driver.close(3)
     await driver.timeline.advance_closed_to(60)
-    await settle()
+    await settle(20)
     assert driver.timeline.selected_to == 30
     await driver.transcribe(3, to=60)
     await driver.selected(60)
@@ -276,16 +266,16 @@ async def test_figures_render_in_the_background_and_a_failure_is_not_fatal(
     driver = Driver(ctx).start()
     await driver.close(0)
     await driver.transcribe(0, to=100)
-    await until(lambda: renderer.started == ["v000001"])
+    await eventually(lambda: renderer.started == ["v000001"])
     await driver.close(1, 2)
     await driver.transcribe(1, 2, to=100)
     await driver.selected(30)
-    await until(lambda: renderer.started == ["v000001", "v000002"])
+    await eventually(lambda: renderer.started == ["v000001", "v000002"])
     assert renderer.max_running == 2
     renderer.hold["v000002"].set()
-    await until(lambda: renderer.started == ["v000001", "v000002", "v000003"])
+    await eventually(lambda: renderer.started == ["v000001", "v000002", "v000003"])
     renderer.hold["v000001"].set()
-    await until(lambda: renderer.running == 0)
+    await eventually(lambda: renderer.running == 0)
     timeline = await driver.stop()
 
     assert Lane.SELECT not in timeline.failed
@@ -314,7 +304,7 @@ async def test_live_renders_hit_the_render_cache(
     await driver.close(0)
     await driver.transcribe(0, to=100)
     await driver.selected(10)
-    await until(lambda: any(kind == EventType.VISUAL_RENDERED for kind, _ in events))
+    await eventually(lambda: any(kind == EventType.VISUAL_RENDERED for kind, _ in events))
     timeline = await driver.stop()
     assert drawn == ["v000001"]
     assert (ctx.paths.visuals_dir / "v000001.svg").is_file()
@@ -345,7 +335,7 @@ async def test_an_api_error_in_a_live_render_gives_the_source_crop_uncached(
     await driver.close(0)
     await driver.transcribe(0, to=100)
     await driver.selected(10)
-    await until(lambda: any(kind == EventType.VISUAL_RENDERED for kind, _ in events))
+    await eventually(lambda: any(kind == EventType.VISUAL_RENDERED for kind, _ in events))
     timeline = await driver.stop()
     [data] = [d for kind, d in events if kind == EventType.VISUAL_RENDERED]
     assert data == {
@@ -369,7 +359,7 @@ async def test_upstream_failure_stops_model_calls(
     driver = Driver(ctx).start()
     await driver.timeline.fail_lane(Lane.AUDIO, "decoder crashed")
     await driver.close(0, 1)
-    await settle()
+    await settle(20)
     timeline = await driver.stop(audio=False)
     assert vision.calls == [] and renderer.started == []
     assert timeline.contents == [] and timeline.selected_to == 0
@@ -383,10 +373,10 @@ async def test_upstream_failure_mid_recording_cancels_renders(
     renderer.hold = {"v000001": asyncio.Event()}
     await driver.close(0, 1)
     await driver.transcribe(0, 1, to=100)
-    await until(lambda: renderer.started == ["v000001"])
+    await eventually(lambda: renderer.started == ["v000001"])
     await driver.timeline.fail_lane(Lane.SCREEN, "boom")
     await driver.close(2)
-    await until(lambda: renderer.running == 0)
+    await eventually(lambda: renderer.running == 0)
     await driver.timeline.request_end()
     await asyncio.wait_for(driver.task, 5)
     assert vision.calls == [["m001", "m002"]]
@@ -440,7 +430,7 @@ async def test_a_fresh_lane_waits_to_rebuild_a_batch_split_by_the_gate(
     await fresh.transcribe(0, 1, to=25)
     fresh.start()
     await fresh.selected(10)
-    await settle()
+    await settle(20)
     assert fresh.timeline.selected_to == 10
     await fresh.transcribe(2, to=100)
     after = await fresh.stop()
@@ -517,17 +507,17 @@ async def test_stop_reads_the_rest_once_the_transcript_is_done_and_waits_for_ren
     driver = Driver(ctx).start()
     await driver.close(0)
     await driver.transcribe(0, to=15)
-    await until(lambda: renderer.started == ["v000001"])
+    await eventually(lambda: renderer.started == ["v000001"])
     await driver.close(1, 2)
     await driver.transcribe(1, to=24)
     await driver.selected(10)
     await driver.timeline.request_end()
     await driver.timeline.finish_lane(Lane.SCREEN)
-    await settle()
+    await settle(20)
     assert vision.calls == [["m001"]] and not driver.task.done()
     await driver.timeline.finish_lane(Lane.AUDIO)
-    await until(lambda: len(vision.calls) == 2)
-    await settle()
+    await eventually(lambda: len(vision.calls) == 2)
+    await settle(20)
     assert not driver.task.done()
     renderer.hold["v000001"].set()
     await asyncio.wait_for(driver.task, 5)
