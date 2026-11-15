@@ -134,6 +134,36 @@ redraw again.
 
 *Why:* a missing key or a rate limit means the same thing in every stage, so it is decided once.
 
+### Usage and cost
+
+1. The job runner wraps every stage in a record of which session and stage its calls belong to.
+   Stages running side by side each keep their own. A stage that makes several kinds of call
+   (render's drawings, images and checks) labels each with its purpose.
+2. Each call (its tokens, time, cost and any error) is appended to the session's usage log as it
+   finishes. The log is the truth: appending costs the same however long the session is, calls
+   finishing together never mix their lines, and a crash loses at most the line being written.
+   A line cut off that way is skipped when read, and the next call starts a fresh line rather
+   than extending it.
+3. Cost comes from the price list in the settings: the model's exact ID, else the ID without a
+   dated snapshot suffix; nothing else is guessed. A call with no price is recorded as unpriced,
+   with the reason, never as free. Images or audio in a call are billed at their own price only
+   where the model has one; otherwise they count as ordinary tokens. An image model's output
+   with no breakdown counts as image tokens. Audio billed by length is charged per second,
+   rounded up.
+4. When a stage that made calls ends, a summary of totals per stage, model and purpose is
+   rewritten from the log. The API and `iris cost` read the log itself, so they are current while
+   a stage runs. A re-run that only hits its caches makes no calls, so it adds nothing.
+5. The session list shows each session's cost from totals kept in memory that read only the
+   lines added since the last look, so listing stays cheap however long the logs grow. Only
+   complete lines count: one still being written waits for the next look. A log that shrank or
+   was replaced is counted again from the start; one that can't be read shows no cost for that
+   session instead of breaking the list. A session with no calls yet shows no cost at all, and
+   counting never holds up a call being logged.
+
+*Why:* cost is a side note to the work, so recording never fails a call or a stage: an error while
+recording is logged and dropped. An append-only log keeps every call even when a run crashes or
+several stages log at once.
+
 ## The progress stream
 
 1. Stages publish events as they go (a stage started, a moment found, a figure redrawn, the run
