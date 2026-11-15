@@ -16,7 +16,6 @@ from openai.types.images_response import ImagesResponse
 
 from iris import cli
 from iris.config import PRICES_CHECKED, ModelPrice, Settings, get_settings
-from iris.llm import client as llm_client
 from iris.llm import usage
 from iris.llm.client import get_openai
 from iris.main import create_app
@@ -34,7 +33,7 @@ from iris.pipeline.stages import render
 from iris.store.db import SessionStore
 from iris.store.layout import SessionPaths, read_model, session_paths, write_model
 from tests.builders import figure_to_render, stage_ctx
-from tests.fakes import PipelineOpenAI, install_client
+from tests.fakes import PipelineOpenAI, fake_openai, install_client
 from tests.media import make_media
 from tests.waiting import wait_until_idle
 
@@ -383,8 +382,7 @@ async def test_unreadable_usage_in_a_response_is_logged_and_the_result_returned(
     async def parse(**_kwargs):
         return weird
 
-    fake = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(parse=parse)))
-    monkeypatch.setattr(llm_client, "_client", lambda _key: fake)
+    install_client(monkeypatch, fake_openai(parse=parse))
     with usage.recording(ctx, Stage.WRITE):
         assert await get_openai(ctx.settings).chat.completions.parse(model="gpt-5.5") is weird
     assert not ctx.paths.usage.exists()
@@ -394,8 +392,7 @@ async def test_failed_call_is_recorded_and_still_raises(ctx, monkeypatch):
     async def parse(**_kwargs):
         raise TimeoutError("took too long")
 
-    fake = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(parse=parse)))
-    monkeypatch.setattr(llm_client, "_client", lambda _key: fake)
+    install_client(monkeypatch, fake_openai(parse=parse))
     with usage.recording(ctx, Stage.WRITE), pytest.raises(TimeoutError):
         await get_openai(ctx.settings).chat.completions.parse(model="gpt-5.5")
     [record] = read_model(ctx.paths.usage, SessionUsage).records
@@ -420,7 +417,7 @@ async def test_with_options_client_is_metered(ctx, fake):
 
 async def test_other_client_attributes_pass_through(ctx, monkeypatch):
     fake = SimpleNamespace(api_key="k", chat=SimpleNamespace(other="x"))
-    monkeypatch.setattr(llm_client, "_client", lambda _key: fake)
+    install_client(monkeypatch, fake)
     proxied = get_openai(ctx.settings)
     assert proxied.api_key == "k"
     assert proxied.chat.other == "x"

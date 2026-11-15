@@ -1,5 +1,4 @@
 import json
-from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import cv2
@@ -16,6 +15,7 @@ from iris.models import (
 from iris.pipeline.stages import select
 from iris.store.layout import read_model, write_model
 from tests.builders import aligned_moments, stage_ctx
+from tests.fakes import fake_openai, parsed_response
 
 
 @pytest.fixture
@@ -24,21 +24,13 @@ def setup(tmp_path, monkeypatch):
     ctx = stage_ctx(tmp_path, events=events, selection_batch_size=2)
     items = aligned_moments(ctx, 3, "Revenue chart")
     parse = AsyncMock()
-    client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(parse=parse)))
-    monkeypatch.setattr(select, "get_openai", lambda _: client)
+    monkeypatch.setattr(select, "get_openai", lambda _: fake_openai(parse=parse))
     return ctx, items, events, parse
 
 
 def response(*decisions, refusal=None):
-    return SimpleNamespace(
-        choices=[
-            SimpleNamespace(
-                message=SimpleNamespace(
-                    parsed=select.Decisions(decisions=list(decisions)) if refusal is None else None,
-                    refusal=refusal,
-                )
-            )
-        ]
+    return parsed_response(
+        select.Decisions(decisions=list(decisions)) if refusal is None else None, refusal
     )
 
 

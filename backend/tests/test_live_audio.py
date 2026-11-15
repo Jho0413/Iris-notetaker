@@ -5,7 +5,6 @@ import random
 import threading
 import wave
 from pathlib import Path
-from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -21,7 +20,6 @@ from iris.live.audio import (
     window_cut,
 )
 from iris.live.replay import encode_webm
-from iris.llm import client as llm_client
 from iris.llm import usage
 from iris.models import EventType, SourceKind, Stage, Transcript
 from iris.pipeline.context import StageContext
@@ -35,6 +33,7 @@ from iris.sources.browser_live import (
 from iris.store.layout import SessionPaths, read_model, write_model
 from tests.api_errors import connection_error, status_error
 from tests.builders import stage_ctx
+from tests.fakes import fake_openai, install_client
 from tests.media import split, tone, wav_seconds
 
 RATE = 16_000
@@ -87,9 +86,7 @@ class FakeTranscriber:
         self.text = text or (
             lambda n, _sha1: " ".join(f"call{n}word{k}" for k in range(words_per_call))
         )
-        self.client = SimpleNamespace(
-            audio=SimpleNamespace(transcriptions=SimpleNamespace(create=self.create))
-        )
+        self.client = fake_openai(transcribe=self.create)
 
     async def create(self, **kwargs):
         n = len(self.calls)
@@ -122,7 +119,7 @@ class Run:
         metered: bool = False,
     ):
         if metered:
-            monkeypatch.setattr(llm_client, "_client", lambda _key: fake.client)
+            install_client(monkeypatch, fake.client)
         else:
             monkeypatch.setattr(audio_lane, "get_openai", lambda _: fake.client)
         self.events: list[tuple[EventType, dict]] = []
@@ -435,10 +432,10 @@ async def test_prompts_are_only_sent_to_models_that_take_them():
         sent.append(kwargs.get("prompt"))
         return {"text": "hi"}
 
-    client = SimpleNamespace(audio=SimpleNamespace(transcriptions=SimpleNamespace(create=create)))
-    await transcribe_chunk(client, "whisper-1", b"", 1.0, prompt="before")
-    await transcribe_chunk(client, "whisper-1", b"", 1.0)
-    await transcribe_chunk(client, "gpt-4o-transcribe", b"", 1.0, prompt="before")
+    fake = fake_openai(transcribe=create)
+    await transcribe_chunk(fake, "whisper-1", b"", 1.0, prompt="before")
+    await transcribe_chunk(fake, "whisper-1", b"", 1.0)
+    await transcribe_chunk(fake, "gpt-4o-transcribe", b"", 1.0, prompt="before")
     assert sent == ["before", None, None]
 
 

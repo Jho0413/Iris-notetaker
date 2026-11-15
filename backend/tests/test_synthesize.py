@@ -1,7 +1,6 @@
 import json
 import shutil
 from pathlib import Path
-from types import SimpleNamespace
 
 import cv2
 import numpy as np
@@ -38,6 +37,7 @@ from iris.store.db import SessionStore
 from iris.store.layout import read_model, session_paths, write_model
 from tests.api_errors import connection_error, status_error
 from tests.builders import stage_ctx
+from tests.fakes import fake_openai, parsed_response
 from tests.media import image_bytes
 
 
@@ -200,12 +200,10 @@ class FakeModel:
             result = synthesize.EditPlan.model_validate({"edits": self.plan})
         else:
             result = self.rewrite(payload)
-        return SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(parsed=result, refusal=None))]
-        )
+        return parsed_response(result)
 
     def client(self):
-        return SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(parse=self.parse)))
+        return fake_openai(parse=self.parse)
 
 
 def edit(kind: str, sections: list[int], **kw) -> dict:
@@ -569,11 +567,9 @@ async def test_a_failing_synthesis_keeps_the_assembled_notes(ctx, monkeypatch, f
     elif fail == "refusal":
 
         async def parse(**kwargs):
-            message = SimpleNamespace(parsed=None, refusal="no")
-            return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+            return parsed_response(None, refusal="no")
 
-        client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(parse=parse)))
-        monkeypatch.setattr(synthesize, "get_openai", lambda _: client)
+        monkeypatch.setattr(synthesize, "get_openai", lambda _: fake_openai(parse=parse))
     elif fail == "missing_key":
         ctx.settings.openai_api_key = None
     await assemble.run(ctx)

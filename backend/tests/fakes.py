@@ -13,19 +13,17 @@ SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 10"><rect width="
 SPOKEN = "Ship the prototype. Alex will test it."
 
 
-def parsed(result, refusal: str | None = None) -> SimpleNamespace:
+def parsed_response(result, refusal: str | None = None) -> SimpleNamespace:
     message = SimpleNamespace(parsed=result, refusal=refusal)
     return SimpleNamespace(choices=[SimpleNamespace(message=message)])
 
 
-def client(parse=None, transcribe=None, generate=None) -> SimpleNamespace:
+def fake_openai(parse=None, transcribe=None) -> SimpleNamespace:
     fake = SimpleNamespace()
     if parse is not None:
         fake.chat = SimpleNamespace(completions=SimpleNamespace(parse=parse))
     if transcribe is not None:
         fake.audio = SimpleNamespace(transcriptions=SimpleNamespace(create=transcribe))
-    if generate is not None:
-        fake.images = SimpleNamespace(generate=generate)
     return fake
 
 
@@ -52,7 +50,7 @@ class PipelineOpenAI:
         return self.respond(self.answer(kwargs), kwargs)
 
     def respond(self, result, kwargs) -> SimpleNamespace:
-        return parsed(result)
+        return parsed_response(result)
 
     def check(self, kwargs) -> render.Check:
         return render.Check(matches=True, problems=[])

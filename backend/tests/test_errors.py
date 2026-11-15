@@ -13,7 +13,6 @@ from iris.api.routes import events as events_route
 from iris.config import Settings
 from iris.events import EventBus
 from iris.jobs.runner import JobRunner
-from iris.llm import client as llm_client
 from iris.llm.client import MissingAPIKey
 from iris.llm.errors import (
     ErrorKind,
@@ -51,7 +50,7 @@ from iris.store.db import SessionStore
 from iris.store.layout import read_model, write_model
 from tests.api_errors import connection_error, status_error, timeout_error
 from tests.builders import aligned_moments, figure_to_render, section
-from tests.fakes import Drawer
+from tests.fakes import Drawer, fake_openai, install_client, parsed_response
 from tests.media import make_audio, make_media, write_wav
 from tests.waiting import wait_for_stage, wait_for_status
 
@@ -348,18 +347,16 @@ async def test_a_blocking_error_in_one_chunk_cancels_the_others(tmp_path, monkey
 
 
 def decisions(*ids: str):
-    parsed = select.Decisions(
-        decisions=[select.Decision(moment_id=i, keep=False, elements=[]) for i in ids]
-    )
-    return SimpleNamespace(
-        choices=[SimpleNamespace(message=SimpleNamespace(parsed=parsed, refusal=None))]
+    return parsed_response(
+        select.Decisions(
+            decisions=[select.Decision(moment_id=i, keep=False, elements=[]) for i in ids]
+        )
     )
 
 
 def fake_vision(monkeypatch, *responses) -> AsyncMock:
     parse = AsyncMock(side_effect=list(responses))
-    client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(parse=parse)))
-    monkeypatch.setattr(select, "get_openai", lambda _: client)
+    monkeypatch.setattr(select, "get_openai", lambda _: fake_openai(parse=parse))
     return parse
 
 
@@ -492,8 +489,7 @@ def assert_no_leak(text: str) -> None:
 def test_raw_errors_never_reach_the_api(tmp_path, monkeypatch, capsys):
     settings = Settings(data_dir=tmp_path / "data", openai_api_key="test", synthesis=False)
     transcriptions = RaisingTranscriptions()
-    fake = SimpleNamespace(audio=SimpleNamespace(transcriptions=transcriptions))
-    monkeypatch.setattr(llm_client, "_client", lambda _key: fake)
+    install_client(monkeypatch, fake_openai(transcribe=transcriptions.create))
     media = make_media(tmp_path / "talk.mp4", seconds=2)
     with TestClient(create_app(settings)) as client:
         sid = client.post("/api/sessions", files={"file": ("talk.mp4", media.read_bytes())}).json()[

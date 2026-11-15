@@ -1,7 +1,6 @@
 import asyncio
 import json
 from pathlib import Path
-from types import SimpleNamespace
 
 import cv2
 import numpy as np
@@ -28,7 +27,7 @@ from iris.sources.browser_live import store_frame
 from iris.store.layout import read_model, write_model
 from tests.api_errors import connection_error
 from tests.builders import stage_ctx
-from tests.fakes import Drawer
+from tests.fakes import Drawer, fake_openai, parsed_response
 from tests.media import image_bytes, three_slides
 from tests.waiting import eventually, settle
 
@@ -63,8 +62,7 @@ class FakeVision:
             )
             for mid in ids
         ]
-        message = SimpleNamespace(parsed=select.Decisions(decisions=decisions), refusal=None)
-        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+        return parsed_response(select.Decisions(decisions=decisions))
 
 
 def rendered_visual(visual_id: str) -> RenderedVisual:
@@ -109,8 +107,7 @@ def ctx(tmp_path: Path, events: list) -> StageContext:
 @pytest.fixture
 def vision(monkeypatch) -> FakeVision:
     fake = FakeVision()
-    client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(parse=fake.parse)))
-    monkeypatch.setattr(select, "get_openai", lambda _: client)
+    monkeypatch.setattr(select, "get_openai", lambda _: fake_openai(parse=fake.parse))
     return fake
 
 
@@ -513,8 +510,7 @@ async def test_a_failed_select_call_fails_the_lane(ctx: StageContext, monkeypatc
     async def parse(**_kwargs):
         raise RuntimeError("rate limited")
 
-    client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(parse=parse)))
-    monkeypatch.setattr(select, "get_openai", lambda _: client)
+    monkeypatch.setattr(select, "get_openai", lambda _: fake_openai(parse=parse))
     driver = Driver(ctx).start()
     await driver.close(0)
     await driver.transcribe(0, to=100)
