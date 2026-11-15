@@ -6,7 +6,6 @@ import cv2
 import numpy as np
 import pytest
 
-from iris.config import Settings
 from iris.models import (
     AlignedMoment,
     Alignment,
@@ -16,30 +15,23 @@ from iris.models import (
     FrameRef,
     Moment,
     Selection,
-    SourceKind,
     TranscriptSegment,
 )
-from iris.pipeline.context import StageContext
 from iris.pipeline.stages import select
-from iris.store.layout import SessionPaths, read_model, write_model
+from iris.store.layout import read_model, write_model
+from tests.builders import stage_ctx
 
 
 @pytest.fixture
 def setup(tmp_path, monkeypatch):
     events = []
-    ctx = StageContext(
-        session_id="s1",
-        source=SourceKind.UPLOAD,
-        paths=SessionPaths(tmp_path).ensure(),
-        settings=Settings(data_dir=tmp_path, selection_batch_size=2),
-        emit=lambda kind, data: events.append((kind, data)),
-    )
+    ctx = stage_ctx(tmp_path, events=events, selection_batch_size=2)
     image = np.zeros((60, 100, 3), dtype=np.uint8)
     image[:, 50:] = 255
     items = []
     for i in range(3):
         path = f"frames/{i}.jpg"
-        cv2.imwrite(str(tmp_path / path), image)
+        cv2.imwrite(str(ctx.paths.root / path), image)
         items.append(
             AlignedMoment(
                 moment=Moment(

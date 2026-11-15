@@ -7,14 +7,14 @@ import cv2
 import numpy as np
 import pytest
 
-from iris.config import Settings
 from iris.live.screen import ScreenLane
 from iris.live.timeline import Lane, LiveTimeline
-from iris.models import EventType, FrameIndex, Moments, SourceKind
+from iris.models import EventType, FrameIndex, Moments
 from iris.pipeline.context import StageContext
 from iris.pipeline.stages.detect import detect_moments, moment_event
 from iris.sources.browser_live import finalize_frames, store_frame
 from iris.store.layout import SessionPaths, read_model
+from tests.builders import stage_ctx
 from tests.media import (
     COLOURS,
     SLIDE_A,
@@ -27,19 +27,11 @@ from tests.media import (
 )
 
 
-def make_ctx(tmp_path: Path, events: list, **settings) -> StageContext:
-    return StageContext(
-        session_id="s1",
-        source=SourceKind.BROWSER_LIVE,
-        paths=SessionPaths(tmp_path / "s1").ensure(),
-        settings=Settings(data_dir=tmp_path, **settings),
-        emit=lambda kind, data: events.append((kind, data)),
-    )
-
-
 @pytest.fixture
 def ctx(tmp_path: Path, events: list) -> StageContext:
-    return make_ctx(tmp_path, events, live_frame_holdback_s=2.0, frame_max_width=320)
+    return stage_ctx(
+        tmp_path, live=True, events=events, live_frame_holdback_s=2.0, frame_max_width=320
+    )
 
 
 class Driver:
@@ -148,7 +140,7 @@ async def test_a_frame_later_than_the_holdback_is_skipped(
 
 
 async def test_zero_holdback_feeds_frames_as_they_arrive(tmp_path: Path, events: list):
-    ctx = make_ctx(tmp_path, events, live_frame_holdback_s=0)
+    ctx = stage_ctx(tmp_path, live=True, events=events, live_frame_holdback_s=0)
     driver = await Driver(ctx).start()
     await driver.deliver((0.0, solid_jpeg(COLOURS[0])))
     assert [f.t for f in read_model(ctx.paths.live_frame_index, FrameIndex).frames] == [0.0]
@@ -207,7 +199,7 @@ async def test_a_fresh_lane_replays_the_captured_frames(ctx: StageContext):
 
 
 def deck_ctx(tmp_path: Path, events: list) -> StageContext:
-    return make_ctx(tmp_path, events, live_frame_holdback_s=2.0)
+    return stage_ctx(tmp_path, live=True, events=events, live_frame_holdback_s=2.0)
 
 
 async def run_deck(ctx: StageContext, deck: Deck, seed: int = 0) -> tuple[LiveTimeline, list]:

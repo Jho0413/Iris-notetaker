@@ -29,8 +29,9 @@ from iris.models import (
 )
 from iris.pipeline.context import StageContext
 from iris.pipeline.stages import write
-from iris.store.layout import SessionPaths, read_model, session_paths, write_model
+from iris.store.layout import read_model, session_paths, write_model
 from tests.api_errors import connection_error, status_error
+from tests.builders import stage_ctx
 from tests.waiting import eventually
 
 BUDGET = 2000
@@ -109,14 +110,7 @@ def notes(monkeypatch) -> FakeNotes:
 
 def make_ctx(tmp_path: Path) -> tuple[StageContext, list]:
     events: list = []
-    ctx = StageContext(
-        session_id="s1",
-        source=SourceKind.BROWSER_LIVE,
-        paths=SessionPaths(tmp_path / "s1").ensure(),
-        settings=Settings(data_dir=tmp_path, notes_context_chars=BUDGET),
-        emit=lambda kind, data: events.append((kind, data)),
-    )
-    return ctx, events
+    return stage_ctx(tmp_path, live=True, events=events, notes_context_chars=BUDGET), events
 
 
 def audio_only() -> LiveTimeline:

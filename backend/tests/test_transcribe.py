@@ -10,12 +10,13 @@ import openai
 import pytest
 
 from iris.config import Settings
-from iris.models import EventType, SourceKind, Transcript
+from iris.models import EventType, Transcript
 from iris.pipeline.context import StageContext
 from iris.pipeline.stages import transcribe
 from iris.pipeline.stages.transcribe import encode_wav, plan_chunks, transcribe_chunk
-from iris.store.layout import SessionPaths, read_model
+from iris.store.layout import read_model
 from tests.api_errors import status_error
+from tests.builders import stage_ctx
 from tests.media import SPEECH_RATE, make_audio, tone, wav_seconds, write_wav
 
 SMALL = {"target_s": 3.0, "max_s": 5.0, "search_s": 1.0}
@@ -91,13 +92,7 @@ def fake_client(**kwargs) -> SimpleNamespace:
 @pytest.fixture
 def ctx(tmp_path: Path) -> StageContext:
     events: list[tuple[EventType, dict]] = []
-    c = StageContext(
-        session_id="s1",
-        source=SourceKind.UPLOAD,
-        paths=SessionPaths(tmp_path / "s1").ensure(),
-        settings=Settings(data_dir=tmp_path, openai_api_key="test-key"),
-        emit=lambda t, d: events.append((t, d)),
-    )
+    c = stage_ctx(tmp_path, events=events, openai_api_key="test-key")
     c.events = events  # type: ignore[attr-defined]
     return c
 

@@ -35,8 +35,9 @@ from iris.pipeline import STAGES
 from iris.pipeline.context import StageContext
 from iris.pipeline.stages import assemble, synthesize
 from iris.store.db import SessionStore
-from iris.store.layout import SessionPaths, read_model, session_paths, write_model
+from iris.store.layout import read_model, session_paths, write_model
 from tests.api_errors import connection_error, status_error
+from tests.builders import stage_ctx
 from tests.media import image_bytes
 
 
@@ -91,12 +92,7 @@ SLIDE_C = slide("Revenue", ["Costs fell 4%", "Margin is 31%", "Cash: 2.1M"], (16
 
 @pytest.fixture
 def ctx(tmp_path: Path) -> StageContext:
-    return StageContext(
-        session_id="s1",
-        source=SourceKind.UPLOAD,
-        paths=SessionPaths(tmp_path / "s1").ensure(),
-        settings=Settings(data_dir=tmp_path, openai_api_key="test"),
-    )
+    return stage_ctx(tmp_path, openai_api_key="test")
 
 
 def visual(vid: str, mid: str, t: float, source: str) -> Visual:
@@ -767,9 +763,7 @@ async def test_generate_uses_strict_structured_output(tmp_path, monkeypatch, mod
     import httpx
     from openai import AsyncOpenAI
 
-    ctx = StageContext(
-        session_id="s", source=SourceKind.UPLOAD, paths=SessionPaths(tmp_path), settings=Settings()
-    )
+    ctx = stage_ctx(tmp_path)
     plan = synthesize.EditPlan.model_validate({"edits": [edit("merge", [0, 1])]})
 
     def handle(request):

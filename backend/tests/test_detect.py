@@ -4,12 +4,12 @@ import cv2
 import numpy as np
 import pytest
 
-from iris.config import Settings
-from iris.models import EventType, FrameIndex, FrameRef, Moment, Moments, SourceKind
+from iris.models import EventType, FrameIndex, FrameRef, Moment, Moments
 from iris.pipeline.context import StageContext
 from iris.pipeline.stages import detect
 from iris.pipeline.stages.detect import DetectParams, MomentDetector
-from iris.store.layout import SessionPaths, read_model, write_model
+from iris.store.layout import read_model, write_model
+from tests.builders import stage_ctx
 from tests.media import (
     BULLET_Y,
     SLIDE_A,
@@ -198,13 +198,7 @@ def test_empty_detector_finishes_with_nothing():
 
 @pytest.fixture
 def ctx(tmp_path: Path, events: list) -> StageContext:
-    return StageContext(
-        session_id="s1",
-        source=SourceKind.UPLOAD,
-        paths=SessionPaths(tmp_path / "s1").ensure(),
-        settings=Settings(data_dir=tmp_path),
-        emit=lambda type, data: events.append((type, data)),
-    )
+    return stage_ctx(tmp_path, events=events)
 
 
 async def test_run_reads_frames_and_writes_moments(ctx: StageContext, events: list):

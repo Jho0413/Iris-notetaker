@@ -8,10 +8,11 @@ from pydantic import ValidationError
 
 from iris.config import Settings
 from iris.llm.errors import UserFacingError
-from iris.models import UNREADABLE_UPLOAD, UPLOAD_WITHOUT_AUDIO, FrameIndex, SourceKind
+from iris.models import UNREADABLE_UPLOAD, UPLOAD_WITHOUT_AUDIO, FrameIndex
 from iris.pipeline.context import StageContext
 from iris.sources.upload import UploadSource, extract_audio, extract_frames
-from iris.store.layout import SessionPaths, read_model
+from iris.store.layout import read_model
+from tests.builders import stage_ctx
 from tests.media import COLOURS, MEDIA_SECONDS, VIDEO_H, VIDEO_W, make_media, mean_bgr
 
 
@@ -20,15 +21,10 @@ def media(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return make_media(tmp_path_factory.mktemp("media") / "talk.mp4")
 
 
-def make_ctx(root: Path, src: Path, **settings) -> StageContext:
-    paths = SessionPaths(root).ensure()
-    paths.source(src.suffix).write_bytes(src.read_bytes())
-    return StageContext(
-        session_id="s1",
-        source=SourceKind.UPLOAD,
-        paths=paths,
-        settings=Settings(data_dir=root, **settings),
-    )
+def make_ctx(tmp_path: Path, src: Path, **settings) -> StageContext:
+    ctx = stage_ctx(tmp_path, **settings)
+    ctx.paths.source(src.suffix).write_bytes(src.read_bytes())
+    return ctx
 
 
 def test_frames_sampled_once_per_second(media: Path, tmp_path: Path):
@@ -126,7 +122,7 @@ def test_unreadable_file_raises(tmp_path: Path):
 
 
 async def test_ingest_writes_audio_and_frames(media: Path, tmp_path: Path):
-    ctx = make_ctx(tmp_path / "s1", media, frame_max_width=160)
+    ctx = make_ctx(tmp_path, media, frame_max_width=160)
     stale = ctx.paths.frames_dir / "999999999.jpg"
     stale.write_bytes(b"old")
     await UploadSource().ingest(ctx)
@@ -143,7 +139,7 @@ async def test_ingest_writes_audio_and_frames(media: Path, tmp_path: Path):
 
 async def test_ingest_audio_only(tmp_path: Path):
     src = make_media(tmp_path / "voice.m4a", video=False, seconds=1)
-    ctx = make_ctx(tmp_path / "s1", src)
+    ctx = make_ctx(tmp_path, src)
     await UploadSource().ingest(ctx)
     assert read_model(ctx.paths.frame_index, FrameIndex) == FrameIndex(
         fps=1.0, width=0, height=0, frames=[]
@@ -153,7 +149,7 @@ async def test_ingest_audio_only(tmp_path: Path):
 
 async def test_ingest_video_without_audio_fails_before_decoding(tmp_path: Path):
     src = make_media(tmp_path / "silent.mp4", audio=False, seconds=1)
-    ctx = make_ctx(tmp_path / "s1", src)
+    ctx = make_ctx(tmp_path, src)
     with pytest.raises(UserFacingError, match="no audio track"):
         await UploadSource().ingest(ctx)
     assert not ctx.paths.frame_index.exists()
@@ -161,11 +157,6 @@ async def test_ingest_video_without_audio_fails_before_decoding(tmp_path: Path):
 
 
 async def test_ingest_without_source(tmp_path: Path):
-    ctx = StageContext(
-        session_id="s1",
-        source=SourceKind.UPLOAD,
-        paths=SessionPaths(tmp_path / "s1").ensure(),
-        settings=Settings(data_dir=tmp_path),
-    )
+    ctx = stage_ctx(tmp_path)
     with pytest.raises(FileNotFoundError):
         await UploadSource().ingest(ctx)

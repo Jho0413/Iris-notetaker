@@ -20,10 +20,8 @@ from iris.models import (
     LIVE_WITHOUT_AUDIO,
     UNREADABLE_LIVE_AUDIO,
     FrameIndex,
-    SourceKind,
     UsageRecord,
 )
-from iris.pipeline.context import StageContext
 from iris.pipeline.stages.transcribe import read_wav
 from iris.sources.browser_live import (
     CLUSTER_ID,
@@ -43,6 +41,7 @@ from iris.sources.browser_live import (
     store_frame,
 )
 from iris.store.layout import SessionPaths, read_model, session_paths
+from tests.builders import stage_ctx
 from tests.media import (
     COLOURS,
     TONE_SECONDS,
@@ -186,7 +185,7 @@ def test_unreadable_audio_raises(paths: SessionPaths):
 
 async def test_ingest_requires_audio_and_its_first_chunk(tmp_path: Path, webm: bytes):
     paths = SessionPaths(tmp_path / "s1").ensure()
-    ctx = StageContext("s1", SourceKind.BROWSER_LIVE, paths, Settings(data_dir=tmp_path))
+    ctx = stage_ctx(tmp_path, live=True)
     with pytest.raises(UserFacingError, match="no audio was recorded") as raised:
         await BrowserLiveSource().ingest(ctx)
     assert raised.value.message == LIVE_WITHOUT_AUDIO

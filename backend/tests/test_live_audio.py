@@ -34,6 +34,7 @@ from iris.sources.browser_live import (
 )
 from iris.store.layout import SessionPaths, read_model, write_model
 from tests.api_errors import connection_error, status_error
+from tests.builders import stage_ctx
 from tests.media import split, tone, wav_seconds
 
 RATE = 16_000
@@ -496,7 +497,7 @@ async def test_failing_lane_is_marked_failed_by_the_processor(
 
     fake = FakeTranscriber(gate)
     monkeypatch.setattr(audio_lane, "get_openai", lambda _: fake.client)
-    ctx = StageContext("s1", SourceKind.BROWSER_LIVE, paths, settings(tmp_path))
+    ctx = stage_ctx(tmp_path, live=True, settings=settings(tmp_path))
     processor = LiveProcessor(ctx, lambda c, t: [AudioLane(c, t)], finish_timeout_s=10)
     processor.start()
     for seq, data in enumerate(split(webm, 2000)):
@@ -521,9 +522,7 @@ async def test_a_window_transcribed_at_stop_is_still_retried(
 
     fake = FakeTranscriber(gate)
     monkeypatch.setattr(audio_lane, "get_openai", lambda _: fake.client)
-    ctx = StageContext(
-        "s1", SourceKind.BROWSER_LIVE, paths, settings(tmp_path, api_retry_delays_s=[0.01])
-    )
+    ctx = stage_ctx(tmp_path, live=True, settings=settings(tmp_path, api_retry_delays_s=[0.01]))
     processor = LiveProcessor(ctx, lambda c, t: [AudioLane(c, t)], finish_timeout_s=10)
     processor.start()
     for seq, data in enumerate(split(webm, 2000)):
@@ -770,7 +769,7 @@ async def test_at_stop_a_very_short_tail_joins_the_last_window(
     tmp_path: Path, paths: SessionPaths, monkeypatch
 ):
     s = settings(tmp_path)
-    lane = AudioLane(StageContext("s1", SourceKind.BROWSER_LIVE, paths, s), LiveTimeline())
+    lane = AudioLane(stage_ctx(tmp_path, live=True, settings=s), LiveTimeline())
     speech = (8000 * np.sin(np.arange(RATE * 4) * 0.2)).astype("<i2")
     paths.live_pcm.parent.mkdir(parents=True, exist_ok=True)
     speech.tofile(paths.live_pcm)

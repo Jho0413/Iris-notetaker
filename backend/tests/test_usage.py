@@ -34,6 +34,7 @@ from iris.pipeline.context import StageContext
 from iris.pipeline.stages import render, select
 from iris.store.db import SessionStore
 from iris.store.layout import SessionPaths, read_model, session_paths, write_model
+from tests.builders import stage_ctx
 from tests.media import make_media
 from tests.waiting import wait_until_idle
 
@@ -135,12 +136,7 @@ def fake(monkeypatch) -> FakeOpenAI:
 
 @pytest.fixture
 def ctx(tmp_path) -> StageContext:
-    return StageContext(
-        session_id="s1",
-        source=SourceKind.UPLOAD,
-        paths=SessionPaths(tmp_path / "s1").ensure(),
-        settings=Settings(data_dir=tmp_path, openai_api_key="test", render_attempts=1),
-    )
+    return stage_ctx(tmp_path, openai_api_key="test", render_attempts=1)
 
 
 def test_pipeline_records_every_call_and_cached_rerun_costs_nothing(tmp_path, fake):
@@ -462,12 +458,7 @@ async def test_other_client_attributes_pass_through(ctx, monkeypatch):
 
 
 async def test_concurrent_stages_and_threads_keep_every_record(ctx, fake, tmp_path):
-    other = StageContext(
-        session_id="s2",
-        source=SourceKind.UPLOAD,
-        paths=SessionPaths(tmp_path / "s2").ensure(),
-        settings=ctx.settings,
-    )
+    other = stage_ctx(tmp_path, root="s2", settings=ctx.settings)
 
     async def stage(c: StageContext, s: Stage, n: int) -> None:
         with usage.recording(c, s):

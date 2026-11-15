@@ -2,7 +2,6 @@ import cv2
 import numpy as np
 import pytest
 
-from iris.config import Settings
 from iris.models import (
     EventType,
     FrameRef,
@@ -11,13 +10,12 @@ from iris.models import (
     Renders,
     Selection,
     SessionType,
-    SourceKind,
     Visual,
 )
-from iris.pipeline.context import StageContext
 from iris.pipeline.stages import assemble, render
-from iris.store.layout import SessionPaths, read_model, write_model
+from iris.store.layout import read_model, write_model
 from iris.svg import rasterize_svg, sanitize_svg
+from tests.builders import stage_ctx
 
 SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 10"><rect width="20"/></svg>'
 
@@ -25,14 +23,8 @@ SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 10"><rect width="
 @pytest.fixture
 def setup(tmp_path, monkeypatch):
     events = []
-    ctx = StageContext(
-        session_id="s1",
-        source=SourceKind.UPLOAD,
-        paths=SessionPaths(tmp_path).ensure(),
-        settings=Settings(data_dir=tmp_path, render_attempts=2),
-        emit=lambda kind, data: events.append((kind, data)),
-    )
-    cv2.imwrite(str(tmp_path / "visuals/v1.source.jpg"), np.full((20, 40, 3), 255, np.uint8))
+    ctx = stage_ctx(tmp_path, events=events, render_attempts=2)
+    cv2.imwrite(str(ctx.paths.root / "visuals/v1.source.jpg"), np.full((20, 40, 3), 255, np.uint8))
     visual = Visual(
         id="v1",
         moment_id="m1",

@@ -26,7 +26,6 @@ from iris.models import (
     Moments,
     NotesDraft,
     Selection,
-    SourceKind,
     Stage,
     Transcript,
     TranscriptSegment,
@@ -37,6 +36,7 @@ from iris.pipeline import PLAN, STAGES
 from iris.pipeline.context import StageContext
 from iris.pipeline.stages import render, select, synthesize
 from iris.store.layout import SessionPaths, read_model, session_paths
+from tests.builders import stage_ctx
 from tests.media import WEBM_RATE, image_bytes, slide, tone
 from tests.test_live import post_audio, post_frame, start, stop
 from tests.test_write import section
@@ -571,16 +571,6 @@ def test_notes_asked_for_when_the_lanes_cannot_start_leave_the_session_as_it_was
         assert stage_events(client, sid, 0) == []
 
 
-def ctx(tmp_path: Path) -> StageContext:
-    settings = Settings(data_dir=tmp_path, openai_api_key=None)
-    return StageContext(
-        session_id="s1",
-        source=SourceKind.BROWSER_LIVE,
-        paths=session_paths(settings.sessions_dir, "s1").ensure(),
-        settings=settings,
-    )
-
-
 async def timeline_with_work(c: StageContext) -> LiveTimeline:
     tl = LiveTimeline()
     frame = FrameRef(t=0, path="frames/000000000.jpg")
@@ -614,7 +604,7 @@ async def timeline_with_work(c: StageContext) -> LiveTimeline:
 
 
 async def test_a_complete_timeline_promotes_everything(tmp_path: Path):
-    c = ctx(tmp_path)
+    c = stage_ctx(tmp_path, live=True)
     tl = await timeline_with_work(c)
     assert promote.promotable(c, tl) == promote.EVERYTHING
     assert promote.remaining_plan(promote.EVERYTHING) == PLAN[4:]
@@ -642,7 +632,7 @@ async def test_a_complete_timeline_promotes_everything(tmp_path: Path):
     ],
 )
 async def test_unusable_screen_work_promotes_only_the_transcript(tmp_path: Path, spoil):
-    c = ctx(tmp_path)
+    c = stage_ctx(tmp_path, live=True)
     tl = await timeline_with_work(c)
     spoil(tl, c)
     assert promote.promotable(c, tl) == promote.TRANSCRIPT_ONLY
@@ -660,7 +650,7 @@ async def test_unusable_screen_work_promotes_only_the_transcript(tmp_path: Path,
     ids=["audio failed", "audio skipped input"],
 )
 async def test_unusable_audio_promotes_nothing(tmp_path: Path, spoil):
-    c = ctx(tmp_path)
+    c = stage_ctx(tmp_path, live=True)
     tl = await timeline_with_work(c)
     await spoil(tl)
     assert promote.promotable(c, tl) == ()
@@ -669,7 +659,7 @@ async def test_unusable_audio_promotes_nothing(tmp_path: Path, spoil):
 
 
 async def test_promotion_writes_the_timeline_as_it_is(tmp_path: Path):
-    c = ctx(tmp_path)
+    c = stage_ctx(tmp_path, live=True)
     emitted: list[tuple[str, dict]] = []
     c.emit = lambda t, d: emitted.append((t, d))
     tl = await timeline_with_work(c)

@@ -7,7 +7,6 @@ import cv2
 import numpy as np
 import pytest
 
-from iris.config import Settings
 from iris.live import LiveProcessor
 from iris.live.screen import ScreenLane
 from iris.live.select import SelectBatches, SelectLane
@@ -20,15 +19,15 @@ from iris.models import (
     RenderedVisual,
     Renders,
     Selection,
-    SourceKind,
     TranscriptSegment,
     Visual,
 )
 from iris.pipeline.context import StageContext
 from iris.pipeline.stages import align, render, select
 from iris.sources.browser_live import store_frame
-from iris.store.layout import SessionPaths, read_model, write_model
+from iris.store.layout import read_model, write_model
 from tests.api_errors import connection_error
+from tests.builders import stage_ctx
 from tests.media import image_bytes, three_slides
 from tests.waiting import eventually, settle
 
@@ -96,17 +95,13 @@ class FakeRenderer:
 
 @pytest.fixture
 def ctx(tmp_path: Path, events: list) -> StageContext:
-    return StageContext(
-        session_id="s1",
-        source=SourceKind.BROWSER_LIVE,
-        paths=SessionPaths(tmp_path / "s1").ensure(),
-        settings=Settings(
-            data_dir=tmp_path,
-            selection_batch_size=2,
-            live_speech_pad_s=5.0,
-            live_render_concurrency=2,
-        ),
-        emit=lambda kind, data: events.append((kind, data)),
+    return stage_ctx(
+        tmp_path,
+        live=True,
+        events=events,
+        selection_batch_size=2,
+        live_speech_pad_s=5.0,
+        live_render_concurrency=2,
     )
 
 

@@ -11,9 +11,8 @@ from iris.config import Settings
 from iris.live import Lane, LiveProcessor, LiveRegistry, LiveTimeline
 from iris.live.lane import LiveLane
 from iris.main import create_app
-from iris.models import FrameRef, Moment, MomentContent, SourceKind, TranscriptSegment
-from iris.pipeline.context import StageContext
-from iris.store.layout import session_paths
+from iris.models import FrameRef, Moment, MomentContent, TranscriptSegment
+from tests.builders import stage_ctx
 from tests.media import make_webm, solid_jpeg, split
 from tests.test_live import post_audio, post_frame, start
 from tests.waiting import settle, wait_for_status
@@ -166,19 +165,9 @@ def fake_lanes(failing: set[Lane] = frozenset(), only: set[Lane] | None = None):
     return factory, made
 
 
-def ctx(tmp_path: Path) -> StageContext:
-    settings = Settings(data_dir=tmp_path, openai_api_key=None)
-    return StageContext(
-        session_id="s1",
-        source=SourceKind.BROWSER_LIVE,
-        paths=session_paths(settings.sessions_dir, "s1").ensure(),
-        settings=settings,
-    )
-
-
 async def test_input_wakes_only_its_lane_and_finish_flushes_every_lane(tmp_path: Path):
     factory, lanes = fake_lanes()
-    processor = LiveProcessor(ctx(tmp_path), factory)
+    processor = LiveProcessor(stage_ctx(tmp_path, live=True), factory)
     processor.start()
     processor.start()
     processor.notify_audio()
@@ -197,7 +186,7 @@ async def test_input_wakes_only_its_lane_and_finish_flushes_every_lane(tmp_path:
 
 async def test_a_failing_lane_does_not_stop_the_others(tmp_path: Path):
     factory, lanes = fake_lanes(failing={Lane.SCREEN})
-    processor = LiveProcessor(ctx(tmp_path), factory)
+    processor = LiveProcessor(stage_ctx(tmp_path, live=True), factory)
     processor.start()
     processor.notify_screen()
     await settle(5)
@@ -213,7 +202,7 @@ async def test_a_failing_lane_does_not_stop_the_others(tmp_path: Path):
 
 async def test_missing_lanes_are_done_but_never_complete(tmp_path: Path):
     factory, _ = fake_lanes(only={Lane.SELECT})
-    processor = LiveProcessor(ctx(tmp_path), factory)
+    processor = LiveProcessor(stage_ctx(tmp_path, live=True), factory)
     processor.start()
     processor.notify_screen()
     assert processor.timeline.transcribed_through(1e9)
@@ -227,7 +216,7 @@ async def test_two_lanes_of_one_kind_are_refused(tmp_path: Path):
         return [FakeLane(c, tl, Lane.AUDIO), FakeLane(c, tl, Lane.AUDIO)]
 
     with pytest.raises(ValueError):
-        LiveProcessor(ctx(tmp_path), factory)
+        LiveProcessor(stage_ctx(tmp_path, live=True), factory)
 
 
 class StubbornLane(LiveLane):
@@ -239,7 +228,7 @@ class StubbornLane(LiveLane):
 
 async def test_a_lane_that_ignores_stop_is_cut_off(tmp_path: Path):
     processor = LiveProcessor(
-        ctx(tmp_path), lambda c, tl: [StubbornLane(c, tl)], finish_timeout_s=0.05
+        stage_ctx(tmp_path, live=True), lambda c, tl: [StubbornLane(c, tl)], finish_timeout_s=0.05
     )
     processor.start()
     timeline = await asyncio.wait_for(processor.finish(), 1)
@@ -255,7 +244,7 @@ class EarlyLane(LiveLane):
 
 
 async def test_a_lane_that_returns_before_notes_are_asked_for_has_failed(tmp_path: Path):
-    processor = LiveProcessor(ctx(tmp_path), lambda c, tl: [EarlyLane(c, tl)])
+    processor = LiveProcessor(stage_ctx(tmp_path, live=True), lambda c, tl: [EarlyLane(c, tl)])
     processor.start()
     await settle(5)
     assert "before notes were asked for" in processor.timeline.failed[Lane.AUDIO]
@@ -281,7 +270,7 @@ async def test_a_cancelled_lane_releases_its_waiters(tmp_path: Path):
         made.append(AbandonedLane(c, tl))
         return made
 
-    processor = LiveProcessor(ctx(tmp_path), factory)
+    processor = LiveProcessor(stage_ctx(tmp_path, live=True), factory)
     processor.start()
     tl = processor.timeline
     waiter = asyncio.create_task(tl.wait_until(lambda: tl.transcribed_through(1e9)))
@@ -300,7 +289,7 @@ class WaitsForScreen(LiveLane):
 
 
 async def test_a_lane_waiting_on_an_absent_lane_completes(tmp_path: Path):
-    processor = LiveProcessor(ctx(tmp_path), lambda c, tl: [WaitsForScreen(c, tl)])
+    processor = LiveProcessor(stage_ctx(tmp_path, live=True), lambda c, tl: [WaitsForScreen(c, tl)])
     processor.start()
     timeline = await asyncio.wait_for(processor.finish(), 1)
     assert Lane.SELECT in timeline.finished
@@ -315,7 +304,7 @@ class SlowFlushLane(LiveLane):
 
 
 async def test_cancelling_finish_cancels_the_lanes(tmp_path: Path):
-    processor = LiveProcessor(ctx(tmp_path), lambda c, tl: [SlowFlushLane(c, tl)])
+    processor = LiveProcessor(stage_ctx(tmp_path, live=True), lambda c, tl: [SlowFlushLane(c, tl)])
     processor.start()
     job = asyncio.create_task(processor.finish())
     await settle(5)
@@ -328,7 +317,7 @@ async def test_cancelling_finish_cancels_the_lanes(tmp_path: Path):
 
 async def test_registry_starts_once_finishes_and_forgets(tmp_path: Path):
     factory, lanes = fake_lanes()
-    registry = LiveRegistry(lambda sid: ctx(tmp_path), lanes=factory)
+    registry = LiveRegistry(lambda sid: stage_ctx(tmp_path, live=True), lanes=factory)
     first = registry.ensure("s1")
     assert first is not None and registry.ensure("s1") is first
     timeline = await registry.finish("s1")
@@ -339,7 +328,7 @@ async def test_registry_starts_once_finishes_and_forgets(tmp_path: Path):
 
 async def test_registry_cancel_and_shutdown_stop_lanes(tmp_path: Path):
     factory, lanes = fake_lanes()
-    registry = LiveRegistry(lambda sid: ctx(tmp_path), lanes=factory)
+    registry = LiveRegistry(lambda sid: stage_ctx(tmp_path, live=True), lanes=factory)
     processor = registry.ensure("s1")
     assert processor is not None
     await settle(5)
@@ -354,7 +343,7 @@ async def test_registry_cancel_and_shutdown_stop_lanes(tmp_path: Path):
 
 
 def test_disabled_registry_starts_nothing(tmp_path: Path):
-    registry = LiveRegistry(lambda sid: ctx(tmp_path), enabled=False)
+    registry = LiveRegistry(lambda sid: stage_ctx(tmp_path, live=True), enabled=False)
     assert registry.ensure("s1") is None
 
 

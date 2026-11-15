@@ -2,7 +2,6 @@ from pathlib import Path
 
 import pytest
 
-from iris.config import Settings
 from iris.models import (
     Box,
     FrameRef,
@@ -12,7 +11,6 @@ from iris.models import (
     NotesDraft,
     Selection,
     SessionType,
-    SourceKind,
     Stage,
     Transcript,
     TranscriptSegment,
@@ -21,17 +19,13 @@ from iris.models import (
 from iris.pipeline import PLAN, plan_from
 from iris.pipeline.context import StageContext
 from iris.pipeline.stages import align, assemble
-from iris.store.layout import SessionPaths, read_model, write_model
+from iris.store.layout import read_model, write_model
+from tests.builders import stage_ctx
 
 
 @pytest.fixture
 def ctx(tmp_path: Path) -> StageContext:
-    return StageContext(
-        session_id="s1",
-        source=SourceKind.UPLOAD,
-        paths=SessionPaths(tmp_path / "s1").ensure(),
-        settings=Settings(data_dir=tmp_path),
-    )
+    return stage_ctx(tmp_path)
 
 
 def moment(mid: str, start: float, end: float) -> Moment:

@@ -3,7 +3,6 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from iris.config import Settings
 from iris.llm.errors import UserFacingError
 from iris.models import (
     NOTHING_TO_WRITE,
@@ -13,14 +12,13 @@ from iris.models import (
     NotesDraft,
     Selection,
     SessionType,
-    SourceKind,
     Transcript,
     TranscriptSegment,
     Visual,
 )
-from iris.pipeline.context import StageContext
 from iris.pipeline.stages import assemble, write
-from iris.store.layout import SessionPaths, read_model, write_model
+from iris.store.layout import read_model, write_model
+from tests.builders import stage_ctx
 from tests.media import make_media
 from tests.waiting import wait_for_status
 
@@ -36,13 +34,7 @@ def section(ids=(), text="## Decisions\n\nShip the prototype. Alex will test it.
 @pytest.fixture
 def setup(tmp_path, monkeypatch):
     events = []
-    ctx = StageContext(
-        session_id="s1",
-        source=SourceKind.UPLOAD,
-        paths=SessionPaths(tmp_path).ensure(),
-        settings=Settings(data_dir=tmp_path),
-        emit=lambda kind, data: events.append((kind, data)),
-    )
+    ctx = stage_ctx(tmp_path, events=events)
     transcript = Transcript(
         segments=[
             TranscriptSegment(
@@ -198,9 +190,7 @@ async def test_real_sdk_response_parsing(tmp_path, monkeypatch, mode):
     from openai import AsyncOpenAI
     from pydantic import ValidationError
 
-    ctx = StageContext(
-        session_id="s", source=SourceKind.UPLOAD, paths=SessionPaths(tmp_path), settings=Settings()
-    )
+    ctx = stage_ctx(tmp_path)
 
     def handle(request):
         payload = json.loads(request.content)
