@@ -387,7 +387,7 @@ def test_plan_validation_drops_unknown_ids_and_bad_edits():
 
 
 def test_edits_touching_shared_sections_are_rewritten_together():
-    sections = ["a", "b", "c", "d", "x" * synthesize.MAX_GROUP_CHARS]
+    sections = ["a", "b", "c", "d", "x" * synthesize.MAX_REWRITE_GROUP_CHARS]
 
     def e(*idx: int) -> SynthesisEdit:
         return SynthesisEdit(

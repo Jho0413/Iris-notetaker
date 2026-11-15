@@ -1,19 +1,3 @@
-"""Write grounded notes in bounded chronological sections, caching completed model calls.
-
-Reads transcript.json and selection.json. Writes notes_draft.json after each completed
-section and emits NOTES_UPDATED. Assemble publishes notes.json only after this stage succeeds.
-
-Sections are planned so that the live draft lane (``iris/live/draft.py``) can write the final ones
-while recording and this stage reuses them when notes are made:
-
-- *Part boundaries depend only on earlier evidence.* Records are packed in time order and a part
-  closes when the next record would exceed the budget, so appending evidence never moves an
-  earlier boundary (``split_parts``).
-- *A section's cache key depends only on its own inputs*: its records, whether parts come before
-  and after it, the language and the first section's title and type, never the number of parts
-  (``section_payload``, ``write_section``).
-"""
-
 import bisect
 import math
 import re
@@ -125,13 +109,22 @@ class WritingPart:
         return {r["id"] for r in self.records if r["kind"] == "visual"}
 
 
-def _array_len(sizes: list[int]) -> int:
-    """The JSON length of ``records`` from their own lengths (``, `` between items)."""
+def _json_array_length(sizes: list[int]) -> int:
     return 2 + sum(sizes) + 2 * max(len(sizes) - 1, 0)
 
 
+def _longest_text_fitting_as_json(record: dict, text: str, budget: int) -> int:
+    low, high = 0, len(text)
+    while low < high:
+        mid = (low + high + 1) // 2
+        if len(structured.payload_json([{**record, "text": text[:mid]}])) <= budget:
+            low = mid
+        else:
+            high = mid - 1
+    return low
+
+
 def evidence_records(transcript: Transcript, selection: Selection, budget: int) -> list[dict]:
-    """Every piece of evidence as a JSON record, in time order; oversized speech is split."""
     records: list[dict] = []
     for segment in transcript.segments:
         if not (math.isfinite(segment.start) and math.isfinite(segment.end)) or not (
@@ -140,26 +133,18 @@ def evidence_records(transcript: Transcript, selection: Selection, budget: int) 
             raise ValueError("invalid transcript timestamps")
         if not segment.text.strip():
             continue
-        record = {"kind": "speech", **segment.model_dump()}
-        # Split only unusually large individual segments. Keep their original time range,
-        # never invent timing for the fragments. JSON escaping is included in the budget.
+        whole_segment = {"kind": "speech", **segment.model_dump()}
         remaining = segment.text
         while remaining:
-            low, high = 0, len(remaining)
-            while low < high:
-                mid = (low + high + 1) // 2
-                if len(structured.payload_json([{**record, "text": remaining[:mid]}])) <= budget:
-                    low = mid
-                else:
-                    high = mid - 1
-            if low == 0:
+            fits = _longest_text_fitting_as_json(whole_segment, remaining, budget)
+            if fits == 0:
                 raise ValueError("speech metadata exceeds notes context budget")
-            records.append({**record, "text": remaining[:low]})
-            remaining = remaining[low:]
+            records.append({**whole_segment, "text": remaining[:fits]})
+            remaining = remaining[fits:]
     for content in selection.contents:
         for element in content.elements:
             if element.kind == "figure":
-                continue  # figures are supplied as visual records
+                continue
             start = element.t if element.t is not None else content.start
             records.append(
                 {"kind": "screen", "start": start, "type": element.kind, "content": element.content}
@@ -176,12 +161,11 @@ def evidence_records(transcript: Transcript, selection: Selection, budget: int) 
         if visual.description:
             record["description"] = visual.description
         records.append(record)
-    records.sort(key=lambda r: r["start"])  # stable: equal times keep their kind and list order
+    records.sort(key=lambda r: r["start"])
     return records
 
 
-def _moment_spans(selection: Selection) -> list[tuple[float, float]]:
-    """The time ranges of the moments read, merged into sorted disjoint ranges."""
+def _merged_moment_spans(selection: Selection) -> list[tuple[float, float]]:
     spans: list[tuple[float, float]] = []
     for start, end in sorted((c.start, c.end) for c in selection.contents if c.end > c.start):
         if spans and start < spans[-1][1]:
@@ -192,52 +176,46 @@ def _moment_spans(selection: Selection) -> list[tuple[float, float]]:
 
 
 def _inside_moment(t: float, spans: list[tuple[float, float]], starts: list[float]) -> bool:
-    i = bisect.bisect_left(starts, t) - 1  # the last span starting strictly before t
-    return i >= 0 and t < spans[i][1]
+    last_span_before_t = bisect.bisect_left(starts, t) - 1
+    return last_span_before_t >= 0 and t < spans[last_span_before_t][1]
 
 
 def split_parts(
     transcript: Transcript, selection: Selection, budget: int, before: float = math.inf
 ) -> tuple[list[WritingPart], WritingPart | None]:
-    """Pack the evidence that starts before ``before`` into bounded parts, in time order.
-
-    Returns the closed parts and the open last part (``None`` without evidence). A part closes
-    when the next record would take it past the budget: at the last moment boundary (a time no
-    read moment spans) that keeps it at least half full, otherwise right there. That decision only
-    looks at the records up to that point, so evidence added later (or a later ``before``) never
-    moves the boundary of a closed part, and the live draft lane can write closed parts while
-    recording. Speech, screen content and visuals are never dropped.
-    """
-    spans = _moment_spans(selection)
+    spans = _merged_moment_spans(selection)
     span_starts = [s for s, _ in spans]
     closed: list[WritingPart] = []
     current: list[dict] = []
     sizes: list[int] = []
-    clean: list[bool] = []  # cutting just before current[i] splits no moment
+    at_moment_boundary: list[bool] = []
     for record in evidence_records(transcript, selection, budget):
         if not record["start"] < before:
-            break  # records are in time order
+            break
         size = len(structured.payload_json(record))
-        if _array_len([size]) > budget:
+        if _json_array_length([size]) > budget:
             raise ValueError("visual metadata exceeds notes context budget")
-        while current and _array_len([*sizes, size]) > budget:
+        while current and _json_array_length([*sizes, size]) > budget:
             cut = len(current)
             for i in range(len(current) - 1, 0, -1):
-                if clean[i] and _array_len(sizes[:i]) * 2 >= budget:
+                if at_moment_boundary[i] and _json_array_length(sizes[:i]) * 2 >= budget:
                     cut = i
                     break
             closed.append(WritingPart(current[:cut]))
-            current, sizes, clean = current[cut:], sizes[cut:], clean[cut:]
+            current, sizes, at_moment_boundary = (
+                current[cut:],
+                sizes[cut:],
+                at_moment_boundary[cut:],
+            )
         current.append(record)
         sizes.append(size)
-        clean.append(not _inside_moment(record["start"], spans, span_starts))
+        at_moment_boundary.append(not _inside_moment(record["start"], spans, span_starts))
     return closed, WritingPart(current) if current else None
 
 
 def plan_parts(transcript: Transcript, selection: Selection, budget: int) -> list[WritingPart]:
-    """Pack complete evidence into bounded JSON arrays; split oversized speech without loss."""
     closed, last = split_parts(transcript, selection, budget)
-    if last is None:  # silence and a blank screen: nothing the user said or showed to write up
+    if last is None:
         raise UserFacingError(
             NOTHING_TO_WRITE, "no transcript or screen content to write notes from"
         )
@@ -250,6 +228,13 @@ def _check_tokens(tokens: list[Token]) -> None:
             raise ValueError("notes must use visual_ids instead of images or HTML")
         if token.children:
             _check_tokens(token.children)
+
+
+def _marker_after_it_stays_text(parser: MarkdownIt, markdown: str) -> bool:
+    probe = "[visual:__iris_probe__]"
+    return any(
+        t.type == "inline" and t.content == probe for t in parser.parse(markdown + "\n\n" + probe)
+    )
 
 
 def validate_section(
@@ -277,12 +262,7 @@ def validate_section(
             raise ValueError("notes must use visual_ids instead of figure commands")
         if problems := notes_format.structure_problems(layout):
             raise ValueError(f"notes block has a format problem: {problems[0].message}")
-        # An unclosed code fence would swallow the server-inserted visual markers.
-        probe = "[visual:__iris_probe__]"
-        if block.visual_ids and not any(
-            t.type == "inline" and t.content == probe
-            for t in parser.parse(block.markdown + "\n\n" + probe)
-        ):
+        if block.visual_ids and not _marker_after_it_stays_text(parser, block.markdown):
             raise ValueError("notes block must close code fences before attaching visuals")
         used.update(block.visual_ids)
         placements += len(block.visual_ids)
@@ -291,8 +271,6 @@ def validate_section(
 
 
 def repaired(section: WrittenSection) -> WrittenSection:
-    """The model's section with what needs no guessing fixed (``notes_format.repair``): a colour
-    name is never worth failing a session over."""
     blocks = [
         b.model_copy(update={"markdown": notes_format.repair(b.markdown)}) for b in section.blocks
     ]
@@ -300,8 +278,6 @@ def repaired(section: WrittenSection) -> WrittenSection:
 
 
 def section_markdown(section: WrittenSection) -> str:
-    """The section with each block's visual markers after it, or inside it at its end when the
-    block ends by closing a step or box (a step's figure belongs in the step)."""
     blocks = []
     for block in section.blocks:
         text = block.markdown.strip()
@@ -337,13 +313,6 @@ def section_payload(
     later: bool,
     earlier: bool | None = None,
 ) -> str:
-    """The model input for one part. ``first`` is the session's first section (``None`` for the
-    first part); ``later`` says whether parts follow. Nothing here depends on how many parts the
-    session has, so a part written live has the payload, and the cache key, it has when notes
-    are made.
-
-    ``earlier`` defaults to ``first is not None``. The live draft lane sets it for a later part
-    when the first part could not be written, so that part is still written as a continuation."""
     return structured.payload_json(
         {
             "records": part.records,
@@ -373,8 +342,6 @@ async def write_section(
     later: bool,
     earlier: bool | None = None,
 ) -> WrittenSection:
-    """The validated section for ``part``, from the cache (``notes_sections/``) or one model
-    call. Used by this stage and by the live draft lane, so both share the cache."""
     payload = section_payload(part, language=language, first=first, later=later, earlier=earlier)
 
     def accept(section: WrittenSection) -> WrittenSection:
@@ -395,7 +362,6 @@ async def write_section(
 
 
 def draft_of(sections: list[WrittenSection], parts: int) -> NotesDraft:
-    """The notes so far; ``parts`` is the number of parts the notes are planned in."""
     return NotesDraft(
         session_type=sections[0].session_type,
         title=sections[0].title,

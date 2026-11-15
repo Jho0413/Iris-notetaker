@@ -1,14 +1,3 @@
-"""Select and read the screen: keep moments worth noting and extract what they show.
-
-A vision model reads each kept moment into elements: math as LaTeX, text, tables, code, and
-figures with a complete description and a source region. Each figure becomes a ``Visual`` whose
-source crop is saved for the render stage. Builds (content added over time) tell the model the order
-things were written, so worked examples can be written up step by step.
-
-Reads alignment.json and frames; writes selection.json, visuals/<id>.source.jpg, and a
-content-addressed per-batch cache so interrupted runs can resume without paying again.
-"""
-
 import asyncio
 import hashlib
 import json
@@ -36,8 +25,6 @@ from iris.models import (
 from iris.pipeline.context import StageContext
 from iris.store.layout import read_model, write_model
 
-# A character budget bounds context even when one screen stays up for a long talk.
-# This is not a model-specific token count; images remain bounded by batch size.
 TRANSCRIPT_CHARS_PER_BATCH = 24_000
 OCR_CHARS_PER_MOMENT = 1_000
 
@@ -115,11 +102,10 @@ class Decisions(BaseModel):
     decisions: list[Decision]
 
 
-EARLIER_MOMENTS = 4  # kept moments summarised for the next batch, so content is not re-listed
+SUMMARISED_EARLIER_MOMENTS = 4
 
 
 def summarize(contents: list[MomentContent]) -> list[dict]:
-    """A compact record of already captured content, for deduplication across batches."""
     return [
         {
             "moment_id": c.moment_id,
@@ -144,7 +130,6 @@ def validate_decisions(result: Decisions, items: list[AlignedMoment]) -> None:
 
 
 def valid_crop(crop: Box | None, width: int, height: int) -> Box | None:
-    """An invalid model crop falls back to the intact frame, never a truncated crop."""
     if crop is None:
         return None
     if (
@@ -174,7 +159,6 @@ class PreparedBatch:
 
 
 def context_excerpts(text: str, budget: int) -> list[str]:
-    """Keep short context intact; sample start, middle and end of longer context."""
     if len(text) <= budget:
         return [text]
     width = budget // 3
@@ -232,8 +216,8 @@ def prepare_batch(
             },
             sort_keys=True,
         )
-        # Invalidate even if a change fell outside the excerpts sent to the model.
-        digest.update(item.model_dump_json().encode())
+        everything_about_the_moment = item.model_dump_json().encode()
+        digest.update(everything_about_the_moment)
         digest.update(metadata.encode())
         digest.update(hashlib.sha256(raw).digest())
         content.append({"type": "text", "text": metadata})
@@ -274,8 +258,6 @@ def render(source: Path, target: Path, crop: Box | None) -> None:
 
 @dataclass
 class BatchResult:
-    """What reading one batch of moments added to the selection."""
-
     contents: list[MomentContent]
     visuals: list[Visual]
     rejected_moment_ids: list[str]
@@ -287,16 +269,9 @@ async def read_batch(
     earlier: list[MomentContent],
     first_visual: int,
 ) -> BatchResult:
-    """Read one batch of moments: its cached decisions, or one vision call.
-
-    ``earlier`` is the content already captured (the last ``EARLIER_MOMENTS`` are summarised for
-    the model); ``first_visual`` is the number of the batch's first figure, so ids follow pipeline
-    order across batches. Saves each figure's source crop and emits VISUAL_SELECTED. Used by
-    ``run`` and by the live select lane, so both make the same calls and cache entries.
-    """
     ctx.paths.visuals_dir.mkdir(exist_ok=True)
     prepared = await asyncio.to_thread(
-        prepare_batch, ctx, batch, summarize(earlier[-EARLIER_MOMENTS:])
+        prepare_batch, ctx, batch, summarize(earlier[-SUMMARISED_EARLIER_MOMENTS:])
     )
 
     def accept(decisions: Decisions) -> Decisions:
@@ -324,7 +299,6 @@ async def read_batch(
             t = builds[element.build].t if element.build in range(len(builds)) else None
             visual_id = None
             if element.kind == "figure":
-                # IDs come from pipeline order, never from model-controlled filenames.
                 visual_id = f"v{first_visual + len(out.visuals):06d}"
                 crop = valid_crop(element.region, frame.width, frame.height)
                 source = f"visuals/{visual_id}.source.jpg"
@@ -376,9 +350,8 @@ async def run(ctx: StageContext) -> None:
         selection.visuals.extend(result.visuals)
         selection.rejected_moment_ids.extend(result.rejected_moment_ids)
         write_model(ctx.paths.selection, selection)
-    # Also produce a valid output for audio-only sessions without invoking a model.
     write_model(ctx.paths.selection, selection)
     current = {v.source_path for v in selection.visuals}
     for path in ctx.paths.visuals_dir.glob("v*.source.jpg"):
         if f"visuals/{path.name}" not in current:
-            path.unlink(missing_ok=True)  # left by an earlier run with more figures
+            path.unlink(missing_ok=True)
