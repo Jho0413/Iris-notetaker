@@ -1,9 +1,3 @@
-"""Error handling: classifying errors, retrying temporary ones, figures falling back to the source
-crop, failing fast on blocking errors, and what the user is told (only our own messages).
-
-No network: SDK exceptions are built locally (``tests/api_errors.py``) and model calls are faked.
-"""
-
 import asyncio
 import json
 import sqlite3
@@ -69,8 +63,6 @@ from tests.test_write import section
 
 SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 10"><rect width="20"/></svg>'
 
-# --- classify ------------------------------------------------------------------------------------
-
 
 @pytest.mark.parametrize(
     ("exc", "kind"),
@@ -115,7 +107,6 @@ def test_classify_looks_through_stage_errors():
 
 
 def test_failure_messages_are_the_fixed_list():
-    """The constants are exactly the messages the API may serve (``FailureMessage``)."""
     constants = {
         GENERIC_FAILURE,
         INTERRUPTED_RUN,
@@ -130,11 +121,7 @@ def test_failure_messages_are_the_fixed_list():
     assert set(get_args(FailureMessage)) == constants
 
 
-# --- retry_temporary, gather_units ---------------------------------------------------------------
-
-
 def flaky(*errors: BaseException, result: str = "ok") -> AsyncMock:
-    """A call that raises each of ``errors`` in turn, then returns ``result``."""
     return AsyncMock(side_effect=[*errors, result])
 
 
@@ -218,9 +205,6 @@ async def test_gather_units_cancels_the_rest_on_a_blocking_error():
     assert cancelled == [True, True]
 
 
-# --- Sessions in a runner ------------------------------------------------------------------------
-
-
 def runner_session(tmp_path, **overrides):
     settings = Settings(data_dir=tmp_path, openai_api_key="test", synthesis=False, **overrides)
     store = SessionStore(settings.db_path)
@@ -232,9 +216,6 @@ def runner_session(tmp_path, **overrides):
 
 def error_events(runner: JobRunner, sid: str) -> list[dict]:
     return [e.data for e in runner.bus.history(sid) if e.type == EventType.ERROR]
-
-
-# --- Render: API errors give the source crop -----------------------------------------------------
 
 
 def figure_visual(ctx, vid: str) -> Visual:
@@ -253,7 +234,6 @@ def figure_visual(ctx, vid: str) -> Visual:
 
 
 def with_figures(ctx, monkeypatch, *ids: str) -> list[Visual]:
-    """Figures to render, and a transcript and notes writer for write, which runs beside it."""
     visuals = [figure_visual(ctx, vid) for vid in ids]
     write_model(ctx.paths.selection, Selection(visuals=visuals))
     segment = TranscriptSegment(start=0, end=10, text="Two bodies orbit each other.")
@@ -263,8 +243,6 @@ def with_figures(ctx, monkeypatch, *ids: str) -> list[Visual]:
 
 
 class Drawer:
-    """The svg renderer: draws ``SVG`` unless ``errors[vid]`` says otherwise."""
-
     def __init__(self, monkeypatch):
         self.errors: dict[str, BaseException] = {}
         self.calls: list[str] = []
@@ -306,7 +284,7 @@ async def test_an_api_error_gives_the_source_crop_unverified_and_uncached(
     await runner.run(sid, Stage.RENDER)
 
     assert runner.store.get(sid).status == SessionStatus.DONE
-    assert drawer.calls.count("v1") == 1  # no retries of our own
+    assert drawer.calls.count("v1") == 1
     renders = {r.id: r for r in read_model(ctx.paths.renders, Renders).visuals}
     v1 = renders["v1"]
     assert (v1.verified, v1.render_as, v1.path) == (False, "screenshot", "visuals/v1.jpg")
@@ -315,7 +293,7 @@ async def test_an_api_error_gives_the_source_crop_unverified_and_uncached(
     assert (ctx.paths.root / v1.path).read_bytes() == source
     assert renders["v2"].verified and renders["v2"].render_as == "svg"
     cached = [json.loads(p.read_text())["id"] for p in ctx.paths.render_cache_dir.glob("*.json")]
-    assert cached == ["v2"]  # the fallback is not cached
+    assert cached == ["v2"]
     notes = read_model(ctx.paths.notes, Notes)
     assert {v.id: v.verified for v in notes.visuals} == {"v1": False, "v2": True}
     assert "::figure{#v1}" in notes.markdown
@@ -324,27 +302,25 @@ async def test_an_api_error_gives_the_source_crop_unverified_and_uncached(
     assert {d["id"]: d["verified"] for d in rendered} == {"v1": False, "v2": True}
     assert all("problems" not in d for d in rendered)
 
-    # A later run tries the redraw again, and it is used once it passes.
     del drawer.errors["v1"]
     await runner.run(sid, Stage.RENDER)
-    assert drawer.calls.count("v1") == 2 and drawer.calls.count("v2") == 1  # v2 from the cache
+    assert drawer.calls.count("v1") == 2 and drawer.calls.count("v2") == 1
     renders = {r.id: r for r in read_model(ctx.paths.renders, Renders).visuals}
     assert renders["v1"].verified and renders["v1"].path == "visuals/v1.svg"
-    assert not (ctx.paths.root / "visuals/v1.jpg").exists()  # the stale fallback is removed
+    assert not (ctx.paths.root / "visuals/v1.jpg").exists()
     runner.store.close()
 
 
 async def test_a_quality_failure_still_tries_the_other_renderer(tmp_path, monkeypatch):
-    """Bad output (a refusal) is not an API error: the quality retries are unchanged."""
     runner, sid, ctx = runner_session(tmp_path, render_attempts=1)
     with_figures(ctx, monkeypatch, "v1")
     drawer = Drawer(monkeypatch)
     drawer.errors["v1"] = ValueError("diagram model: refused")
     await runner.run(sid, Stage.RENDER)
-    assert drawer.calls == ["v1", "v1"]  # svg, then image
+    assert drawer.calls == ["v1", "v1"]
     [v1] = read_model(ctx.paths.renders, Renders).visuals
     assert (v1.verified, v1.attempts) == (False, 2)
-    assert list(ctx.paths.render_cache_dir.glob("*.json"))  # a quality fallback is cached
+    assert list(ctx.paths.render_cache_dir.glob("*.json"))
     runner.store.close()
 
 
@@ -352,7 +328,7 @@ async def test_a_blocking_error_fails_the_run_and_cancels_other_figures(tmp_path
     runner, sid, ctx = runner_session(tmp_path)
     with_figures(ctx, monkeypatch, "v1", "v2", "v3")
     drawer = Drawer(monkeypatch)
-    drawer.hold = {"v1": asyncio.Event(), "v3": asyncio.Event()}  # never released
+    drawer.hold = {"v1": asyncio.Event(), "v3": asyncio.Event()}
     drawer.errors["v2"] = status_error(401, message="SECRET-sk-abc Incorrect API key")
 
     await asyncio.wait_for(runner.run(sid, Stage.RENDER), 5)
@@ -370,7 +346,6 @@ async def test_a_blocking_error_fails_the_run_and_cancels_other_figures(tmp_path
 
 
 async def test_a_blocking_error_cancels_the_stage_running_beside_it(tmp_path, monkeypatch):
-    """Write and render run together; render's blocking error stops write at once."""
     runner, sid, ctx = runner_session(tmp_path)
     cancelled = []
 
@@ -394,15 +369,12 @@ async def test_a_blocking_error_cancels_the_stage_running_beside_it(tmp_path, mo
     runner.store.close()
 
 
-# --- Transcribe: blocking errors don't wait for the other chunks ---------------------------------
-
-
 async def test_a_blocking_error_in_one_chunk_cancels_the_others(tmp_path, monkeypatch):
     from iris.pipeline.stages import transcribe
     from tests.test_transcribe import make_audio, write_wav
 
     runner, sid, ctx = runner_session(tmp_path)
-    write_wav(ctx.paths.audio, make_audio([("tone", 60.0)]))  # speech in every chunk
+    write_wav(ctx.paths.audio, make_audio([("tone", 60.0)]))
     started, cancelled = [], []
 
     async def fake_chunk(_client, _model, _wav, _duration, prompt=None, language=None):
@@ -423,9 +395,6 @@ async def test_a_blocking_error_in_one_chunk_cancels_the_others(tmp_path, monkey
         await asyncio.wait_for(transcribe.run(ctx, target_s=10, max_s=12, search_s=1), 5)
     assert len(started) > 1 and sorted(cancelled) == started[1:]
     runner.store.close()
-
-
-# --- Select and write: temporary errors are retried per unit -------------------------------------
 
 
 def with_moments(ctx, n: int = 2) -> None:
@@ -474,11 +443,11 @@ async def test_a_persistent_temporary_error_fails_select_with_the_generic_messag
     with_moments(ctx)
     parse = fake_vision(monkeypatch, decisions("m0"), *[status_error(500)] * 4)
     await runner.run(sid, Stage.SELECT)
-    assert parse.await_count == 1 + 4  # the first batch, then the second tried four times
+    assert parse.await_count == 1 + 4
     session = runner.store.get(sid)
     assert session.status == SessionStatus.FAILED and session.current_stage == Stage.SELECT
     assert (session.failure_message, session.failure_kind) == (GENERIC_FAILURE, "general")
-    assert len(list(ctx.paths.selection_batches_dir.glob("*.json"))) == 1  # kept
+    assert len(list(ctx.paths.selection_batches_dir.glob("*.json"))) == 1
     runner.store.close()
 
 
@@ -526,9 +495,6 @@ async def test_a_blocking_error_in_a_write_section_is_not_retried(tmp_path, monk
     runner.store.close()
 
 
-# --- Input errors show their own message ---------------------------------------------------------
-
-
 async def test_an_input_error_shows_its_own_message(tmp_path):
     runner, sid, ctx = runner_session(tmp_path)
     make_media(ctx.paths.source(".mp4"), audio=False, seconds=1)
@@ -567,14 +533,10 @@ async def test_a_new_run_clears_the_previous_failure(tmp_path, monkeypatch):
     runner.store.close()
 
 
-# --- No leaks: raw error text never reaches the API ----------------------------------------------
-
 SENTINELS = ("SECRET-sk-proj-42", "openai", "APIConnectionError", "api.openai.com")
 
 
 class RaisingTranscriptions:
-    """The SDK's ``audio.transcriptions``, failing as a connection error would."""
-
     def __init__(self):
         self.calls = 0
 
@@ -592,7 +554,6 @@ def test_raw_errors_never_reach_the_api(tmp_path, monkeypatch, capsys):
     settings = Settings(data_dir=tmp_path / "data", openai_api_key="test", synthesis=False)
     transcriptions = RaisingTranscriptions()
     fake = SimpleNamespace(audio=SimpleNamespace(transcriptions=transcriptions))
-    # Through the real metered client, so the failed calls are recorded in usage.json too.
     monkeypatch.setattr(llm_client, "_client", lambda _key: fake)
     media = make_media(tmp_path / "talk.mp4", seconds=2)
     with TestClient(create_app(settings)) as client:
@@ -622,13 +583,11 @@ def test_raw_errors_never_reach_the_api(tmp_path, monkeypatch, capsys):
         assert usage["records"] and all(r["failed"] for r in usage["records"])
         assert all("error" not in r for r in usage["records"])
 
-        # The event stream sends exactly these, formatted, on (re)connect.
         bus = client.app.state.bus
         stream = "".join(events_route._format(e) for e in bus.history(sid))
         assert '"type":"error"' in stream
         assert_no_leak(stream)
 
-        # The raw error is kept for developers: `iris show`.
         store = client.app.state.store
         out = cli.format_show(store.get(sid), store.failure_detail(sid))
         assert "SECRET-sk-proj-42" in out and "APIConnectionError" in out
@@ -642,7 +601,6 @@ def test_raw_errors_never_reach_the_api(tmp_path, monkeypatch, capsys):
 
 
 def test_old_sessions_with_a_raw_error_are_not_leaked(tmp_path, capsys, monkeypatch):
-    """A database from before this change: its ``error`` column holds the raw message."""
     settings = Settings(data_dir=tmp_path / "data", openai_api_key="test")
     settings.data_dir.mkdir(parents=True)
     conn = sqlite3.connect(settings.db_path)
@@ -670,15 +628,13 @@ def test_old_sessions_with_a_raw_error_are_not_leaked(tmp_path, capsys, monkeypa
     monkeypatch.setattr(cli, "get_settings", lambda: settings)
     assert cli._show("old1") == 0
     printed = capsys.readouterr().out
-    assert "SECRET-sk-proj-42" in printed and "unknown" in printed  # failure time not recorded
-    # Opening again changes nothing (the migration is idempotent).
+    assert "SECRET-sk-proj-42" in printed and "unknown" in printed
     store = SessionStore(settings.db_path)
     assert store.failure_detail("old1").error.startswith("render failed: APIConnectionError")
     store.close()
 
 
 def test_a_stored_message_not_on_the_list_is_served_as_the_generic_one(tmp_path):
-    """Say a later version rewords a message: older rows never break the library or leak."""
     settings = Settings(data_dir=tmp_path / "data", openai_api_key="test")
     store = SessionStore(settings.db_path)
     bad = store.create("Reworded", SourceKind.UPLOAD).id
@@ -708,9 +664,6 @@ def test_a_stored_message_not_on_the_list_is_served_as_the_generic_one(tmp_path)
         )
 
 
-# --- Runs cut off by Iris stopping ---------------------------------------------------------------
-
-
 def wait_for_stage(client: TestClient, sid: str, stage: str, timeout: float = 5.0) -> None:
     deadline = time.monotonic() + timeout
     while client.get(f"/api/sessions/{sid}").json()["current_stage"] != stage:
@@ -719,8 +672,6 @@ def wait_for_stage(client: TestClient, sid: str, stage: str, timeout: float = 5.
 
 
 def test_a_run_cut_off_by_a_restart_can_be_tried_again_from_its_stage(tmp_path, monkeypatch):
-    """Restart Engine or Quit mid-run: shutdown cancels the run, which records nothing (the
-    cancellation is not an ``Exception``). The next start marks it failed at its stage."""
     settings = Settings(data_dir=tmp_path / "data", openai_api_key="test", synthesis=False)
     ran: list[Stage] = []
 
@@ -728,7 +679,7 @@ def test_a_run_cut_off_by_a_restart_can_be_tried_again_from_its_stage(tmp_path, 
         async def run(_ctx) -> None:
             ran.append(stage)
             if hang:
-                await asyncio.sleep(3600)  # stands in for a stage waiting on the API
+                await asyncio.sleep(3600)
 
         return run
 
@@ -739,7 +690,7 @@ def test_a_run_cut_off_by_a_restart_can_be_tried_again_from_its_stage(tmp_path, 
         assert client.post(f"/api/sessions/{sid}/run?from_stage=transcribe").status_code == 200
         wait_for_stage(client, sid, "align")
     store = SessionStore(settings.db_path)
-    assert store.get(sid).status == SessionStatus.PROCESSING  # what shutdown leaves behind
+    assert store.get(sid).status == SessionStatus.PROCESSING
     store.close()
 
     for stage in STAGES:
@@ -752,7 +703,6 @@ def test_a_run_cut_off_by_a_restart_can_be_tried_again_from_its_stage(tmp_path, 
         assert session["current_stage"] == "align"
         assert "interrupted" in client.app.state.store.failure_detail(sid).error
 
-        # Try again from the stage it stopped at; the earlier stages' outputs are reused.
         assert client.post(f"/api/sessions/{sid}/run?from_stage=align").status_code == 200
         session = wait_for_status(client, sid, {"done", "failed"})
         assert session["status"] == "done"
@@ -761,7 +711,6 @@ def test_a_run_cut_off_by_a_restart_can_be_tried_again_from_its_stage(tmp_path, 
 
 
 def test_startup_fails_only_the_runs_left_processing(tmp_path):
-    """A crash, a forced quit or power loss: no shutdown ran, so only the next start finds out."""
     settings = Settings(data_dir=tmp_path / "data", openai_api_key="test")
     store = SessionStore(settings.db_path)
 
@@ -772,7 +721,7 @@ def test_startup_fails_only_the_runs_left_processing(tmp_path):
 
     cut_off = session(SessionStatus.PROCESSING, Stage.WRITE)
     cut_off_live = store.create("Live", SourceKind.BROWSER_LIVE).id
-    store.update(cut_off_live, status=SessionStatus.PROCESSING)  # before its first stage
+    store.update(cut_off_live, status=SessionStatus.PROCESSING)
     untouched = {
         session(SessionStatus.CREATED): None,
         session(SessionStatus.RECORDING): None,
@@ -794,8 +743,6 @@ def test_startup_fails_only_the_runs_left_processing(tmp_path):
 
 
 async def test_a_run_that_finishes_after_being_marked_interrupted_is_clean(tmp_path, monkeypatch):
-    """A CLI run on the same data while the server starts: marked, but it carries on and ends
-    done with no failure left on it."""
     runner, sid, _ctx = runner_session(tmp_path)
     started, release = asyncio.Event(), asyncio.Event()
 
@@ -810,7 +757,7 @@ async def test_a_run_that_finishes_after_being_marked_interrupted_is_clean(tmp_p
         monkeypatch.setitem(STAGES, stage, wait if stage == Stage.INGEST else nothing)
     runner.start(sid)
     await started.wait()
-    runner.fail_interrupted()  # as the server starting would
+    runner.fail_interrupted()
     assert runner.store.get(sid).failure_message == INTERRUPTED_RUN
     release.set()
     await runner._tasks[sid]

@@ -1,5 +1,3 @@
-"""Transcribe stage tests. No real API calls: a fake client stands in for OpenAI."""
-
 import asyncio
 import io
 import json
@@ -20,14 +18,10 @@ from iris.store.layout import SessionPaths, read_model
 from tests.api_errors import status_error
 
 RATE = 16_000
-SMALL = {"target_s": 3.0, "max_s": 5.0, "search_s": 1.0}  # small chunks so tests run fast
-
-
-# --- Synthetic audio ---------------------------------------------------------------------------
+SMALL = {"target_s": 3.0, "max_s": 5.0, "search_s": 1.0}
 
 
 def make_audio(pattern: list[tuple[str, float]], seed: int = 0) -> np.ndarray:
-    """Join ("tone"|"silence", seconds) pieces into int16 samples. Silence has faint noise."""
     rng = np.random.default_rng(seed)
     parts = []
     for kind, dur in pattern:
@@ -42,7 +36,6 @@ def make_audio(pattern: list[tuple[str, float]], seed: int = 0) -> np.ndarray:
 
 
 def bursts_pattern(n: int = 16) -> list[tuple[str, float]]:
-    """Tone bursts of varying length separated by 0.4 s silences."""
     pattern = []
     for i in range(n):
         pattern.append(("tone", 0.6 + 0.15 * (i % 4)))
@@ -69,7 +62,6 @@ def write_wav(path: Path, samples: np.ndarray) -> None:
 
 
 def find_bursts(samples: np.ndarray, rate: int) -> list[tuple[float, float]]:
-    """Tone runs in a chunk, in seconds from its start (what a perfect transcriber would hear)."""
     frame = rate // 100
     n = len(samples) // frame
     loud = np.abs(samples[: n * frame].astype(np.int32)).reshape(n, frame).max(axis=1) > 1000
@@ -77,9 +69,6 @@ def find_bursts(samples: np.ndarray, rate: int) -> list[tuple[float, float]]:
     return [
         (a * frame / rate, b * frame / rate) for a, b in zip(edges[::2], edges[1::2], strict=True)
     ]
-
-
-# --- Fake OpenAI client ------------------------------------------------------------------------
 
 
 class FakeTranscriptions:
@@ -107,7 +96,7 @@ class FakeTranscriptions:
                 SimpleNamespace(start=a, end=b, text=f" burst {a:.2f}")
                 for a, b in find_bursts(samples, rate)
             ]
-            segments.append(SimpleNamespace(start=0.0, end=0.1, text="   "))  # empty: stripped
+            segments.append(SimpleNamespace(start=0.0, end=0.1, text="   "))
             return SimpleNamespace(language="english", text="...", segments=segments)
         finally:
             self.active -= 1
@@ -135,16 +124,13 @@ def use_client(monkeypatch, client) -> None:
     monkeypatch.setattr(transcribe, "get_openai", lambda _settings: client)
 
 
-# --- plan_chunks -------------------------------------------------------------------------------
-
-
 def test_plan_chunks_cuts_in_silences_and_respects_max():
     samples = make_audio(bursts_pattern(30))
     chunks = plan_chunks(samples, RATE, **SMALL)
     assert len(chunks) > 3
     assert chunks[0][0] == 0 and chunks[-1][1] == len(samples)
     for (_, e1), (s2, _) in zip(chunks, chunks[1:], strict=False):
-        assert e1 == s2  # contiguous
+        assert e1 == s2
     for s, e in chunks:
         assert 0 < e - s <= SMALL["max_s"] * RATE
     for _, cut in chunks[:-1]:
@@ -152,7 +138,6 @@ def test_plan_chunks_cuts_in_silences_and_respects_max():
 
 
 def test_plan_chunks_finds_the_one_pause_in_the_window():
-    # Continuous tone except one short pause 0.8 s after the 3 s target.
     samples = make_audio([("tone", 3.6), ("silence", 0.4), ("tone", 2.0)])
     chunks = plan_chunks(samples, RATE, **SMALL)
     assert len(chunks) == 2
@@ -164,8 +149,6 @@ def test_plan_chunks_prefers_the_pause_closest_to_target():
     samples = make_audio(
         [("tone", 2.0), ("silence", 0.4), ("tone", 0.7), ("silence", 0.4), ("tone", 4.0)]
     )
-    # Both pauses (2.0-2.4 s and 3.1-3.5 s) are in the 2-4 s window and equally quiet; the second
-    # is closer to the 3 s target.
     cut = plan_chunks(samples, RATE, **SMALL)[0][1] / RATE
     assert 3.1 < cut < 3.5
 
@@ -180,16 +163,13 @@ def test_plan_chunks_without_silence_still_respects_max():
 def test_plan_chunks_short_audio_is_one_chunk():
     samples = make_audio([("tone", 2.0), ("silence", 1.0)])
     assert plan_chunks(samples, RATE, **SMALL) == [(0, len(samples))]
-    assert plan_chunks(samples, RATE) == [(0, len(samples))]  # default 5 min target
+    assert plan_chunks(samples, RATE) == [(0, len(samples))]
 
 
 def test_plan_chunks_empty_and_bad_args():
     assert plan_chunks(np.zeros(0, dtype=np.int16), RATE) == []
     with pytest.raises(ValueError):
         plan_chunks(np.zeros(10, dtype=np.int16), RATE, target_s=5, max_s=4)
-
-
-# --- transcribe_chunk parsing ------------------------------------------------------------------
 
 
 class Recorder:
@@ -221,7 +201,7 @@ async def test_transcribe_chunk_whisper_verbose_json():
     assert result.language == "english"
     assert [(s.start, s.end, s.text) for s in result.segments] == [
         (0.5, 2.0, "Hello there."),
-        (2.0, 10.0, "runs past the end"),  # clamped to the chunk
+        (2.0, 10.0, "runs past the end"),
     ]
 
 
@@ -248,7 +228,7 @@ async def test_transcribe_chunk_sends_the_language_only_when_given():
     await transcribe_chunk(client, "whisper-1", b"wav", 1.0, language="en")
     assert client.kwargs["language"] == "en"
     await transcribe_chunk(client, "whisper-1", b"wav", 1.0)
-    assert "language" not in client.kwargs  # the model detects it
+    assert "language" not in client.kwargs
 
 
 @pytest.mark.parametrize(
@@ -275,9 +255,6 @@ async def test_transcribe_chunk_plain_string_response():
     assert result.segments[0].text == "hello"
 
 
-# --- The stage ---------------------------------------------------------------------------------
-
-
 async def test_stage_offsets_and_merges_timestamps(ctx, monkeypatch):
     pattern = bursts_pattern(20)
     write_wav(ctx.paths.audio, make_audio(pattern))
@@ -293,7 +270,7 @@ async def test_stage_offsets_and_merges_timestamps(ctx, monkeypatch):
     assert transcript.language == "english"
     starts = [s.start for s in transcript.segments]
     assert starts == sorted(starts)
-    assert all(s.text.strip() for s in transcript.segments)  # empty segments stripped
+    assert all(s.text.strip() for s in transcript.segments)
     expected = burst_times(pattern)
     assert len(transcript.segments) == len(expected)
     for seg, (a, b) in zip(transcript.segments, expected, strict=True):
@@ -350,7 +327,6 @@ async def test_stage_sends_the_language_and_a_changed_language_resends_every_chu
     first = client.audio.transcriptions.calls
     assert first and all(c["language"] == "en" for c in first)
 
-    # Chunks cached before the setting existed (or with another language) are paid for again.
     client = fake_client()
     use_client(monkeypatch, client)
     ctx.settings = ctx.settings.model_copy(update={"transcribe_language": None})
@@ -361,7 +337,6 @@ async def test_stage_sends_the_language_and_a_changed_language_resends_every_chu
 
 
 def strip_requested_language(cache_dir: Path) -> None:
-    """Make every cache entry look as it did before ``requested_language`` existed."""
     for path in cache_dir.glob("*.json"):
         data = json.loads(path.read_text())
         del data["requested_language"]
@@ -375,14 +350,12 @@ async def test_chunks_cached_before_the_language_setting_are_resent_in_english(c
     await transcribe.run(ctx, **SMALL)
     strip_requested_language(ctx.paths.transcript_chunks_dir)
 
-    # Detected then, detected now: still cached.
     def no_client(_settings):
         raise AssertionError("no API call expected: these chunks were detected too")
 
     monkeypatch.setattr(transcribe, "get_openai", no_client)
     await transcribe.run(ctx, **SMALL)
 
-    # Under the default ("en") they may hold a misdetected language: every chunk is sent again.
     client = fake_client()
     use_client(monkeypatch, client)
     ctx.settings = ctx.settings.model_copy(update={"transcribe_language": "en"})
@@ -408,7 +381,7 @@ async def test_stage_resends_chunk_if_audio_changed(ctx, monkeypatch):
     use_client(monkeypatch, fake_client())
     await transcribe.run(ctx, **SMALL)
 
-    write_wav(ctx.paths.audio, make_audio(bursts_pattern(4), seed=2))  # same length, new audio
+    write_wav(ctx.paths.audio, make_audio(bursts_pattern(4), seed=2))
     client = fake_client()
     use_client(monkeypatch, client)
     await transcribe.run(ctx, **SMALL)
@@ -428,18 +401,17 @@ async def test_failing_chunk_fails_stage_but_keeps_others_cached(ctx, monkeypatc
     client = fake_client()
     use_client(monkeypatch, client)
     await transcribe.run(ctx, **SMALL)
-    assert len(client.audio.transcriptions.calls) == 1  # only the failed chunk is re-sent
+    assert len(client.audio.transcriptions.calls) == 1
     assert ctx.paths.transcript.exists()
 
 
 async def test_a_chunk_with_one_failing_stretch_is_not_cached_and_both_are_resent(ctx, monkeypatch):
-    # One chunk, two speech stretches (more than 2 s apart); the second call fails for good.
     write_wav(ctx.paths.audio, make_audio([("tone", 2.0), ("silence", 6.0), ("tone", 2.0)]))
     use_client(monkeypatch, fake_client(fail_on_call=2))
     with pytest.raises(transcribe.TranscribeError, match="1 of 1 transcription chunks") as caught:
         await transcribe.run(ctx)
-    assert isinstance(caught.value.__cause__, RuntimeError)  # the stretch's own error
-    assert list(ctx.paths.transcript_chunks_dir.glob("*.json")) == []  # no half a chunk cached
+    assert isinstance(caught.value.__cause__, RuntimeError)
+    assert list(ctx.paths.transcript_chunks_dir.glob("*.json")) == []
 
     client = fake_client()
     use_client(monkeypatch, client)
@@ -457,7 +429,7 @@ async def test_a_blocking_error_in_one_stretch_cancels_the_chunks_other_stretch(
         n = len(started)
         started.append(n)
         if n == 0:
-            await both_started.wait()  # fails while the other stretch is in flight
+            await both_started.wait()
             raise status_error(403, message="rejected key")
         both_started.set()
         try:
@@ -471,9 +443,6 @@ async def test_a_blocking_error_in_one_stretch_cancels_the_chunks_other_stretch(
     with pytest.raises(openai.PermissionDeniedError):
         await asyncio.wait_for(transcribe.run(ctx), 5)
     assert started == [0, 1] and cancelled == [1]
-
-
-# --- Only speech is sent (the stand-in detector in conftest hears the tones as speech) -----------
 
 
 def sent_seconds(call: dict) -> float:
@@ -507,8 +476,6 @@ async def test_each_speech_stretch_is_sent_on_its_own_and_placed_at_its_start(ct
     use_client(monkeypatch, client)
     await transcribe.run(ctx)
 
-    # 0-2 s and 8-10 s, each padded by 0.4 s (and by up to a 32 ms slice at its end), each its
-    # own call; the 6 s between and the 3 s after are neither sent nor billed.
     sent = sorted(sent_seconds(c) for c in client.audio.transcriptions.calls)
     assert sent == [pytest.approx(2.4, abs=0.07), pytest.approx(2.8, abs=0.07)]
     transcript = read_model(ctx.paths.transcript, Transcript)
@@ -531,7 +498,7 @@ async def test_speech_whisper_returns_no_text_for_is_saved_empty(ctx, monkeypatc
     client = Recorder({"language": "english", "segments": []})
     use_client(monkeypatch, client)
     await transcribe.run(ctx)
-    assert client.kwargs  # it was sent
+    assert client.kwargs
     assert read_model(ctx.paths.transcript, Transcript).segments == []
 
 
@@ -574,12 +541,7 @@ async def test_8_khz_audio_is_sent_at_its_own_rate(ctx, monkeypatch):
     assert (seg.start, seg.end) == pytest.approx((1.0, 4.0), abs=0.02)
 
 
-# --- Text-only models (no timestamps) ----------------------------------------------------------
-
-
 class TextOnlyTranscriptions:
-    """Like gpt-transcribe: ``json`` with ``text`` and ``languages``, no segments."""
-
     def __init__(self):
         self.calls: list[dict] = []
 
@@ -601,12 +563,12 @@ def test_chunk_lengths_for_models():
 
 async def test_text_only_model_gives_one_segment_per_short_chunk(ctx, monkeypatch):
     ctx.settings.transcribe_model = "gpt-transcribe"
-    samples = make_audio(bursts_pattern(60))  # ~73 s
+    samples = make_audio(bursts_pattern(60))
     write_wav(ctx.paths.audio, samples)
     fake = TextOnlyTranscriptions()
     use_client(monkeypatch, SimpleNamespace(audio=SimpleNamespace(transcriptions=fake)))
 
-    await transcribe.run(ctx)  # chunk lengths from chunk_lengths_for("gpt-transcribe")
+    await transcribe.run(ctx)
 
     target, max_s = transcribe.chunk_lengths_for("gpt-transcribe")
     chunks = plan_chunks(samples, RATE, target, max_s)
@@ -623,7 +585,7 @@ async def test_text_only_model_gives_one_segment_per_short_chunk(ctx, monkeypatc
     for seg in transcript.segments:
         assert seg.text == f"chunk of {seg.end - seg.start:.2f}s"
     for _, cut in chunks[:-1]:
-        assert is_quiet(samples, cut)  # still cut at silences
+        assert is_quiet(samples, cut)
 
 
 @pytest.mark.parametrize("seconds", [10, 12, 15])

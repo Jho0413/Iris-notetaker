@@ -109,7 +109,6 @@ async def test_batches_render_real_pixels_and_emit(setup):
     assert json.loads(content[0]["text"]) == {"earlier_content": []}
     assert "Revenue chart" in content[1]["text"]
     assert content[2]["image_url"]["url"].startswith("data:image/jpeg;base64,")
-    # The next batch knows what the first one captured, so it does not list it again.
     later = json.loads(parse.call_args_list[1].kwargs["messages"][1]["content"][0]["text"])
     assert [m["moment_id"] for m in later["earlier_content"]] == ["m0"]
 
@@ -156,12 +155,10 @@ async def test_failed_batch_resumes_from_content_cache(setup):
     assert parse.await_count == 1
     await select.run(ctx)
     assert parse.await_count == 1
-    # A changed transcript invalidates only its batch.
     items[2].transcript[0].text = "Updated chart"
     write_model(ctx.paths.alignment, Alignment(items=items))
     await select.run(ctx)
     assert parse.await_count == 2
-    # Changed pixels also invalidate that batch.
     cv2.imwrite(str(ctx.paths.frames_dir / "2.jpg"), np.zeros((60, 100, 3), dtype=np.uint8))
     await select.run(ctx)
     assert parse.await_count == 3

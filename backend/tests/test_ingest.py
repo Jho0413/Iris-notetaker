@@ -1,5 +1,3 @@
-"""Upload ingest, on small synthetic recordings generated with PyAV."""
-
 import wave
 from fractions import Fraction
 from pathlib import Path
@@ -19,7 +17,6 @@ from iris.store.layout import SessionPaths, read_model
 
 W, H, FPS = 320, 240, 10
 SECONDS = 6
-# One solid colour (BGR) per second of video, so a frame's colour tells which second it is from.
 COLOURS = [(0, 0, 255), (0, 255, 0), (255, 0, 0), (0, 255, 255), (255, 0, 255), (255, 255, 0)]
 
 
@@ -32,7 +29,6 @@ def make_media(
     audio_start: float = 0.0,
     seconds: int = SECONDS,
 ) -> Path:
-    """Write a test file: solid colour video changing every second, and a 440 Hz sine."""
     with av.open(str(path), "w") as out:
         vs = as_ = None
         if video:
@@ -49,7 +45,7 @@ def make_media(
                 img = np.empty((H, W, 3), np.uint8)
                 img[:] = COLOURS[(i // FPS) % len(COLOURS)]
                 if rotation is not None:
-                    img[H // 2 :] = 0  # top half coloured, bottom half black
+                    img[H // 2 :] = 0
                 frame = av.VideoFrame.from_ndarray(img, format="bgr24")
                 frame.pts = i
                 frame.time_base = Fraction(1, FPS)
@@ -98,9 +94,6 @@ def make_ctx(root: Path, src: Path, **settings) -> StageContext:
     )
 
 
-# --- Frames -----------------------------------------------------------------------------------
-
-
 def test_frames_sampled_once_per_second(media: Path, tmp_path: Path):
     index = extract_frames(media, tmp_path / "frames", fps=1.0, max_width=1280)
     assert index.fps == 1.0
@@ -130,7 +123,6 @@ def test_frames_not_upscaled(media: Path, tmp_path: Path):
 
 
 def test_frames_rotated_upright(tmp_path: Path):
-    # Display matrix says rotate 90 degrees counterclockwise: the coloured top half ends up left.
     src = make_media(tmp_path / "phone.mp4", rotation=90, seconds=1)
     index = extract_frames(src, tmp_path / "frames", fps=1.0, max_width=1280)
     assert (index.width, index.height) == (H, W)
@@ -145,9 +137,6 @@ def test_audio_only_gives_empty_frame_index(tmp_path: Path):
     assert index == FrameIndex(fps=1.0, width=0, height=0, frames=[])
 
 
-# --- Audio ------------------------------------------------------------------------------------
-
-
 def test_audio_is_16k_mono_s16(media: Path, tmp_path: Path):
     dest = tmp_path / "audio.wav"
     duration = extract_audio(media, dest, rate=16_000)
@@ -156,7 +145,7 @@ def test_audio_is_16k_mono_s16(media: Path, tmp_path: Path):
         assert w.getnframes() / 16_000 == pytest.approx(SECONDS, abs=0.1)
         samples = np.frombuffer(w.readframes(w.getnframes()), np.int16)
     assert duration == pytest.approx(SECONDS, abs=0.1)
-    assert np.abs(samples[16_000:32_000]).max() > 5000  # the sine survived
+    assert np.abs(samples[16_000:32_000]).max() > 5000
     assert not (tmp_path / "audio.wav.tmp").exists()
 
 
@@ -195,9 +184,6 @@ def test_unreadable_file_raises(tmp_path: Path):
     with pytest.raises(UserFacingError, match="not a readable") as raised:
         extract_audio(src, tmp_path / "audio.wav", rate=16_000)
     assert raised.value.message == UNREADABLE_UPLOAD
-
-
-# --- Ingest stage -----------------------------------------------------------------------------
 
 
 async def test_ingest_writes_audio_and_frames(media: Path, tmp_path: Path):

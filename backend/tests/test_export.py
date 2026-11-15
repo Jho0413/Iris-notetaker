@@ -177,13 +177,12 @@ def test_export_keeps_boxes_and_steps_and_embeds_figures_inside_them(tmp_path):
     lines = exported.split("\n")
     assert lines[:3] == ["# Review", "", ":::step[Find the forces]{color=indigo}"]
     assert "At the bottom, $P_1 * W$ points up." in lines
-    # A list followed by ::: stays a list: the fence is never read as part of the list item.
     assert ":::box[Key idea]{color=blue}" in lines and "- two" in lines
     assert lines.count(":::") == 2
     assert [i.attrGet("src") for i in images(exported)] == ["data:image/jpeg;base64,aW1hZ2U="]
     assert "*Forces \\[N\\]*" in exported or "*Forces [N]*" in exported
-    assert "gone" not in exported  # an unknown figure is left out
-    assert "```\n:::box\n```" in exported  # code is code
+    assert "gone" not in exported
+    assert "```\n:::box\n```" in exported
 
 
 def test_export_upgrades_old_notes(tmp_path):

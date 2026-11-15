@@ -104,7 +104,7 @@ async def test_falls_back_to_other_renderer_then_screenshot(setup):
     assert (r.path, r.render_as, r.attempts) == ("visuals/v1.png", "image", 3)
     assert [c[0] for c in calls if c[0] != "check"] == ["svg", "svg", "image"]
 
-    ctx.settings.image_quality = "low"  # new cache key
+    ctx.settings.image_quality = "low"
     calls.clear()
     verdicts.extend([bad("x")] * 4)
     await render.run(ctx)

@@ -363,7 +363,6 @@ async def test_fixable_format_slips_are_repaired_not_failed(setup):
     assert draft.markdown == (
         ":::box[Decision]{color=grey}\nShip the prototype. Alex will test it.\n\n[visual:v1]\n\n:::"
     )
-    # The repaired section is what is cached, so a re-run reads it without a call.
     await write.run(ctx)
     assert generate.await_count == 1
 

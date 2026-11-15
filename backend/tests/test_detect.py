@@ -1,5 +1,3 @@
-"""Moment detection on synthetic slide decks built in memory."""
-
 from pathlib import Path
 
 import cv2
@@ -14,7 +12,7 @@ from iris.pipeline.stages.detect import DetectParams, MomentDetector
 from iris.store.layout import SessionPaths, read_model, write_model
 
 W, H = 640, 360
-BULLET_Y = 280  # baseline of the third bullet, added by the slide build
+BULLET_Y = 280
 
 
 def slide(title: str, bullets: int = 2, shape: str = "rect") -> np.ndarray:
@@ -42,8 +40,6 @@ SLIDE_C = slide("Next steps", shape="tri")
 
 
 class Deck:
-    """Builds a frame sequence at 1 fps with noise; remembers which times are transitions."""
-
     def __init__(self, seed: int = 0):
         self.frames: list[np.ndarray] = []
         self.transitions: set[float] = set()
@@ -83,7 +79,6 @@ class Deck:
 
 
 def cursor(frame: np.ndarray, i: int, _rng) -> None:
-    """A small arrow-like cursor wandering over the slide, plus a blinking caret."""
     x, y = 100 + 37 * i % 400, 120 + 23 * i % 200
     pts = np.array([[x, y], [x, y + 18], [x + 5, y + 13], [x + 12, y + 13]], np.int32)
     cv2.fillPoly(frame, [pts], (0, 0, 0))
@@ -92,7 +87,6 @@ def cursor(frame: np.ndarray, i: int, _rng) -> None:
 
 
 def thumbnails(frame: np.ndarray, _i: int, rng) -> None:
-    """Video-call participant thumbnails flickering in the bottom-right corner."""
     frame[290:350, 500:630] = rng.integers(0, 255, (60, 130, 3), dtype=np.uint8)
 
 
@@ -116,7 +110,6 @@ def test_three_slides_with_crossfade():
     assert [m.id for m in moments] == ["m001", "m002", "m003"]
     assert_not_transition(moments, deck)
     assert moments[0].changed_region is None
-    # A whole new slide is a full-screen change: no region to crop.
     assert moments[1].changed_region is None and moments[2].changed_region is None
 
 
@@ -131,7 +124,6 @@ def test_flickering_thumbnails_are_ignored():
     deck = three_slides(overlay_all=thumbnails)
     moments = deck.detect()
     assert len(moments) == 3
-    # Boundaries stay at the slide changes (the first moment's start is the session start).
     assert [m.start for m in moments] == [0, 10, 21]
     assert_not_transition(moments, deck)
 
@@ -142,7 +134,6 @@ def test_slide_build_updates_moment_with_most_complete_state():
     deck.fade(built, SLIDE_B).hold(SLIDE_B, 10)
     moments = deck.detect()
     assert [(m.start, m.end) for m in moments] == [(0, 21), (21, 32)]
-    # Representative shows the bullet (taken from the built stretch, after the fade).
     assert 11 <= moments[0].frame.t < 21
     assert_not_transition(moments, deck)
 
@@ -178,7 +169,7 @@ def test_scrolling_a_canvas_continues_the_moment():
 
     def view(top: int) -> np.ndarray:
         img = canvas[top : top + H].copy()
-        img[:30] = 40  # a toolbar that stays put
+        img[:30] = 40
         cv2.putText(img, "toolbar", (250, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
         return img
 
@@ -186,7 +177,7 @@ def test_scrolling_a_canvas_continues_the_moment():
     [moment] = deck.detect()
     assert [b.t for b in moment.builds] == [0, 8]
     assert moment.builds[1].region is not None
-    assert moment.builds[1].region.y > H - 120  # "LIGO" scrolled into view at the bottom
+    assert moment.builds[1].region.y > H - 120
 
 
 def test_scrolling_content_off_screen_is_a_new_moment():
@@ -211,7 +202,6 @@ def _covers(box, target, slack: int = 40) -> bool:
 
 
 def bullet_box(title: str) -> tuple[int, int, int, int]:
-    """x, y, w, h of the third bullet (dot + text) drawn by ``slide``."""
     (tw, th), base = cv2.getTextSize(f"{title} point 3", cv2.FONT_HERSHEY_SIMPLEX, 0.9, 2)
     top = min(BULLET_Y - th, BULLET_Y - 17)
     return 68, top, 95 + tw - 68, BULLET_Y + base - top
@@ -261,7 +251,6 @@ def test_moments_close_incrementally():
         if m is not None:
             closed_at[m.id] = ref.t
     last = det.finish(deck.t)
-    # Each moment is returned shortly after the next slide has settled for min_moment_s.
     assert closed_at == {"m001": 14.0, "m002": 25.0}
     assert last is not None and last.id == "m003"
 
@@ -353,11 +342,7 @@ async def test_single_frame_stage_writes_and_emits_fallback(ctx, events):
     assert events == [(EventType.MOMENT_FOUND, detect.moment_event(moments[0]))]
 
 
-# --- Shares ------------------------------------------------------------------------------------
-
-
 def feed_share(det: MomentDetector, img: np.ndarray, start: float, seconds: int, seed: int = 0):
-    """Feed ``img`` at 1 fps from ``start`` (with noise); return the moments closed."""
     deck = Deck(seed).hold(img, seconds)
     out = []
     for i, frame in enumerate(deck.frames):
@@ -371,11 +356,9 @@ def test_a_share_ending_ends_the_moment_there_and_the_next_share_starts_afresh()
     assert feed_share(det, SLIDE_A, 0, 10) == []
     first = det.end_share(10.0)
     assert first is not None and (first.id, first.start, first.end) == ("m001", 0.0, 10.0)
-    # The same slide shared again later is a moment of its own: nothing spans two shares.
     assert feed_share(det, SLIDE_A, 100, 10, seed=1) == []
     again = det.end_share(110.0)
     assert again is not None and (again.id, again.start, again.end) == ("m002", 100.0, 110.0)
-    # Another source, at another size: compared only with itself.
     small = cv2.resize(SLIDE_B, (SLIDE_B.shape[1] // 2, SLIDE_B.shape[0] // 2))
     assert feed_share(det, small, 200, 10, seed=2) == []
     last = det.finish(210.0)
@@ -386,17 +369,17 @@ def test_a_share_too_short_to_settle_still_gives_its_frame():
     det = MomentDetector()
     feed_share(det, SLIDE_A, 0, 10)
     assert det.end_share(10.0) is not None
-    feed_share(det, SLIDE_B, 50, 1)  # one frame: never settles
+    feed_share(det, SLIDE_B, 50, 1)
     brief = det.end_share(51.0)
     assert brief is not None and (brief.id, brief.start, brief.end) == ("m002", 50.0, 51.0)
-    assert det.end_share(60.0) is None  # nothing shared since: nothing to close
+    assert det.end_share(60.0) is None
     assert det.finish(70.0) is None
 
 
 def test_a_share_ends_a_grid_step_after_its_last_frame_or_where_the_next_starts():
     assert detect.share_end(9.0, fps=1.0) == 10.0
     assert detect.share_end(9.0, fps=1.0, next_start=40.0) == 10.0
-    assert detect.share_end(8.0, fps=0.5, next_start=9.0) == 9.0  # no overlap with the next
+    assert detect.share_end(8.0, fps=0.5, next_start=9.0) == 9.0
     assert detect.share_end(9.0, fps=0.0) == 9.0
 
 
@@ -418,10 +401,7 @@ def test_detect_moments_ends_moments_where_shares_end(tmp_path):
     )
     index = FrameIndex(fps=1.0, width=W, height=H, frames=refs, share_starts=[40.0])
     spans = [(m.start, m.end) for m in detect.detect_moments(tmp_path, index)]
-    # Each share ends one grid step after its last frame: what was shown isn't taken to be on
-    # screen until the next share starts.
     assert spans == [(0.0, 10.0), (40.0, 50.0)]
-    # The next share starts within a grid step of the last frame (Continue): it ends there.
     tight = write_frames(
         tmp_path / "tight",
         [
@@ -432,6 +412,5 @@ def test_detect_moments_ends_moments_where_shares_end(tmp_path):
     continued = FrameIndex(fps=1.0, width=W, height=H, frames=tight, share_starts=[10.1])
     spans = [(m.start, m.end) for m in detect.detect_moments(tmp_path / "tight", continued)]
     assert spans == [(0.3, 10.1), (10.1, 20.1)]
-    # One share: the same slide before and after 30 s without frames is one moment.
     one_share = index.model_copy(update={"share_starts": []})
     assert [(m.start, m.end) for m in detect.detect_moments(tmp_path, one_share)] == [(0.0, 50.0)]

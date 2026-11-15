@@ -1,8 +1,3 @@
-"""Live select lane: closed moments -> screen content and rendered figures, while recording.
-
-The vision model and the renderer are fakes; the timeline's other lanes are driven by hand.
-"""
-
 import asyncio
 import json
 from pathlib import Path
@@ -39,8 +34,6 @@ from tests.test_live_screen import encode
 
 
 class FakeVision:
-    """The vision model: keeps every moment with one figure. Calls can be held open."""
-
     def __init__(self):
         self.calls: list[list[str]] = []
         self.release = asyncio.Event()
@@ -80,8 +73,6 @@ def rendered_visual(visual_id: str) -> RenderedVisual:
 
 
 class FakeRenderer:
-    """``render.render_visual``: per-visual gates and failures; tracks concurrency."""
-
     def __init__(self):
         self.started: list[str] = []
         self.hold: dict[str, asyncio.Event] = {}
@@ -140,7 +131,6 @@ def renderer(monkeypatch) -> FakeRenderer:
 
 
 def moment(ctx: StageContext, i: int) -> Moment:
-    """Moment ``i`` spans [10i, 10i + 10); its frame is a distinct image on disk."""
     start = 10.0 * i
     name = f"{int(start * 1000):09d}.jpg"
     image = np.full((60, 100, 3), 40 * i % 255, np.uint8)
@@ -155,7 +145,6 @@ def speech(i: int) -> TranscriptSegment:
 
 
 async def until(predicate, timeout: float = 5.0) -> None:
-    """Wait for a condition that is not on the timeline (a fake's state)."""
     async with asyncio.timeout(timeout):
         while not predicate():
             await asyncio.sleep(0)
@@ -173,7 +162,6 @@ class Driver:
         return self
 
     async def close(self, *indexes: int) -> list[Moment]:
-        """The screen lane closes moments; the audio lane transcribes nothing yet."""
         out = []
         for i in indexes:
             m = moment(self.ctx, i)
@@ -188,7 +176,6 @@ class Driver:
         await asyncio.wait_for(self.timeline.wait_until(lambda: self.timeline.selected_to >= t), 5)
 
     async def stop(self, audio: bool = True) -> LiveTimeline:
-        """Stop: the screen lane finishes (and the audio lane, unless told otherwise)."""
         await self.timeline.request_end()
         await self.timeline.finish_lane(Lane.SCREEN)
         if audio:
@@ -203,15 +190,12 @@ async def settle() -> None:
         await asyncio.sleep(0)
 
 
-# --- Gate and batching ------------------------------------------------------------------------
-
-
 async def test_a_moment_waits_for_the_transcript_past_its_end_plus_pad(
     ctx: StageContext, vision: FakeVision, renderer: FakeRenderer
 ):
     driver = Driver(ctx).start()
     await driver.close(0)
-    await driver.transcribe(0, to=14.9)  # the moment ends at 10; the pad is 5 s
+    await driver.transcribe(0, to=14.9)
     await settle()
     assert vision.calls == []
     await driver.transcribe(to=15.0)
@@ -228,14 +212,13 @@ async def test_moments_closing_during_a_call_are_batched_and_ids_continue(
     await driver.close(0)
     await driver.transcribe(0, to=100)
     await asyncio.wait_for(vision.started.wait(), 5)
-    await driver.close(1, 2, 3)  # pass the gate while the first call is in flight
+    await driver.close(1, 2, 3)
     await driver.transcribe(1, 2, 3, to=100)
     assert driver.timeline.selected_to == 0
     vision.release.set()
     await driver.selected(40)
     timeline = await driver.stop()
 
-    # One call in flight; then the waiting moments together, up to the batch size, in order.
     assert vision.calls == [["m001"], ["m002", "m003"], ["m004"]]
     assert [v.id for v in timeline.visuals] == ["v000001", "v000002", "v000003", "v000004"]
     assert [v.moment_id for v in timeline.visuals] == ["m001", "m002", "m003", "m004"]
@@ -248,7 +231,7 @@ async def test_moments_closing_during_a_call_are_batched_and_ids_continue(
 
 async def test_selected_to_never_passes_closed_to(ctx: StageContext, vision, renderer):
     driver = Driver(ctx).start()
-    await driver.timeline.advance_closed_to(5)  # not a real case: closed_to lags the moment
+    await driver.timeline.advance_closed_to(5)
     driver.timeline.moments.append(moment(ctx, 0))
     await driver.transcribe(to=100)
     await driver.selected(5)
@@ -259,13 +242,11 @@ async def test_selected_to_never_passes_closed_to(ctx: StageContext, vision, ren
 async def test_with_every_moment_read_selected_to_follows_closed_to(
     ctx: StageContext, vision, renderer
 ):
-    # With no screen shared, the screen lane moves closed_to on its own (no moment can open).
     driver = Driver(ctx).start()
     await driver.timeline.advance_closed_to(30)
     await driver.selected(30)
     assert vision.calls == []
-    # A closed moment still waiting for its speech holds selected_to back until it is read.
-    await driver.close(3)  # [30, 40)
+    await driver.close(3)
     await driver.timeline.advance_closed_to(60)
     await settle()
     assert driver.timeline.selected_to == 30
@@ -281,20 +262,16 @@ async def test_selection_matches_the_select_stage_when_batches_coincide(
     driver = Driver(ctx)
     moments = await driver.close(0, 1, 2)
     await driver.transcribe(0, 1, 2, to=100)
-    driver.start()  # all three are ready at once: batches [m001, m002], [m003], as at stop
+    driver.start()
     await driver.selected(30)
     timeline = await driver.stop()
     assert vision.calls == [["m001", "m002"], ["m003"]]
 
-    # Stop runs the select stage on the same moments: same output, and every batch is cached.
     items = align.align(moments, timeline.segments)
     write_model(ctx.paths.alignment, Alignment(items=items))
     await select.run(ctx)
     assert read_model(ctx.paths.selection, Selection) == timeline.selection()
     assert len(vision.calls) == 2
-
-
-# --- Rendering --------------------------------------------------------------------------------
 
 
 async def test_figures_render_in_the_background_and_a_failure_is_not_fatal(
@@ -306,13 +283,12 @@ async def test_figures_render_in_the_background_and_a_failure_is_not_fatal(
     await driver.close(0)
     await driver.transcribe(0, to=100)
     await until(lambda: renderer.started == ["v000001"])
-    # The render of v000001 is still running; reading carries on.
     await driver.close(1, 2)
     await driver.transcribe(1, 2, to=100)
     await driver.selected(30)
     await until(lambda: renderer.started == ["v000001", "v000002"])
-    assert renderer.max_running == 2  # live_render_concurrency
-    renderer.hold["v000002"].set()  # fails
+    assert renderer.max_running == 2
+    renderer.hold["v000002"].set()
     await until(lambda: renderer.started == ["v000001", "v000002", "v000003"])
     renderer.hold["v000001"].set()
     await until(lambda: renderer.running == 0)
@@ -328,7 +304,6 @@ async def test_figures_render_in_the_background_and_a_failure_is_not_fatal(
 async def test_live_renders_hit_the_render_cache(
     ctx: StageContext, vision: FakeVision, monkeypatch, events: list
 ):
-    """The real ``render_visual``: what the lane renders, the render stage reuses at stop."""
     drawn = []
 
     async def draw(_ctx, visual, _source, _feedback):
@@ -352,13 +327,12 @@ async def test_live_renders_hit_the_render_cache(
 
     write_model(ctx.paths.selection, timeline.selection())
     await render.run(ctx)
-    assert drawn == ["v000001"]  # cached
+    assert drawn == ["v000001"]
 
 
 async def test_an_api_error_in_a_live_render_gives_the_source_crop_uncached(
     ctx: StageContext, vision: FakeVision, monkeypatch, events: list
 ):
-    """The real ``render_visual``: the render stage's rule, so stop tries the redraw again."""
     drawn = []
 
     async def draw(_ctx, visual, _source, _feedback):
@@ -390,12 +364,9 @@ async def test_an_api_error_in_a_live_render_gives_the_source_crop_uncached(
 
     write_model(ctx.paths.selection, timeline.selection())
     await render.run(ctx)
-    assert drawn == ["v000001", "v000001"]  # redrawn at stop
+    assert drawn == ["v000001", "v000001"]
     [rendered] = read_model(ctx.paths.renders, Renders).visuals
     assert rendered.verified and rendered.render_as == "svg"
-
-
-# --- Upstream failure and stop ----------------------------------------------------------------
 
 
 async def test_upstream_failure_stops_model_calls(
@@ -421,27 +392,26 @@ async def test_upstream_failure_mid_recording_cancels_renders(
     await until(lambda: renderer.started == ["v000001"])
     await driver.timeline.fail_lane(Lane.SCREEN, "boom")
     await driver.close(2)
-    await until(lambda: renderer.running == 0)  # the running render is cancelled
+    await until(lambda: renderer.running == 0)
     await driver.timeline.request_end()
     await asyncio.wait_for(driver.task, 5)
     assert vision.calls == [["m001", "m002"]]
-    assert renderer.started == ["v000001"]  # the queued one never started
+    assert renderer.started == ["v000001"]
     assert not [kind for kind, _ in events if kind == EventType.VISUAL_RENDERED]
 
 
 async def test_a_fresh_lane_reuses_the_batches_already_paid_for(
     ctx: StageContext, vision: FakeVision, renderer: FakeRenderer
 ):
-    """After a backend restart the backlog is read in the batches cached before it."""
     driver = Driver(ctx).start()
-    for i in range(4):  # moments pass the gate one at a time: batches of one
+    for i in range(4):
         await driver.close(i)
         await driver.transcribe(i, to=10.0 * i + 15)
         await driver.selected(10.0 * i + 10)
     before = await driver.stop()
     assert vision.calls == [["m001"], ["m002"], ["m003"], ["m004"]]
 
-    fresh = Driver(ctx)  # a new timeline: the other lanes replay to the same results
+    fresh = Driver(ctx)
     await fresh.close(0, 1, 2, 3)
     await fresh.transcribe(0, 1, 2, 3, to=100)
     fresh.start()
@@ -449,7 +419,6 @@ async def test_a_fresh_lane_reuses_the_batches_already_paid_for(
     assert len(vision.calls) == 4
     assert after.selection() == before.selection()
 
-    # A new moment after the restart is batched with nothing cached: one call for both.
     third = Driver(ctx)
     await third.close(0, 1, 2, 3, 4)
     await third.transcribe(0, 1, 2, 3, 4, to=100)
@@ -461,7 +430,6 @@ async def test_a_fresh_lane_reuses_the_batches_already_paid_for(
 async def test_a_fresh_lane_waits_to_rebuild_a_batch_split_by_the_gate(
     ctx: StageContext, vision: FakeVision, renderer: FakeRenderer
 ):
-    """After a restart the transcript may release a cached batch's moments one at a time."""
     driver = Driver(ctx).start()
     vision.release.clear()
     await driver.close(0)
@@ -475,11 +443,11 @@ async def test_a_fresh_lane_waits_to_rebuild_a_batch_split_by_the_gate(
 
     fresh = Driver(ctx)
     await fresh.close(0, 1, 2)
-    await fresh.transcribe(0, 1, to=25)  # past m002's gate (20 + 5), not m003's (35)
+    await fresh.transcribe(0, 1, to=25)
     fresh.start()
     await fresh.selected(10)
     await settle()
-    assert fresh.timeline.selected_to == 10  # m002 waits for m003, its batch-mate
+    assert fresh.timeline.selected_to == 10
     await fresh.transcribe(2, to=100)
     after = await fresh.stop()
     assert len(vision.calls) == 2
@@ -500,7 +468,7 @@ async def test_a_second_restart_during_a_replay_keeps_the_rest_of_it(
     await first.stop()
     assert vision.calls == [["m001"], ["m002", "m003"]]
 
-    second = Driver(ctx)  # replays only m001 before the backend restarts again
+    second = Driver(ctx)
     await second.close(0, 1, 2)
     await second.transcribe(0, to=15)
     second.start()
@@ -528,7 +496,7 @@ async def test_a_replay_that_no_longer_matches_is_dropped(
         SelectBatches(batches=[["m001", "m002"], ["m003"]]),
     )
     driver = Driver(ctx).start()
-    await driver.close(0)  # the screen lane stops after one moment: the batch can't form
+    await driver.close(0)
     await driver.transcribe(0, to=100)
     timeline = await driver.stop()
     assert vision.calls == [["m001"]]
@@ -554,26 +522,25 @@ async def test_stop_reads_the_rest_once_the_transcript_is_done_and_waits_for_ren
     renderer.hold = {"v000001": asyncio.Event()}
     driver = Driver(ctx).start()
     await driver.close(0)
-    await driver.transcribe(0, to=15)  # m001 ends at 10: passes its gate (10 + 5 s pad)
+    await driver.transcribe(0, to=15)
     await until(lambda: renderer.started == ["v000001"])
     await driver.close(1, 2)
-    await driver.transcribe(1, to=24)  # gated: m002 needs 25, m003 35; the audio is still flushing
+    await driver.transcribe(1, to=24)
     await driver.selected(10)
     await driver.timeline.request_end()
     await driver.timeline.finish_lane(Lane.SCREEN)
     await settle()
     assert vision.calls == [["m001"]] and not driver.task.done()
-    await driver.timeline.finish_lane(Lane.AUDIO)  # the gate passes for the rest
+    await driver.timeline.finish_lane(Lane.AUDIO)
     await until(lambda: len(vision.calls) == 2)
     await settle()
-    assert not driver.task.done()  # v000001 is still rendering
+    assert not driver.task.done()
     renderer.hold["v000001"].set()
     await asyncio.wait_for(driver.task, 5)
     timeline = driver.timeline
     assert vision.calls == [["m001"], ["m002", "m003"]]
     assert timeline.selected_to == 30
     assert [c.moment_id for c in timeline.contents] == ["m001", "m002", "m003"]
-    # Renders not started before stop are left to the render stage.
     assert renderer.started == ["v000001"]
     assert read_model(ctx.paths.live_selection, Selection) == timeline.selection()
 
@@ -595,9 +562,6 @@ async def test_a_failed_select_call_fails_the_lane(ctx: StageContext, monkeypatc
     await driver.transcribe(0, to=100)
     with pytest.raises(RuntimeError):
         await asyncio.wait_for(driver.task, 5)
-
-
-# --- Both lanes through the processor ---------------------------------------------------------
 
 
 async def test_screen_and_select_lanes_through_the_processor(

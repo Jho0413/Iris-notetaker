@@ -1,8 +1,3 @@
-"""The live draft lane (sections written ahead of stop) and the write stage's stable parts and keys.
-
-The notes model is a fake (``write.generate_section`` patched); nothing calls a real API.
-"""
-
 import asyncio
 import json
 import math
@@ -42,7 +37,6 @@ WORDS = "the derivative measures how fast the function changes at a point "
 
 
 def seg(i: int, length: int = 300) -> TranscriptSegment:
-    """Segment ``i``: [10 i, 10 i + 9], about ``length`` characters of text."""
     text = f"[{i}] " + (WORDS * (length // len(WORDS) + 1))[:length]
     return TranscriptSegment(start=10 * i, end=10 * i + 9, text=text)
 
@@ -66,16 +60,14 @@ def visual(i: int, t: float) -> Visual:
 
 
 class FakeNotes:
-    """Stands in for the notes model: records each payload and places every supplied visual."""
-
     def __init__(self) -> None:
         self.payloads: list[dict] = []
         self.horizons: list[float] = []
         self.timeline: LiveTimeline | None = None
         self.fail_next = 0
-        self.error: Exception = RuntimeError("model unavailable")  # what fail_next raises
-        self.invalid = lambda data: False  # payloads answered with a section that fails validation
-        self.gate: asyncio.Event | None = None  # when set, calls wait for it
+        self.error: Exception = RuntimeError("model unavailable")
+        self.invalid = lambda data: False
+        self.gate: asyncio.Event | None = None
         self.cancelled = 0
 
     async def __call__(self, ctx: StageContext, payload: str) -> write.WrittenSection:
@@ -127,7 +119,6 @@ def make_ctx(tmp_path: Path) -> tuple[StageContext, list]:
 
 
 def audio_only() -> LiveTimeline:
-    """A timeline whose horizon is the transcript's (no screen or select lane)."""
     tl = LiveTimeline()
     tl.absent.update({Lane.SCREEN, Lane.SELECT})
     return tl
@@ -160,9 +151,6 @@ async def publish_speech(tl: LiveTimeline, upto: int, start: int = 0) -> None:
     await tl.publish_transcript(segments, transcribed_to=10 * upto, language="en")
 
 
-# --- Planning: boundaries and keys don't depend on later evidence -----------------------------
-
-
 def random_session(rng: random.Random, n: int) -> tuple[Transcript, Selection]:
     segments = [
         TranscriptSegment(start=10 * i, end=10 * i + 9, text="w " * rng.randint(20, 400))
@@ -190,7 +178,6 @@ def test_part_boundaries_before_a_point_never_change_when_evidence_is_appended(s
     for before in sorted(rng.uniform(0, 1200) for _ in range(30)):
         closed, last = write.split_parts(transcript, selection, BUDGET, before)
         assert [p.records for p in closed] == [p.records for p in full[: len(closed)]]
-        # Nothing at or past `before` is packed, and nothing before it is lost.
         packed = [r for p in [*closed, *([last] if last else [])] for r in p.records]
         assert all(r["start"] < before for r in packed)
         everything = [r for p in full for r in p.records]
@@ -200,9 +187,6 @@ def test_part_boundaries_before_a_point_never_change_when_evidence_is_appended(s
 def live_prefix(
     rng: random.Random, transcript: Transcript, selection: Selection, cut: float
 ) -> tuple[Transcript, Selection, float]:
-    """What the live timeline holds at ``cut`` s: the speech transcribed so far, and the moments
-    the select lane has read, in order (it reads a moment once its speech, plus a pad, is in, and
-    may still be a few moments behind). Returns them with the horizon."""
     pad = 5.0
     segments = [s for s in transcript.segments if s.start < cut]
     gated = 0
@@ -219,8 +203,6 @@ def live_prefix(
 
 @pytest.mark.parametrize("seed", range(8))
 def test_parts_frozen_on_the_live_timeline_are_the_parts_of_the_whole_session(seed):
-    # Unlike the test above, the selection here only holds the moments read by each point, as
-    # on the live timeline, so moment boundaries after the horizon are not known yet.
     rng = random.Random(seed)
     transcript, selection = random_session(rng, 120)
     full = write.plan_parts(transcript, selection, BUDGET)
@@ -238,7 +220,7 @@ def test_selection_that_reaches_back_before_selected_to_is_rejected():
     async def scenario() -> None:
         tl = LiveTimeline()
         await tl.publish_selection([content(0, 0, 50)], [], [], selected_to=50)
-        await tl.publish_selection([content(1, 50, 80)], [], [], selected_to=80)  # in order
+        await tl.publish_selection([content(1, 50, 80)], [], [], selected_to=80)
         with pytest.raises(ValueError, match="time order"):
             await tl.publish_selection([content(2, 70, 90)], [], [], selected_to=90)
         assert [c.moment_id for c in tl.contents] == ["m000", "m001"] and tl.selected_to == 80
@@ -247,16 +229,13 @@ def test_selection_that_reaches_back_before_selected_to_is_rejected():
 
 
 def test_parts_close_at_a_moment_boundary_and_stay_within_budget():
-    # Two moments, each with its own speech; the budget fits about one and a half of them.
     segments = [seg(i, 250) for i in range(10)]
     contents = [content(0, 0, 49), content(1, 49, 100)]
     transcript, selection = Transcript(segments=segments), Selection(visuals=[], contents=contents)
     parts = write.plan_parts(transcript, selection, BUDGET)
     assert all(len(write._json(p.records)) <= BUDGET for p in parts)
-    # The first part ends with the first moment's evidence, not in the middle of the second.
     assert max(r["start"] for r in parts[0].records) < 49
     assert min(r["start"] for r in parts[1].records) == 49
-    # Greedy packing would have filled the first part past the boundary.
     assert len(write._json([*parts[0].records, parts[1].records[0]])) <= BUDGET
 
 
@@ -289,11 +268,7 @@ def test_the_section_key_ignores_the_number_of_parts(tmp_path):
     assert write.section_key(ctx, payload) != write.section_key(ctx, last)
 
 
-# --- The lane ----------------------------------------------------------------------------------
-
-
 def live_counts(events: list) -> list[int]:
-    """The ``completed_parts`` of each live NOTES_UPDATED, in order."""
     out = []
     for kind, data in events:
         if kind == EventType.NOTES_UPDATED:
@@ -307,8 +282,6 @@ def live_counts(events: list) -> list[int]:
 
 
 async def stop_and_write(ctx: StageContext, tl: LiveTimeline, task: asyncio.Task) -> list[dict]:
-    """Stop, promote the timeline's outputs and run the write stage over the whole session, as
-    the run at stop does. Returns the payloads of the calls the write stage made."""
     await stop(tl, task)
     write_model(ctx.paths.transcript, tl.transcript())
     write_model(ctx.paths.selection, tl.selection())
@@ -322,22 +295,20 @@ async def test_parts_frozen_live_are_reused_by_the_write_stage_at_stop(tmp_path,
     ctx, events = make_ctx(tmp_path)
     tl = audio_only()
     task = start_lane(ctx, tl, notes)
-    for upto in range(5, 45, 5):  # the transcript arrives in windows
+    for upto in range(5, 45, 5):
         await publish_speech(tl, upto, upto - 5)
         await idle(0.05)
     closed = draft.plan(tl.transcript(), tl.selection(), BUDGET, tl.horizon)
     assert len(closed) >= 4
     await eventually(lambda: notes.calls == len(closed))
     await idle(0.1)
-    assert [p["records"] for p in notes.payloads] == [p.records for p in closed]  # each once
+    assert [p["records"] for p in notes.payloads] == [p.records for p in closed]
     assert all(p["later_parts"] for p in notes.payloads)
-    # Only the cache is written: no draft is shown while recording.
     assert not ctx.paths.notes_draft.exists()
     assert len(list(ctx.paths.notes_sections_dir.glob("*.json"))) == len(closed)
     assert live_counts(events) == list(range(1, len(closed) + 1))
 
     stop_payloads = await stop_and_write(ctx, tl, task)
-    # Only the part still open at stop is new work.
     assert len(stop_payloads) == 1 and stop_payloads[0]["later_parts"] is False
     notes_draft = read_model(ctx.paths.notes_draft, NotesDraft)
     assert notes_draft.markdown.count("## From") == len(closed) + 1
@@ -348,7 +319,6 @@ async def test_only_parts_closed_before_the_horizon_are_written(tmp_path, notes)
     tl = LiveTimeline()
     tl.absent.add(Lane.SCREEN)
     task = start_lane(ctx, tl, notes)
-    # Speech is transcribed far ahead; the screen has only been read to 95 s.
     await publish_speech(tl, 30)
     contents = [content(0, 0, 50), content(1, 50, 95)]
     await tl.publish_selection(contents, [visual(1, 51)], [], selected_to=95)
@@ -358,7 +328,6 @@ async def test_only_parts_closed_before_the_horizon_are_written(tmp_path, notes)
     assert frozen and len(everything) > len(frozen)
     await eventually(lambda: notes.calls == len(frozen))
     await idle(0.2)
-    # Exactly the parts that closed before the horizon; nothing past it reached the model.
     assert [p["records"] for p in notes.payloads] == [p.records for p in frozen]
     assert all(
         r["start"] < horizon
@@ -372,24 +341,20 @@ async def test_only_parts_closed_before_the_horizon_are_written(tmp_path, notes)
 
 
 async def test_a_long_open_moment_makes_no_calls_until_it_closes(tmp_path, notes):
-    # A slide stays up for 20 minutes: the screen moment is open, so selected_to stays at 0 and
-    # the horizon never moves. Nothing is final, so nothing is written.
     ctx, events = make_ctx(tmp_path)
     tl = LiveTimeline()
     task = start_lane(ctx, tl, notes)
-    for upto in range(10, 130, 10):  # 20 minutes of speech, in windows
+    for upto in range(10, 130, 10):
         await publish_speech(tl, upto, upto - 10)
         await idle(0.02)
     await idle(0.1)
     assert tl.horizon == 0 and notes.calls == 0 and events == []
 
-    # The moment closes with nothing to keep: the horizon jumps and the closed parts are written.
     await tl.publish_selection([], [], ["m001"], selected_to=1200)
     closed = draft.plan(tl.transcript(), tl.selection(), BUDGET, tl.horizon)
     assert len(closed) > 4
     await eventually(lambda: notes.calls == len(closed))
     assert live_counts(events)[-1] == len(closed)
-    # At stop the write stage writes only the last part.
     stop_payloads = await stop_and_write(ctx, tl, task)
     assert [p["later_parts"] for p in stop_payloads] == [False]
 
@@ -407,7 +372,7 @@ async def test_an_upstream_failure_stops_model_calls(tmp_path, notes):
     await tl.publish_transcript([seg(i) for i in range(12, 40)], transcribed_to=400)
     await idle(0.3)
     assert notes.calls == calls
-    await stop(tl, task)  # it still returns cleanly at stop
+    await stop(tl, task)
 
 
 async def test_stop_lets_a_call_in_flight_finish(tmp_path, notes):
@@ -415,14 +380,14 @@ async def test_stop_lets_a_call_in_flight_finish(tmp_path, notes):
     tl = audio_only()
     notes.gate = asyncio.Event()
     task = start_lane(ctx, tl, notes)
-    await publish_speech(tl, 20)  # several parts close at once
+    await publish_speech(tl, 20)
     await eventually(lambda: notes.calls == 1)
     await tl.request_end()
     await idle(0.05)
-    assert not task.done()  # the write stage would make this very call
+    assert not task.done()
     notes.gate.set()
     await asyncio.wait_for(task, 2)
-    assert notes.calls == 1 and notes.cancelled == 0  # and no new call is started after stop
+    assert notes.calls == 1 and notes.cancelled == 0
     assert len(list(ctx.paths.notes_sections_dir.glob("*.json"))) == 1
 
 
@@ -437,17 +402,16 @@ async def test_a_failed_call_is_retried_after_the_retry_delay(tmp_path, notes, m
     assert len(closed) >= 2
     await eventually(lambda: notes.calls == 1)
     await idle(0.1)
-    # The first part failed; the later parts carry its title, so they wait for its retry.
     assert notes.calls == 1 and events == []
     await eventually(lambda: notes.calls == len(closed) + 1, timeout=2)
-    assert notes.payloads[1] == notes.payloads[0]  # the same payload, tried again
+    assert notes.payloads[1] == notes.payloads[0]
     assert live_counts(events)[-1] == len(closed)
-    assert not task.done()  # the failure didn't end the lane
+    assert not task.done()
     await stop(tl, task)
 
 
 async def test_a_temporary_error_is_retried_within_the_call(tmp_path, notes, monkeypatch):
-    monkeypatch.setattr(draft, "RETRY_DELAY_S", 60.0)  # the lane's own retry never comes
+    monkeypatch.setattr(draft, "RETRY_DELAY_S", 60.0)
     ctx, events = make_ctx(tmp_path)
     tl = audio_only()
     notes.fail_next, notes.error = 2, connection_error()
@@ -461,7 +425,6 @@ async def test_a_temporary_error_is_retried_within_the_call(tmp_path, notes, mon
 
 
 async def test_stop_ends_a_retry_wait_and_starts_no_new_call(tmp_path, notes):
-    """Stop never waits for a retry of a temporary error: the processor ends the wait."""
     ctx, _ = make_ctx(tmp_path)
     ctx.settings.api_retry_delays_s = [30.0]
     notes.fail_next, notes.error = 1000, connection_error()
@@ -471,16 +434,15 @@ async def test_stop_ends_a_retry_wait_and_starts_no_new_call(tmp_path, notes):
     await publish_speech(processor.timeline, 12)
     await eventually(lambda: notes.calls >= 1)
     await idle(0.05)
-    assert notes.calls == 1  # waiting 30 s to retry
+    assert notes.calls == 1
     started = time.monotonic()
     timeline = await processor.finish()
     assert time.monotonic() - started < 2
-    assert notes.calls == 1  # no retry after stop, and no new call
+    assert notes.calls == 1
     assert Lane.DRAFT in timeline.finished
 
 
 async def test_an_upstream_failure_ends_a_retry_wait(tmp_path, notes):
-    """Nothing the lane writes can be used once an upstream lane failed: no more retries."""
     ctx, _ = make_ctx(tmp_path)
     ctx.settings.api_retry_delays_s = [30.0]
     notes.fail_next, notes.error = 1000, connection_error()
@@ -493,7 +455,6 @@ async def test_an_upstream_failure_ends_a_retry_wait(tmp_path, notes):
     started = time.monotonic()
     await processor.timeline.fail_lane(Lane.AUDIO, "decoder crashed")
     lane = processor.lanes[Lane.DRAFT]
-    # The wait ended (the call is given up) well before the 30 s delay, with no new attempt.
     await eventually(lambda: bool(lane._failures), timeout=1)
     assert time.monotonic() - started < 1
     assert notes.calls == 1
@@ -509,7 +470,6 @@ async def test_a_blocking_error_gives_the_payload_up_at_once(tmp_path, notes, mo
     await publish_speech(tl, 12)
     closed = draft.plan(tl.transcript(), tl.selection(), BUDGET, tl.horizon)
     assert len(closed) >= 2
-    # The first part is given up after one call; the later ones are written as continuations.
     await eventually(lambda: notes.calls == len(closed))
     await idle(0.3)
     assert notes.calls == len(closed)
@@ -529,14 +489,12 @@ async def test_a_model_that_always_fails_validation_is_called_at_most_twice_per_
     closed = draft.plan(tl.transcript(), tl.selection(), BUDGET, tl.horizon)
     assert len(closed) >= 2
     await eventually(lambda: notes.calls == draft.MAX_ATTEMPTS * len(closed))
-    await idle(1.0)  # about 50 retry delays
-    # Every closed part was tried twice, then given up.
+    await idle(1.0)
     assert notes.calls == draft.MAX_ATTEMPTS * len(closed)
     payloads = [json.dumps(p, sort_keys=True) for p in notes.payloads]
     assert len(set(payloads)) == len(closed)
     assert events == [] and not list(ctx.paths.notes_sections_dir.glob("*.json"))
 
-    # The lane keeps working: a part that closes later is a new payload, and the model is back.
     notes.invalid = lambda data: False
     await publish_speech(tl, 40, 20)
     more = draft.plan(tl.transcript(), tl.selection(), BUDGET, tl.horizon)
@@ -561,7 +519,7 @@ async def test_a_part_that_cannot_freeze_blocks_nothing_and_the_write_stage_retr
     speech = Transcript(language="en", segments=[seg(i) for i in range(30)])
     closed, last = write.split_parts(speech, Selection(visuals=[]), BUDGET, 300)
     assert len(closed) >= 3 and last is not None
-    bad = closed[1].records[0]["start"]  # the model never gets part 1 right
+    bad = closed[1].records[0]["start"]
     notes.invalid = lambda data: data["records"][0]["start"] == bad
     tl = audio_only()
     task = start_lane(ctx, tl, notes)
@@ -570,11 +528,9 @@ async def test_a_part_that_cannot_freeze_blocks_nothing_and_the_write_stage_retr
     await idle(0.3)
     tries = [p for p in notes.payloads if p["records"][0]["start"] == bad]
     assert len(tries) == draft.MAX_ATTEMPTS
-    assert notes.calls == len(closed) + 1  # every other part once
+    assert notes.calls == len(closed) + 1
     assert live_counts(events)[-1] == len(closed) - 1
 
-    # At stop the write stage writes the part that failed live and the open last part, and
-    # reuses everything else.
     notes.invalid = lambda data: False
     stop_payloads = await stop_and_write(ctx, tl, task)
     assert [p["records"][0]["start"] for p in stop_payloads] == [bad, last.records[0]["start"]]
@@ -586,7 +542,7 @@ async def test_no_call_starts_once_stop_is_requested_while_planning(tmp_path, no
     real_plan = draft.plan
 
     def plan_then_stop(*args):
-        tl.ending = True  # stop arrives while the lane plans, before it writes the closed parts
+        tl.ending = True
         return real_plan(*args)
 
     monkeypatch.setattr(draft, "plan", plan_then_stop)
@@ -604,7 +560,6 @@ async def test_a_restarted_lane_reuses_its_frozen_parts(tmp_path, notes):
     closed = draft.plan(tl.transcript(), tl.selection(), BUDGET, tl.horizon)
     await eventually(lambda: notes.calls == len(closed))
     await stop(tl, task)
-    # The backend restarts: a fresh lane over the same evidence finds every section cached.
     ctx2, events = make_ctx(tmp_path)
     tl2 = audio_only()
     await tl2.publish_transcript(tl.segments, transcribed_to=tl.transcribed_to, language="en")
@@ -620,18 +575,16 @@ async def test_parts_rewritten_once_the_language_is_known_never_lower_the_count(
     ctx, events = make_ctx(tmp_path)
     tl = audio_only()
     task = start_lane(ctx, tl, notes)
-    # Parts close before the language is known (silent first windows, say)...
     await tl.publish_transcript([seg(i) for i in range(20)], transcribed_to=200)
     closed = draft.plan(tl.transcript(), tl.selection(), BUDGET, tl.horizon)
     assert len(closed) >= 2
     await eventually(lambda: notes.calls == len(closed))
-    # ...then it is: every payload changes, so every part is written again for stop to reuse.
     await tl.publish_transcript([seg(20)], transcribed_to=210, language="en")
     await eventually(lambda: notes.calls >= 2 * len(closed))
     await idle(0.1)
     assert {p["language"] for p in notes.payloads[len(closed) :]} == {"en"}
     counts = live_counts(events)
-    assert counts == sorted(set(counts))  # it only grows
+    assert counts == sorted(set(counts))
     await stop(tl, task)
 
 
@@ -639,14 +592,13 @@ async def test_no_evidence_means_no_calls_and_a_prompt_stop(tmp_path, notes):
     ctx, events = make_ctx(tmp_path)
     tl = audio_only()
     task = start_lane(ctx, tl, notes)
-    await tl.publish_transcript([], transcribed_to=60)  # silence
+    await tl.publish_transcript([], transcribed_to=60)
     await idle(0.1)
     await stop(tl, task)
     assert notes.calls == 0 and events == []
 
 
 async def test_a_lane_without_upstream_lanes_writes_every_closed_part(tmp_path, notes):
-    # Absent audio and select lanes publish nothing more: their evidence is final (inf horizon).
     ctx, _ = make_ctx(tmp_path)
     tl = LiveTimeline()
     tl.segments.extend(seg(i) for i in range(20))
@@ -658,10 +610,7 @@ async def test_a_lane_without_upstream_lanes_writes_every_closed_part(tmp_path, 
     await eventually(lambda: notes.calls == len(closed))
     await idle(0.1)
     await stop(tl, task)
-    assert notes.calls == len(closed)  # the open last part is left to the write stage
-
-
-# --- The runner --------------------------------------------------------------------------------
+    assert notes.calls == len(closed)
 
 
 def test_a_run_that_selects_again_never_assembles_a_draft_of_the_old_selection(
@@ -684,7 +633,6 @@ def test_a_run_that_selects_again_never_assembles_a_draft_of_the_old_selection(
         drafts_seen_by_select.append(ctx.paths.notes_draft.exists())
         selecting.set()
         await asyncio.to_thread(release.wait, 5)
-        # Selected again: the figure that was v1 now has another id.
         write_model(ctx.paths.selection, Selection(visuals=[visual(2, 3)]))
 
     async def write_stage(ctx: StageContext) -> None:
@@ -702,7 +650,6 @@ def test_a_run_that_selects_again_never_assembles_a_draft_of_the_old_selection(
             assert time.monotonic() < deadline, "the run never finished"
             time.sleep(0.02)
 
-    # A full run selects again: the old draft is gone before select starts.
     assert client.post(f"/api/sessions/{session.id}/run").status_code == 200
     try:
         assert selecting.wait(5)
@@ -711,7 +658,6 @@ def test_a_run_that_selects_again_never_assembles_a_draft_of_the_old_selection(
     finish()
     assert drafts_seen_by_select == [False] and drafts_seen_by_write == [False]
 
-    # A run that starts at write (as one promoted from live does) keeps it: write replaces it.
     write_model(paths.notes_draft, old)
     assert client.post(f"/api/sessions/{session.id}/run?from_stage=write").status_code == 200
     finish()

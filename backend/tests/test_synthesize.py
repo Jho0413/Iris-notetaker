@@ -1,5 +1,3 @@
-"""The synthesis pass: local sweep, validated edit plan, rewrites of touched sections, safety."""
-
 import json
 import shutil
 from pathlib import Path
@@ -39,8 +37,6 @@ from iris.pipeline.stages import assemble, synthesize
 from iris.store.db import SessionStore
 from iris.store.layout import SessionPaths, read_model, session_paths, write_model
 from tests.api_errors import connection_error, status_error
-
-# --- Synthetic frames and crops -------------------------------------------------------------------
 
 
 def slide(title: str, body: list[str], accent: tuple[int, int, int]) -> np.ndarray:
@@ -91,7 +87,6 @@ def save(root: Path, rel: str, image: np.ndarray, quality: int = 90) -> str:
 
 SLIDE_A = slide("Revenue", ["Q1 grew 12%", "Q2 grew 9%"], (160, 60, 20))
 SLIDE_B = slide("Hiring plan", ["Two engineers", "One designer"], (30, 120, 40))
-# Same template and title as A, different body text: a different slide, not a repeat.
 SLIDE_C = slide("Revenue", ["Costs fell 4%", "Margin is 31%", "Cash: 2.1M"], (160, 60, 20))
 
 
@@ -119,22 +114,21 @@ def visual(vid: str, mid: str, t: float, source: str) -> Visual:
 
 
 def setup_session(ctx: StageContext, markdown: str, parts: int | None = 2) -> NotesDraft:
-    """An upload-style session: moments with frames, figures with crops, a written draft."""
     root = ctx.paths.root
     shown = [("m1", 0, SLIDE_A), ("m2", 30, SLIDE_B), ("m3", 60, SLIDE_A), ("m4", 90, SLIDE_C)]
     moments = []
     for mid, t, image in shown:
         noisy = image.copy()
-        if mid == "m3":  # the same slide again: a cursor and different compression
+        if mid == "m3":
             cv2.circle(noisy, (500, 300), 4, (0, 0, 0), -1)
         rel = save(root, f"frames/{t * 1000:09d}.jpg", noisy, 70 if mid == "m3" else 90)
         moments.append(Moment(id=mid, start=t, end=t + 30, frame=FrameRef(t=t, path=rel)))
     write_model(ctx.paths.moments, Moments(moments=moments))
     v1 = save(root, "visuals/v1.source.jpg", chart("bars"))
     v2 = save(root, "visuals/v2.source.jpg", chart("curve"))
-    v3 = save(root, "visuals/v3.source.jpg", chart("bars", (240, 160)), 75)  # v1, cropped smaller
+    v3 = save(root, "visuals/v3.source.jpg", chart("bars", (240, 160)), 75)
     visuals = [visual("v1", "m1", 1, v1), visual("v2", "m2", 31, v2), visual("v3", "m3", 61, v3)]
-    for v in visuals:  # the "rendered" visual is the crop itself (a screenshot)
+    for v in visuals:
         (root / v.path).write_bytes((root / v.source_path).read_bytes())
     contents = [
         MomentContent(
@@ -195,8 +189,6 @@ Revenue grew 12% in Q1, as shown before. Decision: we keep the forecast.
 
 
 class FakeModel:
-    """Fake notes client: plans from ``plan``; rewrites with ``rewrite(payload) -> Rewrite``."""
-
     def __init__(self, plan: list[dict] | None = None, rewrite=None, fail: Exception | None = None):
         self.plan = plan or []
         self.rewrite = rewrite
@@ -269,7 +261,6 @@ def use(monkeypatch, fake: FakeModel) -> FakeModel:
 
 
 async def finish(ctx: StageContext) -> Notes:
-    """Assemble, then the synthesize stage as the pipeline runs it (which assembles again)."""
     await assemble.run(ctx)
     await STAGES[Stage.SYNTHESIZE](ctx)
     return read_model(ctx.paths.notes, Notes)
@@ -277,9 +268,6 @@ async def finish(ctx: StageContext) -> Notes:
 
 def report(ctx: StageContext) -> SynthesisReport:
     return read_model(ctx.paths.synthesis_report, SynthesisReport)
-
-
-# --- Local sweep ----------------------------------------------------------------------------------
 
 
 def test_sweep_flags_a_repeated_slide_and_a_duplicate_figure_only(ctx: StageContext):
@@ -305,7 +293,6 @@ def test_sweep_skips_unreadable_images_and_paths_outside_the_session(ctx: StageC
 
 
 def whiteboard(lines: int) -> np.ndarray:
-    """A crop of handwritten-style working, one more line per build step."""
     img = np.full((600, 900, 3), 245, np.uint8)
     for i in range(lines):
         text = ["x^2 + 6x + 5 = 0", "(x + 1)(x + 5) = 0", "x = -1", "x = -5", "check: 1 - 6 + 5"][i]
@@ -331,10 +318,8 @@ def test_look_alike_groups_are_not_transitive():
     def shifted(level: float) -> synthesize.Fingerprint:
         return synthesize.Fingerprint(base.phash, base.thumb + level, base.aspect)
 
-    # B is close to A and to C; A and C are too far apart: B joins A, C stays alone.
     items = [("a", base, None), ("b", shifted(4), None), ("c", shifted(8), None)]
     assert synthesize.group_same(items) == [["a", "b"]]
-    # Items from one source (figures of one moment) are never grouped.
     assert synthesize.group_same([("a", base, "m1"), ("b", base, "m1")]) == []
     assert synthesize.group_same([("a", base, "m1"), ("b", base, "m2")]) == [["a", "b"]]
 
@@ -352,9 +337,6 @@ def test_kept_moments_ignore_rejected_ones():
     assert [m.id for m in synthesize.kept_moments(moments, rejected)] == ["a", "c"]
 
 
-# --- Sections and plan validation -----------------------------------------------------------------
-
-
 def test_sections_split_at_top_level_headings_only():
     md = "Intro\n\n## One\n\ntext\n\n```\n## not a heading\n```\n\n### Sub\n\nmore\n\n# Two\n\nend"
     sections = notes_format.split_sections(md)
@@ -364,7 +346,6 @@ def test_sections_split_at_top_level_headings_only():
         "# Two\n\nend",
     ]
     assert notes_format.split_sections("") == []
-    # A heading inside a box or step belongs to it and never splits it.
     boxed = "## One\n\n:::box[Key idea]{color=blue}\n## Inside\ntext\n:::\n\n## Two\n\nend"
     assert notes_format.split_sections(boxed) == [
         "## One\n\n:::box[Key idea]{color=blue}\n## Inside\ntext\n:::",
@@ -379,15 +360,15 @@ def test_plan_validation_drops_unknown_ids_and_bad_edits():
     plan = synthesize.EditPlan.model_validate(
         {
             "edits": [
-                edit("merge", [1, 2, 99], context=[-1, 3]),  # unknown sections dropped
-                edit("merge", [2, 42]),  # one real section left: not a merge
-                edit("correct", [7]),  # no real section
-                edit("drop_repeat", [3], instruction="   "),  # no instruction
-                edit("correct", [0], keep="v1", drops=["v2"]),  # only dedupe drops markers
-                edit("dedupe_figure", [0], keep="nope", drops=["v3"]),  # unknown keep
+                edit("merge", [1, 2, 99], context=[-1, 3]),
+                edit("merge", [2, 42]),
+                edit("correct", [7]),
+                edit("drop_repeat", [3], instruction="   "),
+                edit("correct", [0], keep="v1", drops=["v2"]),
+                edit("dedupe_figure", [0], keep="nope", drops=["v3"]),
                 edit("dedupe_figure", [0], keep="v1", drops=["v3", "ghost", "v1"]),
-                edit("dedupe_figure", [1], keep="v3", drops=["v2"]),  # v3 already dropped
-                edit("dedupe_figure", [1], keep="v2", drops=["v1"]),  # not look-alikes
+                edit("dedupe_figure", [1], keep="v3", drops=["v2"]),
+                edit("dedupe_figure", [1], keep="v2", drops=["v1"]),
             ]
         }
     )
@@ -396,14 +377,10 @@ def test_plan_validation_drops_unknown_ids_and_bad_edits():
     assert [e.kind for e in edits] == ["merge", "correct", "dedupe_figure"]
     assert edits[0].sections == [1, 2] and edits[0].context_sections == [3]
     assert edits[1].keep_visual_id is None and edits[1].drop_visual_ids == []
-    # The dedupe rewrites the section holding v3 (not the model's guess) and reads v1's.
     assert edits[2].sections == [3] and edits[2].context_sections == [0]
     assert edits[2].drop_visual_ids == ["v3"]
-    # Markers in the notes that aren't selected visuals can't be kept or dropped.
     assert synthesize.validate_plan(plan, sections, {"v2"}, repeats)[-1].kind == "correct"
-    # Without the sweep grouping them, no figure is dropped.
     assert [e.kind for e in synthesize.validate_plan(plan, sections, known, [])][-1] == "correct"
-    # One-part notes accept only duplicate figures.
     one = synthesize.validate_plan(plan, sections, known, repeats, one_part=True)
     assert [e.kind for e in one] == ["dedupe_figure"]
 
@@ -422,10 +399,7 @@ def test_edits_touching_shared_sections_are_rewritten_together():
         )
 
     groups = synthesize.group_edits([e(0, 1), e(3), e(1, 2), e(3, 4)], sections)
-    assert [sorted(g.indexes) for g in groups] == [[0, 1, 2], [3]]  # last edit is too long
-
-
-# --- The pass -------------------------------------------------------------------------------------
+    assert [sorted(g.indexes) for g in groups] == [[0, 1, 2], [3]]
 
 
 async def test_only_touched_sections_are_rewritten_and_markers_resolve(ctx, monkeypatch):
@@ -469,7 +443,7 @@ async def test_a_duplicate_figure_is_dropped_locally_without_a_rewrite(ctx, monk
     hint = fake.calls[0][1]["repeats"][1]["figures"][1]
     assert hint["visual_id"] == "v3" and hint["moment_id"] == "m3" and hint["section"] == 3
     assert "#v3}" not in notes.markdown and "::figure{#v1}" in notes.markdown
-    assert [v.id for v in notes.visuals] == ["v1", "v2", "v3"]  # still listed, just not placed
+    assert [v.id for v in notes.visuals] == ["v1", "v2", "v3"]
     result = report(ctx)
     assert result.edits[0].drop_visual_ids == ["v3"] and result.rewritten_sections == [3]
     synthesized = read_model(ctx.paths.notes_synthesis, SynthesizedDraft).draft.markdown
@@ -488,9 +462,8 @@ async def test_a_wholly_repeated_section_can_be_dropped(ctx, monkeypatch):
     notes = await finish(ctx)
     assert "Revenue recap" not in notes.markdown and "\\frac{a}{b}" in notes.markdown
     assert report(ctx).status == "applied"
-    # Without a section that keeps the point, emptying is still refused.
     fake.plan = [edit("drop_repeat", [4])]
-    shutil.rmtree(ctx.paths.synthesis_cache_dir)  # same inputs would reuse the cached plan
+    shutil.rmtree(ctx.paths.synthesis_cache_dir)
     await finish(ctx)
     assert "Revenue recap" in read_model(ctx.paths.notes, Notes).markdown
 
@@ -555,7 +528,6 @@ async def test_an_invalid_rewrite_leaves_the_assembled_notes(ctx, monkeypatch, d
     assert not ctx.paths.notes_synthesis.exists()
     result = report(ctx)
     assert result.status == "unchanged" and result.failed_sections
-    # Nothing invalid is cached: a re-run asks again.
     await STAGES[Stage.SYNTHESIZE](ctx)
     assert [name for name, _ in fake.calls].count("Rewrite") == 2
 
@@ -612,7 +584,6 @@ async def test_a_failing_synthesis_keeps_the_assembled_notes(ctx, monkeypatch, f
     await assemble.run(ctx)
     assembled = read_model(ctx.paths.notes, Notes)
     if fail == "bad_draft":
-        # A stale synthesized file from an earlier run must not survive a failed pass.
         write_model(
             ctx.paths.notes_synthesis,
             SynthesizedDraft(
@@ -622,7 +593,7 @@ async def test_a_failing_synthesis_keeps_the_assembled_notes(ctx, monkeypatch, f
             ),
         )
         ctx.paths.selection.write_text("{broken")
-        await synthesize.run(ctx)  # the stage's re-assembly would fail on the broken selection
+        await synthesize.run(ctx)
         assert not ctx.paths.notes_synthesis.exists()
     else:
         await STAGES[Stage.SYNTHESIZE](ctx)
@@ -652,8 +623,6 @@ async def test_a_failing_synthesis_still_finishes_the_session(tmp_path, monkeypa
 
 
 class Flaky(FakeModel):
-    """Fails the first ``failures`` calls with ``error``, then answers."""
-
     def __init__(self, *args, error: Exception, failures: int, **kwargs):
         super().__init__(*args, **kwargs)
         self.error, self.failures = error, failures
@@ -698,7 +667,6 @@ async def test_a_rerun_hits_the_cache_and_a_damaged_entry_is_regenerated(ctx, mo
         entry.write_text("{damaged")
     assert await finish(ctx) == first
     assert len(fake.calls) == 4
-    # A different model is a different cache key.
     ctx.settings.synthesis_model = "other-model"
     await finish(ctx)
     assert len(fake.calls) == 6
@@ -723,16 +691,15 @@ async def test_one_part_notes_with_look_alike_figures_cost_one_call(ctx, monkeyp
     plan = [edit("merge", [0, 1]), edit("dedupe_figure", [1], keep="v1", drops=["v3"])]
     fake = use(monkeypatch, FakeModel(plan))
     notes = await finish(ctx)
-    assert [name for name, _ in fake.calls] == ["EditPlan"]  # the merge is ignored: one part
+    assert [name for name, _ in fake.calls] == ["EditPlan"]
     assert fake.calls[0][1]["one_part"] is True
     assert "#v3}" not in notes.markdown
     assert "::figure{#v1}" in notes.markdown and "::figure{#v2}" in notes.markdown
     assert "## More" in notes.markdown and "収益" in notes.markdown
     result = report(ctx)
     assert result.status == "applied" and [e.kind for e in result.edits] == ["dedupe_figure"]
-    # The model may also find the look-alikes different: then nothing changes.
     fake.plan = []
-    shutil.rmtree(ctx.paths.synthesis_cache_dir)  # same inputs would reuse the cached plan
+    shutil.rmtree(ctx.paths.synthesis_cache_dir)
     assert "::figure{#v3}" in (await finish(ctx)).markdown
 
 
@@ -747,7 +714,6 @@ async def test_one_part_notes_with_headings_and_no_look_alikes_make_no_call(ctx,
 
 
 async def test_one_section_without_duplicates_is_skipped(ctx, monkeypatch):
-    # A draft from an older version doesn't record its parts: one section counts as one part.
     setup_session(ctx, "## Only\n\nText.\n\n[visual:v1]\n\n[visual:v2]", parts=None)
     (ctx.paths.root / "visuals/v3.source.jpg").unlink()
     (ctx.paths.root / "visuals/v3.jpg").unlink()
@@ -774,12 +740,10 @@ async def test_assemble_ignores_a_stale_or_damaged_synthesis(ctx):
     write_model(ctx.paths.notes_synthesis, current)
     await assemble.run(ctx)
     assert read_model(ctx.paths.notes, Notes).markdown == "P"
-    # Written from another draft (e.g. before a re-run from write): ignored.
     other = draft.model_copy(update={"markdown": draft.markdown + "\n\nNew."})
     write_model(ctx.paths.notes_synthesis, current.model_copy(update={"based_on": other}))
     await assemble.run(ctx)
     assert "Revenue grew" in read_model(ctx.paths.notes, Notes).markdown
-    # Same draft but the selection changed: ignored.
     write_model(ctx.paths.notes_synthesis, current.model_copy(update={"visual_ids": ["v1"]}))
     await assemble.run(ctx)
     assert "Revenue grew" in read_model(ctx.paths.notes, Notes).markdown
@@ -858,7 +822,7 @@ def test_a_repeat_in_a_group_does_not_excuse_deleting_other_sections():
         "## Recap",
     ]
     group = _group(edit("merge", [1, 2]), edit("drop_repeat", [2], context=[0]))
-    assert group.repeats == set()  # section 2 is also a merge target
+    assert group.repeats == set()
     emptied = synthesize.Rewrite(
         sections=[
             synthesize.RewrittenSection(index=1, markdown=""),
@@ -901,11 +865,11 @@ def test_two_repeats_cannot_each_rely_on_the_other():
         {
             "edits": [
                 edit("drop_repeat", [3], context=[0]),
-                edit("drop_repeat", [0], context=[3]),  # relies on the section just dropped
-                edit("correct", [0]),  # would rewrite the section the first repeat keeps
+                edit("drop_repeat", [0], context=[3]),
+                edit("correct", [0]),
                 edit("merge", [1, 2]),
-                edit("drop_repeat", [3], context=[1]),  # its context is rewritten by the merge
-                edit("dedupe_figure", [0], keep="v1", drops=["v3"]),  # markers only: allowed
+                edit("drop_repeat", [3], context=[1]),
+                edit("dedupe_figure", [0], keep="v1", drops=["v3"]),
             ]
         }
     )

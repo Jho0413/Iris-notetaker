@@ -1,8 +1,3 @@
-"""Live processing foundation: the timeline, the processor's lane lifecycle and its API wiring.
-
-Lanes are fakes here; each lane's own behaviour is tested with that lane.
-"""
-
 import asyncio
 import math
 from datetime import UTC, datetime
@@ -35,9 +30,6 @@ def moment(i: int, start: float, end: float) -> Moment:
 async def settle() -> None:
     for _ in range(5):
         await asyncio.sleep(0)
-
-
-# --- Timeline ---------------------------------------------------------------------------------
 
 
 async def test_waiters_wake_when_a_watermark_passes():
@@ -146,12 +138,7 @@ async def test_a_failed_lane_stays_failed():
     assert Lane.AUDIO in tl.failed and Lane.AUDIO not in tl.finished
 
 
-# --- Processor --------------------------------------------------------------------------------
-
-
 class FakeLane(LiveLane):
-    """Counts wakes; flushes (records it) when stop is requested; can fail on demand."""
-
     def __init__(self, ctx, timeline, lane: Lane, fail: bool = False):
         super().__init__(ctx, timeline)
         self.lane = lane  # type: ignore[misc]
@@ -197,7 +184,7 @@ async def test_input_wakes_only_its_lane_and_finish_flushes_every_lane(tmp_path:
     factory, lanes = fake_lanes()
     processor = LiveProcessor(ctx(tmp_path), factory)
     processor.start()
-    processor.start()  # idempotent
+    processor.start()
     processor.notify_audio()
     await settle()
     processor.notify_screen()
@@ -232,11 +219,11 @@ async def test_missing_lanes_are_done_but_never_complete(tmp_path: Path):
     factory, _ = fake_lanes(only={Lane.SELECT})
     processor = LiveProcessor(ctx(tmp_path), factory)
     processor.start()
-    processor.notify_screen()  # no screen lane: ignored
-    assert processor.timeline.transcribed_through(1e9)  # nothing waits on an absent lane
+    processor.notify_screen()
+    assert processor.timeline.transcribed_through(1e9)
     timeline = await asyncio.wait_for(processor.finish(), 1)
     assert Lane.SELECT in timeline.finished
-    assert not timeline.complete  # no transcript or moments were made to promote
+    assert not timeline.complete
 
 
 async def test_two_lanes_of_one_kind_are_refused(tmp_path: Path):
@@ -248,8 +235,6 @@ async def test_two_lanes_of_one_kind_are_refused(tmp_path: Path):
 
 
 class StubbornLane(LiveLane):
-    """Ignores stop entirely."""
-
     lane = Lane.SELECT
 
     async def run(self) -> None:
@@ -270,7 +255,7 @@ class EarlyLane(LiveLane):
     lane = Lane.AUDIO
 
     async def run(self) -> None:
-        return  # gave up before stop
+        return
 
 
 async def test_a_lane_that_returns_before_notes_are_asked_for_has_failed(tmp_path: Path):
@@ -283,8 +268,6 @@ async def test_a_lane_that_returns_before_notes_are_asked_for_has_failed(tmp_pat
 
 
 class AbandonedLane(LiveLane):
-    """Awaits a future someone else cancels."""
-
     lane = Lane.AUDIO
 
     def __init__(self, ctx, timeline):
@@ -313,8 +296,6 @@ async def test_a_cancelled_lane_releases_its_waiters(tmp_path: Path):
 
 
 class WaitsForScreen(LiveLane):
-    """Follows the select lane's stop contract: waits for the screen lane to finish."""
-
     lane = Lane.SELECT
 
     async def run(self) -> None:
@@ -334,7 +315,7 @@ class SlowFlushLane(LiveLane):
 
     async def run(self) -> None:
         await self.timeline.wait_until(lambda: self.timeline.ending)
-        await asyncio.sleep(30)  # still flushing when the backend shuts down
+        await asyncio.sleep(30)
 
 
 async def test_cancelling_finish_cancels_the_lanes(tmp_path: Path):
@@ -357,7 +338,7 @@ async def test_registry_starts_once_finishes_and_forgets(tmp_path: Path):
     timeline = await registry.finish("s1")
     assert timeline is not None and timeline.complete
     assert registry.get("s1") is None
-    assert await registry.finish("s1") is None  # e.g. a re-run after the backend restarted
+    assert await registry.finish("s1") is None
 
 
 async def test_registry_cancel_and_shutdown_stop_lanes(tmp_path: Path):
@@ -384,9 +365,6 @@ def test_disabled_registry_starts_nothing(tmp_path: Path):
 def test_live_window_bounds_are_validated():
     with pytest.raises(ValidationError):
         Settings(live_window_min_s=30, live_window_max_s=30)
-
-
-# --- API wiring --------------------------------------------------------------------------------
 
 
 @pytest.fixture(scope="module")
@@ -435,7 +413,6 @@ def test_first_chunk_after_a_restart_starts_a_processor(
     sid = start(client)
     old = registry(client).get(sid)
     assert old is not None
-    # A backend restart loses the processor; the session is still recording.
     registry(client)._processors.clear()
     assert post_frame(client, sid, 1.0, jpeg((0, 0, 255))) == 204
     new = registry(client).get(sid)
@@ -464,8 +441,6 @@ def test_delete_refuses_live_input_before_stopping_processing(
     real_cancel = live.cancel
 
     async def cancel(session_id: str) -> None:
-        # Live input is refused (404) once the row is gone, so posts arriving while the
-        # processor stops can't start a new one.
         rows_while_cancelling.append(store.get(session_id))
         await real_cancel(session_id)
 

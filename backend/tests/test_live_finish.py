@@ -1,10 +1,3 @@
-"""Finishing a live session at stop: promoting the live work and running only what is left.
-
-The end-to-end tests drive a live session through the API with all the real lanes. The OpenAI
-client is a fake behind the real metered client, so ``usage_calls.jsonl`` records every call with
-its stage, as in a real session, and the calls made after stop can be counted.
-"""
-
 import json
 import time
 from functools import cache
@@ -51,7 +44,6 @@ from tests.test_write import section
 
 RATE = 48_000
 SECONDS = 120
-# Four slides, shown 30 s each.
 SCREENS = [
     (0, "Agenda", "rect"),
     (30, "Results", "circle"),
@@ -61,7 +53,6 @@ SCREENS = [
 
 
 def speech(seconds: int = SECONDS) -> np.ndarray:
-    """Tone "words" of 0.7 s with 0.5 s pauses: every window has pauses to cut at."""
     t = np.arange(seconds * RATE) / RATE
     loud = (t % 1.2) < 0.7
     return (0.3 * loud * np.sin(2 * np.pi * 440 * t)).astype(np.float32)
@@ -69,7 +60,6 @@ def speech(seconds: int = SECONDS) -> np.ndarray:
 
 @pytest.fixture(scope="module")
 def recording() -> list[tuple[float, bytes]]:
-    """Two minutes of speech as ~5 s MediaRecorder-like chunks, as (recorded by t, bytes)."""
     return chunk_webm(encode_webm([speech()]))
 
 
@@ -82,8 +72,6 @@ def screen_at(t: float) -> bytes:
 
 
 class FakeOpenAI:
-    """Every model call the pipeline makes, answered locally (no network, no cost)."""
-
     def __init__(self):
         self.chat = SimpleNamespace(completions=SimpleNamespace(parse=self.parse))
         self.audio = SimpleNamespace(transcriptions=SimpleNamespace(create=self.transcribe))
@@ -91,7 +79,6 @@ class FakeOpenAI:
     async def transcribe(self, **kwargs):
         data = kwargs["file"][1]
         seconds = (len(data) - 44) / 2 / 16_000
-        # Different text per window (from its audio), so sections differ as speech arrives.
         text = f"Point {len(data) % 9973} about the slide on screen, with its working explained."
         return {"language": "english", "segments": [{"start": 0, "end": seconds, "text": text}]}
 
@@ -177,8 +164,6 @@ def record_session(
     recording: list[tuple[float, bytes]],
     hold_frame: float | None = None,
 ) -> None:
-    """Post audio and frames in session-time order, as the browser does (not paced: session time
-    comes from the data). ``hold_frame`` is posted last, too late for the screen lane."""
     queue = [(t, "audio", seq, data) for seq, (t, data) in enumerate(recording)]
     queue += [(float(s), "frame", s, b"") for s in range(SECONDS)]
     for t, kind, key, data in sorted(queue, key=lambda item: (item[0], item[1])):
@@ -191,12 +176,6 @@ def record_session(
 
 
 def wait_until_caught_up(client: TestClient, sid: str, kinds: set[str], timeout: float = 30.0):
-    """Until the live lanes have caught up: ``kinds`` of event have arrived and no model call
-    has been made for a while.
-
-    A quiet second is a heuristic: the lanes have no "idle" signal to wait on, and this runs
-    them for real (threads, decoding, OpenCV), so a fake clock can't reach them. A second is far
-    longer than any pause between their calls with the fake client."""
     deadline = time.monotonic() + timeout
     last, quiet_since = -1, time.monotonic()
     while True:
@@ -237,7 +216,6 @@ LIVE_EVENTS = {"transcript_chunk", "moment_found", "visual_selected", "notes_upd
 
 
 def draft_seen_at(monkeypatch, at: Stage) -> list[bool]:
-    """Whether notes_draft.json existed when ``at`` started (promoted or run)."""
     seen: list[bool] = []
     real_promote, real_stage = promote.promote, STAGES[at]
 
@@ -268,11 +246,9 @@ def test_a_live_session_is_finished_at_stop_with_only_the_open_work_left(
     record_session(client, sid, recording)
     wait_until_caught_up(client, sid, LIVE_EVENTS)
 
-    # Everything the UI shows while recording arrived before stop.
     live = events(client, sid)
     assert {e.type for e in live} >= LIVE_EVENTS
     assert any(e.type == "notes_updated" and e.data.get("live") for e in live)
-    # Sections are written ahead of stop into the write stage's cache; no draft is made.
     assert not (root / "notes_draft.json").exists()
     frozen = len(list(SessionPaths(root).notes_sections_dir.glob("*.json")))
     assert frozen >= 1
@@ -285,12 +261,10 @@ def test_a_live_session_is_finished_at_stop_with_only_the_open_work_left(
     session = wait_for_done(client, sid)
     assert session["status"] == "done", session.get("error")
     assert (root / "notes.json").exists()
-    # The live lanes left no notes draft for the run to keep or drop.
     assert draft_at_promotion == [False]
     notes = client.get(f"/api/sessions/{sid}/notes").json()
     assert len(notes["visuals"]) == 4 and "::figure{#v000004}" in notes["markdown"]
 
-    # Promoted: the stages the live lanes did report as promoted, the rest ran.
     assert timeline.complete
     stages = stage_events(client, sid, len(live))
     promoted = [s for kind, s, p in stages if p and kind == "stage_finished"]
@@ -304,16 +278,13 @@ def test_a_live_session_is_finished_at_stop_with_only_the_open_work_left(
         "synthesize",
     ]
 
-    # The promoted files are exactly the timeline's.
     assert read_model(root / "transcript.json", Transcript) == timeline.transcript()
     assert read_model(root / "transcript.json", Transcript).language == "english"
     assert read_model(root / "moments.json", Moments).moments == timeline.moments
     assert read_model(root / "selection.json", Selection) == timeline.selection()
     items = read_model(root / "alignment.json", Alignment).items
     assert [i.moment for i in items] == timeline.moments
-    assert not SessionPaths(root).transcript_chunks_dir.exists()  # the transcribe stage never ran
-    # The UI resets its counts when processing starts, after the live windows' events: the
-    # promoted transcribe step reports the whole transcript's size itself.
+    assert not SessionPaths(root).transcript_chunks_dir.exists()
     finished = [
         e.data
         for e in events(client, sid)[len(live) :]
@@ -324,9 +295,6 @@ def test_a_live_session_is_finished_at_stop_with_only_the_open_work_left(
         {"stage": "transcribe", "promoted": True, "segments": len(timeline.segments)}
     ]
 
-    # After stop: the last window(s), the last select batch, the sections still open at stop,
-    # the last figure's render (live renders don't start after stop) and synthesis. Nothing live
-    # is redone.
     after = calls(client, sid)[len(before) :]
     counts = by_stage(after)
     new_windows = windows(root) - windows_before
@@ -338,13 +306,12 @@ def test_a_live_session_is_finished_at_stop_with_only_the_open_work_left(
         print(f"\nmodel calls after stop: {counts} (live before stop: {by_stage(before)})")
     assert new_windows == 1 and new_batches == 1 and new_figures == 1
     assert counts == {
-        "transcribe": new_windows,  # the window cut at stop
-        "select": new_batches,  # the moment closed at stop
-        "render": 2 * new_figures,  # its figure: one drawing and one check
-        "write": parts - frozen,  # the sections still open at stop, the last one included
-        "synthesize": 1,  # the plan over several parts (no edits, so no rewrites)
+        "transcribe": new_windows,
+        "select": new_batches,
+        "render": 2 * new_figures,
+        "write": parts - frozen,
+        "synthesize": 1,
     }
-    # No repeats of live work: one call per window and per batch over the whole session.
     total = by_stage(calls(client, sid))
     assert total["transcribe"] == windows(root)
     assert total["select"] == len(
@@ -352,7 +319,6 @@ def test_a_live_session_is_finished_at_stop_with_only_the_open_work_left(
     )
     assert total["render"] == 2 * len(timeline.visuals)
 
-    # A re-run from the API has no processor: it runs as before (here from select, all cached).
     n = len(events(client, sid))
     assert client.post(f"/api/sessions/{sid}/run?from_stage=select").status_code == 200
     assert wait_for_done(client, sid)["status"] == "done"
@@ -360,8 +326,6 @@ def test_a_live_session_is_finished_at_stop_with_only_the_open_work_left(
 
 
 def test_an_audio_only_session_writes_its_notes_while_recording(app_client: TestClient, recording):
-    """With no screen, the horizon follows the transcript: sections are written while recording
-    (not all at stop), and stop still promotes everything."""
     client = app_client
     sid = client.post("/api/live", json={"title": "call"}).json()["id"]
     timeline: LiveTimeline = client.app.state.runner.live.get(sid).timeline  # type: ignore[attr-defined]
@@ -388,7 +352,6 @@ def test_an_audio_only_session_writes_its_notes_while_recording(app_client: Test
     assert promoted == ["transcribe", "detect", "align", "select"]
     notes = client.get(f"/api/sessions/{sid}/notes").json()
     assert notes["visuals"] == [] and "::figure" not in notes["markdown"]
-    # After stop: the last window, the sections still open, and synthesis. Nothing is redone.
     parts = read_model(root / "notes_draft.json", NotesDraft).parts
     assert parts is not None and parts > frozen
     counts = by_stage(calls(client, sid)[len(before) :])
@@ -398,10 +361,6 @@ def test_an_audio_only_session_writes_its_notes_while_recording(app_client: Test
 def test_a_screen_shared_for_part_of_a_recording_is_placed_only_there(
     app_client: TestClient, recording
 ):
-    """An audio recording whose screen is shared from 30 s to 60 s, then again from 90 s: each
-    share is one moment ending one frame after its last, the first closes while recording once
-    the second share's frames come, the speech between them isn't aligned with either, and stop
-    still promotes everything."""
     client = app_client
     sid = start(client)
     timeline: LiveTimeline = client.app.state.runner.live.get(sid).timeline  # type: ignore[attr-defined]
@@ -417,8 +376,6 @@ def test_a_screen_shared_for_part_of_a_recording_is_placed_only_there(
     wait_until_caught_up(client, sid, {"transcript_chunk", "moment_found", "visual_selected"})
 
     assert [(m.start, m.end) for m in timeline.moments] == [(30.0, 60.0)]
-    # The second share's moment is open until stop, so nothing after the first's end is final
-    # yet: the notes from 60 s on are written at stop.
     assert timeline.horizon == 60.0
     r = client.post(f"/api/live/{sid}/end", json={"audio_chunks": len(recording)})
     assert r.status_code == 200
@@ -428,7 +385,6 @@ def test_a_screen_shared_for_part_of_a_recording_is_placed_only_there(
     assert read_model(root / "frames.json", FrameIndex).share_starts == [90.0]
     moments = read_model(root / "moments.json", Moments).moments
     assert [(m.start, m.end) for m in moments] == [(30.0, 60.0), (90.0, 120.0)]
-    # Speech while nothing was shared isn't taken as said about what was shown.
     alignment = read_model(root / "alignment.json", Alignment)
     for item in alignment.items:
         assert not any(s.start > 60.0 and s.end < 90.0 for s in item.transcript)
@@ -444,9 +400,8 @@ def test_an_audio_failure_runs_the_full_plan(app_client: TestClient, recording, 
 
     monkeypatch.setattr(AudioLane, "run", broken)
     sid = start(client)
-    record_session(client, sid, recording[:6])  # half a minute is enough here
+    record_session(client, sid, recording[:6])
     wait_until_caught_up(client, sid, {"moment_found"})
-    # Nothing downstream of the failed lane made a call while recording.
     assert calls(client, sid) == []
     n = len(events(client, sid))
     r = client.post(f"/api/live/{sid}/end", json={"audio_chunks": 6})
@@ -470,7 +425,6 @@ def test_a_skipped_frame_promotes_the_transcript_and_runs_from_detect(
     processor = client.app.state.runner.live.get(sid)  # type: ignore[attr-defined]
     timeline: LiveTimeline = processor.timeline
     root = client.app.state.settings.sessions_dir / sid  # type: ignore[attr-defined]
-    # The frame at 7 s arrives after the screen lane has moved on; ingest samples it.
     record_session(client, sid, recording[:8], hold_frame=7.0)
     wait_until_caught_up(client, sid, {"transcript_chunk", "moment_found"})
     assert not (root / "notes_draft.json").exists()
@@ -488,25 +442,16 @@ def test_a_skipped_frame_promotes_the_transcript_and_runs_from_detect(
     promoted = [s for kind, s, p in stages if p and kind == "stage_finished"]
     ran = [s for kind, s, p in stages if not p and kind == "stage_finished"]
     assert promoted == ["transcribe"]
-    # Select runs again: no notes draft is left for the run to assemble by mistake.
     assert draft_at_detect == [False]
     assert ran[:4] == ["ingest", "detect", "align", "select"]
     assert read_model(root / "transcript.json", Transcript) == timeline.transcript()
-    # Transcription is paid once: after stop, only the window cut at stop.
     after = by_stage(calls(client, sid)[before:])
     assert after.get("transcribe", 0) == windows(root) - windows_before
     assert not SessionPaths(root).transcript_chunks_dir.exists()
-    # Detect saw the late frame that the screen lane skipped.
     assert any(m.start <= 7.0 for m in read_model(root / "moments.json", Moments).moments)
 
 
-# --- Making notes after an engine restart -----------------------------------------------------
-
-
 def test_notes_made_after_a_restart_keep_the_live_work(tmp_path: Path, fake: FakeOpenAI, recording):
-    """The desktop app stops a recording at quit; the next engine has no processor for it. Making
-    notes starts fresh lanes that catch up from the captured files and their caches, so nothing
-    done before the restart is paid for again, and their work is promoted as at a normal stop."""
     settings = live_settings(tmp_path)
     with TestClient(create_app(settings)) as client:
         sid = start(client)
@@ -528,12 +473,11 @@ def test_notes_made_after_a_restart_keep_the_live_work(tmp_path: Path, fake: Fak
         assert r.status_code == 200
         session = wait_for_done(client, sid)
         assert session["status"] == "done", session.get("error")
-        assert live.get(sid) is None  # finished and forgotten, as at a normal stop
+        assert live.get(sid) is None
 
         stages = stage_events(client, sid, 0)
         promoted = [s for kind, s, p in stages if p and kind == "stage_finished"]
         assert promoted == ["transcribe", "detect", "align", "select"]
-        # The transcribe stage never ran.
         assert not SessionPaths(root).transcript_chunks_dir.exists()
         transcript = read_model(root / "transcript.json", Transcript)
         assert transcript == read_model(root / "live/transcript.json", Transcript)
@@ -543,7 +487,6 @@ def test_notes_made_after_a_restart_keep_the_live_work(tmp_path: Path, fake: Fak
         notes = client.get(f"/api/sessions/{sid}/notes").json()
         assert len(notes["visuals"]) == 4
 
-        # Only what was still open when recording stopped is new work, as at a normal stop.
         after = calls(client, sid)[len(before) :]
         visuals = read_model(root / "selection.json", Selection).visuals
         new_figures = len(visuals) - len(before_restart.visuals)
@@ -552,8 +495,8 @@ def test_notes_made_after_a_restart_keep_the_live_work(tmp_path: Path, fake: Fak
         assert parts is not None and parts > frozen
         assert windows(root) - windows_before == 1 and new_figures == 1
         assert by_stage(after) == {
-            "transcribe": 1,  # the window cut at stop
-            "select": len(batches) - batches_before,  # the moment closed at stop
+            "transcribe": 1,
+            "select": len(batches) - batches_before,
             "render": 2 * new_figures,
             "write": parts - frozen,
             "synthesize": 1,
@@ -562,7 +505,6 @@ def test_notes_made_after_a_restart_keep_the_live_work(tmp_path: Path, fake: Fak
         assert total["transcribe"] == windows(root)
         assert total["select"] == len(batches)
 
-        # A re-run with a chosen stage starts no lanes: it runs that stage and the rest.
         n = len(events(client, sid))
         r = client.post(f"/api/sessions/{sid}/run?from_stage=transcribe")
         assert r.status_code == 200
@@ -599,8 +541,6 @@ def test_notes_made_after_a_restart_with_live_processing_off_run_the_full_plan(
 def test_notes_made_after_a_restart_without_the_first_chunk_fail_as_before(
     tmp_path: Path, fake: FakeOpenAI, recording
 ):
-    """Fresh lanes can't decode audio without its first chunk: they finish at once (no waiting
-    for it), promote nothing, and ingest fails with the message it gives without live work."""
     settings = live_settings(tmp_path)
     with TestClient(create_app(settings)) as client:
         sid = start(client)
@@ -624,8 +564,6 @@ def test_notes_made_after_a_restart_without_the_first_chunk_fail_as_before(
 def test_notes_asked_for_when_the_lanes_cannot_start_leave_the_session_as_it_was(
     tmp_path: Path, fake: FakeOpenAI, recording, monkeypatch, status: str
 ):
-    """Starting the lanes is the one step of making notes that can fail before the status
-    changes, so the recording can still be kept, or its notes asked for again."""
     settings = live_settings(tmp_path)
     with TestClient(create_app(settings)) as client:
         sid = start(client)
@@ -645,9 +583,6 @@ def test_notes_asked_for_when_the_lanes_cannot_start_leave_the_session_as_it_was
         assert client.get(f"/api/sessions/{sid}").json()["status"] == status
         assert not runner.is_running(sid)
         assert stage_events(client, sid, 0) == []
-
-
-# --- Deciding what to promote -----------------------------------------------------------------
 
 
 def ctx(tmp_path: Path) -> StageContext:
@@ -704,7 +639,7 @@ async def test_a_complete_timeline_promotes_everything(tmp_path: Path):
     [
         lambda tl, c: tl.failed.update({Lane.SCREEN: "x"}),
         lambda tl, c: tl.skipped_input.add(Lane.SELECT),
-        lambda tl, c: tl.finished.discard(Lane.SELECT),  # absent: never finished
+        lambda tl, c: tl.finished.discard(Lane.SELECT),
         lambda tl, c: (c.paths.root / "frames/000000000.jpg").unlink(),
         lambda tl, c: (c.paths.root / "visuals/v000001.source.jpg").unlink(),
         lambda tl, c: tl.rejected_moment_ids.append("m999"),
@@ -753,10 +688,8 @@ async def test_promotion_writes_the_timeline_as_it_is(tmp_path: Path):
     c.emit = lambda t, d: emitted.append((t, d))
     tl = await timeline_with_work(c)
     extras = [await promote.promote(c, tl, stage) for stage in promote.EVERYTHING]
-    # Only transcribe reports extra data: its size, as the UI can't count it from events.
     assert extras == [{"segments": len(tl.segments)}, {}, {}, {}]
     transcript = read_model(c.paths.transcript, Transcript)
-    # Order and language as the timeline holds them (not re-sorted, not re-voted).
     assert [s.text for s in transcript.segments] == ["b", "a"]
     assert transcript.language == "english"
     assert read_model(c.paths.moments, Moments).moments == tl.moments

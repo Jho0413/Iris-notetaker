@@ -1,7 +1,3 @@
-"""Backend support for the desktop app: ``python -m iris``, the per-launch API token, the secrets
-passed on stdin (``iris serve --secrets-from-stdin``) and the parent watcher
-(``IRIS_PARENT_PID``)."""
-
 import asyncio
 import io
 import json
@@ -30,18 +26,12 @@ def _client(tmp_path: Path, **settings) -> TestClient:
     return TestClient(create_app(Settings(data_dir=tmp_path / "data", **settings)))
 
 
-# --- python -m iris ---------------------------------------------------------------------------
-
-
 def test_python_m_iris_runs_the_cli(monkeypatch, capsys):
     monkeypatch.setattr(sys, "argv", ["iris", "--help"])
     with pytest.raises(SystemExit) as exit_:
         runpy.run_module("iris", run_name="__main__")
     assert exit_.value.code == 0
     assert "serve" in capsys.readouterr().out
-
-
-# --- API token --------------------------------------------------------------------------------
 
 
 def test_no_token_configured_leaves_the_api_open(tmp_path):
@@ -61,7 +51,7 @@ def test_token_from_the_environment(monkeypatch, tmp_path):
     monkeypatch.setenv("IRIS_PARENT_PID", "4242")
     s = Settings(data_dir=tmp_path)
     assert s.api_token is not None and s.api_token.get_secret_value() == TOKEN
-    assert TOKEN not in repr(s)  # never printed with the settings
+    assert TOKEN not in repr(s)
     assert s.parent_pid == 4242
 
 
@@ -95,7 +85,6 @@ def test_right_token_is_accepted(tmp_path):
         c.headers["X-Iris-Token"] = TOKEN
         assert c.get("/api/health").json()["ok"] is True
         assert c.get("/api/sessions").json() == []
-        # A request with a body, and the header name in any case.
         live = c.post("/api/live", json={"title": "t"}, headers={"x-iris-token": TOKEN})
         assert live.status_code == 201
         sid = live.json()["id"]
@@ -109,7 +98,6 @@ def test_right_token_is_accepted(tmp_path):
 
 
 def test_refused_preflight_from_another_origin(tmp_path):
-    """A web page on another origin can't get past the token, preflight or not."""
     with _client(tmp_path, api_token=TOKEN) as c:
         res = c.options(
             "/api/sessions",
@@ -117,8 +105,6 @@ def test_refused_preflight_from_another_origin(tmp_path):
         )
     assert res.status_code == 401
 
-
-# --- secrets on stdin -------------------------------------------------------------------------
 
 KEY = "sk-from-the-app-0123456789"
 
@@ -129,7 +115,6 @@ def _line(**fields) -> bytes:
 
 @pytest.fixture
 def clean_env(monkeypatch, tmp_path):
-    """No key or token from the developer's environment or backend/.env: cwd is an empty folder."""
     for name in ("OPENAI_API_KEY", "IRIS_OPENAI_API_KEY", "IRIS_API_TOKEN"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("IRIS_DATA_DIR", str(tmp_path / "data"))
@@ -143,7 +128,7 @@ def test_secrets_line_sets_key_and_token(clean_env):
     )
     assert settings.openai_api_key == KEY
     assert settings.api_token is not None and settings.api_token.get_secret_value() == TOKEN
-    assert dict(os.environ) == before  # never written into the environment
+    assert dict(os.environ) == before
 
 
 def test_secrets_line_with_no_key(clean_env):
@@ -164,7 +149,6 @@ def test_key_from_the_app_wins_over_env_and_dotenv(clean_env, monkeypatch, tmp_p
 
 
 def test_no_key_from_the_app_leaves_the_dotenv_key(clean_env, tmp_path):
-    """As before: with no key stored in the app, a .env in the data folder may supply one."""
     (tmp_path / ".env").write_text("OPENAI_API_KEY=sk-from-dotenv\n")
     secrets = read_secrets(io.BytesIO(_line(openai_api_key=None, api_token=TOKEN)))
     assert settings_with_secrets(secrets).openai_api_key == "sk-from-dotenv"
@@ -187,14 +171,14 @@ def test_secrets_are_hidden_in_repr():
         (b"", "no secrets line"),
         (b"\n", "no secrets line"),
         (b"   \n", "no secrets line"),
-        (f'{{"openai_api_key": "{KEY}", "api_token": '.encode(), "not valid"),  # cut short
+        (f'{{"openai_api_key": "{KEY}", "api_token": '.encode(), "not valid"),
         (f"{KEY} {TOKEN}\n".encode(), "not valid"),
-        (_line(openai_api_key=KEY), "api_token"),  # token missing
+        (_line(openai_api_key=KEY), "api_token"),
         (_line(openai_api_key=KEY, api_token=""), "api_token"),
         (_line(openai_api_key=KEY, api_token="   "), "api_token"),
         (_line(openai_api_key="", api_token=TOKEN), "openai_api_key"),
         (_line(openai_api_key=42, api_token=TOKEN), "openai_api_key"),
-        (_line(api_token=TOKEN), "openai_api_key"),  # the key is always sent, null if none
+        (_line(api_token=TOKEN), "openai_api_key"),
         (_line(openai_api_key=KEY, api_token=TOKEN, **{KEY + "x": 1}), "unknown field"),
         (json.dumps([KEY, TOKEN]).encode() + b"\n", "not valid"),
         (_line(openai_api_key=KEY, api_token=TOKEN + "x" * MAX_LINE_BYTES), "longer than"),
@@ -206,13 +190,11 @@ def test_bad_secrets_line_fails_clearly_without_the_secrets(line, problem):
     message = str(exc.value)
     assert problem in message
     assert KEY not in message and TOKEN not in message
-    # No chained pydantic error, whose text would hold the input.
     assert exc.value.__cause__ is None
     assert exc.value.__context__ is None or exc.value.__suppress_context__
 
 
 def _serve(monkeypatch, stdin: bytes, *flags: str) -> SimpleNamespace:
-    """Run ``iris serve --secrets-from-stdin`` with uvicorn replaced: what it would have served."""
     served = SimpleNamespace(app=None, code=None)
     monkeypatch.setattr(sys, "stdin", SimpleNamespace(buffer=io.BytesIO(stdin)))
     monkeypatch.setattr(sys, "argv", ["iris", "serve", "--secrets-from-stdin", *flags])
@@ -229,10 +211,9 @@ def test_serve_with_secrets_from_stdin(clean_env, monkeypatch, tmp_path):
     assert served.code == 0
     assert dict(os.environ) == before
     with TestClient(served.app) as c:
-        assert c.get("/api/settings").status_code == 401  # the token from stdin guards the API
+        assert c.get("/api/settings").status_code == 401
         c.headers["X-Iris-Token"] = TOKEN
         assert c.get("/api/settings").json()["api_key_set"] is True
-        # A save on the Settings page rebuilds the settings from the loaded ones: the key stays.
         saved = c.put("/api/settings", json={"transcribe_language": "fr"})
         assert saved.status_code == 200
         assert saved.json()["api_key_set"] is True
@@ -252,7 +233,7 @@ def test_serve_with_no_key_from_stdin(clean_env, monkeypatch):
 def test_serve_refuses_a_bad_secrets_line(clean_env, monkeypatch, capsys, stdin):
     served = _serve(monkeypatch, stdin)
     assert served.code == 2
-    assert served.app is None  # never started
+    assert served.app is None
     err = capsys.readouterr().err
     assert err.startswith("iris serve: ")
     assert KEY not in err and TOKEN not in err
@@ -263,9 +244,6 @@ def test_serve_refuses_reload_with_secrets_from_stdin(clean_env, monkeypatch, ca
     assert served.code == 2
     assert served.app is None
     assert "--reload" in capsys.readouterr().err
-
-
-# --- parent watcher ---------------------------------------------------------------------------
 
 
 def test_watch_parent_calls_on_gone_once_the_parent_is_gone():
@@ -318,7 +296,7 @@ def test_pid_alive(monkeypatch):
     monkeypatch.setattr(iris.parent.os, "kill", kill(ProcessLookupError()))
     assert not pid_alive(4242)
     monkeypatch.setattr(iris.parent.os, "kill", kill(PermissionError()))
-    assert pid_alive(4242)  # exists, but belongs to another user
+    assert pid_alive(4242)
 
 
 def _wait_for(predicate, timeout_s: float = 2.0) -> bool:
@@ -344,10 +322,10 @@ def test_server_shuts_down_when_the_parent_disappears(monkeypatch, tmp_path):
     with _client(tmp_path, parent_pid=4242, parent_poll_s=0.01) as c:
         assert c.get("/api/health").status_code == 200
         assert _wait_for(lambda: len(polls) >= 3)
-        assert shutdowns == []  # parent still there, however often it is checked
+        assert shutdowns == []
         alive["value"] = False
         assert _wait_for(lambda: shutdowns == [True])
-    assert shutdowns == [True]  # once, not on every poll
+    assert shutdowns == [True]
 
 
 def test_no_parent_pid_means_no_watcher(monkeypatch, tmp_path):
