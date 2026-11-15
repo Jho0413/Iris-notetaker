@@ -91,3 +91,35 @@ def test_redraws_not_rendered_are_removed_and_source_crops_are_kept(tmp_path):
         "v4.source.jpg",
         "v5.svg.tmp",
     ]
+
+
+def test_a_model_reads_back_whatever_the_locale_encoding(tmp_path, monkeypatch):
+    path = tmp_path / "notes.json"
+    notes = Notes(
+        session_id="s1",
+        session_type=SessionType.LECTURE,
+        title="Café 会议",
+        markdown="x",
+        visuals=[],
+    )
+    write_model(path, notes)
+    monkeypatch.setattr(
+        Path,
+        "read_text",
+        lambda self, encoding=None, errors=None: self.read_bytes().decode("latin-1"),
+    )
+    assert read_model(path, Notes).title == "Café 会议"
+
+
+def test_a_failed_write_leaves_the_old_file_and_no_temp_file(tmp_path, monkeypatch):
+    path = tmp_path / "k.json"
+    write_bytes(path, b"old")
+
+    def refuse(self, target):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(Path, "replace", refuse)
+    with pytest.raises(OSError, match="disk full"):
+        write_bytes(path, b"new")
+    assert path.read_bytes() == b"old"
+    assert [p.name for p in tmp_path.iterdir()] == ["k.json"]

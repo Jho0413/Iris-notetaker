@@ -182,8 +182,12 @@ def session_paths(sessions_dir: Path, session_id: str) -> SessionPaths:
 def write_bytes(path: Path, data: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
-    tmp.write_bytes(data)
-    tmp.replace(path)
+    try:
+        tmp.write_bytes(data)
+        tmp.replace(path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
 
 
 def write_model(path: Path, model: BaseModel) -> None:
@@ -191,4 +195,4 @@ def write_model(path: Path, model: BaseModel) -> None:
 
 
 def read_model[M: BaseModel](path: Path, model: type[M]) -> M:
-    return model.model_validate_json(path.read_text())
+    return model.model_validate_json(path.read_bytes())

@@ -51,7 +51,9 @@ they do as events that clients follow as it happens.
 2. Each stage writes its own files there, all named in one place (`store/layout.py`). Its JSON
    outputs are written atomically (`write_model`), so a crash never leaves one half-written.
 3. The store only records what a list needs: the title, the source, the status, the stage a run
-   reached, and how a failed run ended.
+   reached, and how a failed run ended. The engine's request threads and its job runner
+   share one connection, so the store lets only one query through at a time; two at once would
+   mix up their rows.
 4. A failure is stored twice: what the user is told (one of a fixed list of messages Iris wrote)
    and, apart from it, the raw error for developers (`iris show`). A stored message that is no
    longer on the list (reworded since, say) is shown as the generic one, never as it is, and

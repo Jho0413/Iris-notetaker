@@ -20,7 +20,14 @@ from iris.models import Notes, NotesEdits, Session, SourceKind, Stage, Transcrip
 from iris.notes_edits import MAX_EDITED_CHARS, as_read, read_notes
 from iris.notes_format import validate
 from iris.sources.upload import save_upload
-from iris.store.layout import SERVED_DIRS, SessionPaths, read_model, session_paths, write_model
+from iris.store.layout import (
+    SERVED_DIRS,
+    SessionPaths,
+    inside,
+    read_model,
+    session_paths,
+    write_model,
+)
 
 log = logging.getLogger(__name__)
 
@@ -234,7 +241,7 @@ def get_file(subdir: str, name: str, paths: PathsDep) -> FileResponse:
     """Serve frames and visuals referenced by notes (e.g. ``visuals/v1.jpg``)."""
     if subdir not in SERVED_DIRS or "/" in name or name.startswith("."):
         raise HTTPException(404)
-    path = paths.root / subdir / name
-    if not path.is_file():
+    path = inside(paths.root, f"{subdir}/{name}", paths.root / subdir)
+    if path is None or not path.is_file():
         raise HTTPException(404)
     return FileResponse(path)

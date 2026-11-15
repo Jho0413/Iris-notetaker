@@ -29,9 +29,8 @@ class _ImageRenderer:
     RENDERERS = {"image": _image_markdown}
 
 
-def export_markdown_embedded(notes: Notes, session_root: Path) -> str:
+def export_markdown_embedded(notes: Notes, root: Path) -> str:
     notes = upgraded(notes)
-    root = session_root.resolve()
     visuals = {v.id: v for v in notes.visuals}
     layout = scan(notes.markdown)
     fences = {b.line for b in layout.blocks} | {b.end for b in layout.blocks if b.end is not None}
