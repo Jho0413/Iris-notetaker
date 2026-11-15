@@ -60,7 +60,8 @@ the form that fits the change; don't invent states where there are none.
   near-copy.
 - **Change only what the task needs.** No drive-by refactors, renames or reformatting; note them
   and do them separately, unless the user asks. Remove code a change leaves unused. The one
-  exception: removing the comments and docstrings of a file you work on (see *No comments*).
+  exception to this rule: removing, from a file you work on, the comments and docstrings that
+  *No comments* doesn't keep.
 - **One source of truth.** Settings, file names, wording and constants live in one place
   (`Settings`, `store/layout.py`, `session/messages.ts`) and are imported, never copied.
 - **Pure logic, thin edges.** Keep decisions in small pure functions (no I/O) that plain
@@ -77,13 +78,14 @@ the form that fits the change; don't invent states where there are none.
   step in, as a small `Protocol` or a function argument, the way `Source` does for uploads and
   live recordings. An interface earns its place with two real implementations, not one.
 - **No comments** in hand-written code and tests (`backend/`, `frontend/`, `desktop/`): no comments
-  in any form (`#`, `//`, `/* */`, JSDoc, HTML and CSS comments) and no docstrings. Name things
-  for what they mean to the user or the domain, and let a clear name or a smaller function carry
-  what a comment would; a reason still needed goes into such a name, or as a decision into the
-  feature's `docs/` page. Tool directives stay, with nothing after them (shebangs, `# noqa`,
+  in any form (`#`, `//`, `/* */`, JSDoc, HTML and CSS comments) and no docstrings, except the ones
+  something reads (below), which new code writes too. Name things for what they mean to the user
+  or the domain, and let a clear name or a smaller function carry what a comment would; a reason
+  still needed goes into such a name, or as a decision into the feature's `docs/` page. Tool directives stay, with nothing after them (shebangs, `# noqa`,
   `# type: ignore`, `// eslint-disable`). Generated files (`schema.d.ts`) and config and example
-  files (`.env.example`, `Makefile`, CI workflows) keep their comments. When you work on a file,
-  remove its comments and docstrings, all but those something reads:
+  files of any format (`.env.example`, `pyproject.toml`, `vite.config.ts`, `tsconfig*.json`,
+  `electron-builder.yml`, `Makefile`, CI workflows) keep their comments. When you work on a file,
+  remove its other comments and docstrings. The docstrings that stay:
   - MCP tool docstrings: the assistant reads them as the tools' descriptions;
   - docstrings of FastAPI routes and of the models the API sends or accepts (the ones that reach
     `schema.d.ts`): they become the OpenAPI schema;
