@@ -53,7 +53,10 @@ they do as events that clients follow as it happens.
 3. The store only records what a list needs: the title, the source, the status, the stage a run
    reached, and how a failed run ended.
 4. A failure is stored twice: what the user is told (one of a fixed list of messages Iris wrote)
-   and, apart from it, the raw error for developers (`iris show`).
+   and, apart from it, the raw error for developers (`iris show`). A stored message that is no
+   longer on the list (reworded since, say) is shown as the generic one, never as it is, and
+   never stops the list from loading. Older versions stored only the raw error; opening their
+   store moves it to the developers' side and gives those sessions the generic message.
 5. The user's edits sit beside the generated notes, written only by the API. A re-run makes new
    notes and leaves the edits alone ([`ui.md`](ui.md#reading-and-editing-notes)).
 6. The notes or the transcript, asked for before they are made, answer "not ready". When they
@@ -72,6 +75,50 @@ they do as events that clients follow as it happens.
 
 *Why:* files are the source of truth and the store is only an index, so any stage can be run,
 checked or re-run from its files alone, and a session survives a crash (principle 4).
+
+### What a session folder holds
+
+A stage's outputs sit beside its cache folders; a cache holds one file per unit, named by its key.
+Promotion is a live recording's results kept as the stages' own
+([`recording-live.md`](recording-live.md#making-notes-and-promotion)).
+
+| File or folder | What it holds | Written by |
+| --- | --- | --- |
+| `source.<ext>` | the uploaded recording, as sent | the API, on upload |
+| `audio.wav` | the sound, as one plain track | ingest |
+| `frames/`, `frames.json` | the sampled stills of the screen, and the list of them with their times | ingest; while recording, the screen lane adds stills as they come |
+| `transcript_chunks/` | each transcribed chunk (a cache) | transcribe |
+| `transcript.json` | what was said, with its times | transcribe, or promotion |
+| `moments.json` | the moments found on screen | detect, or promotion |
+| `alignment.json` | each moment with the speech around it | align, or promotion |
+| `selection_batches/` | each batch of moments read (a cache) | select, or the select lane |
+| `selection.json` | what was read on screen, and the figures kept | select, or promotion |
+| `visuals/` | each figure's source crop and its redraw | select (crops) and render (redraws), or the select lane |
+| `render_cache/` | each finished redraw (a cache) | render, or the select lane |
+| `renders.json` | which picture each figure shows, and whether it was checked | render |
+| `notes_sections/` | each written section (a cache) | write, or the draft lane |
+| `notes_draft.json` | the notes as written, before the polish | write |
+| `synthesis_cache/` | synthesis's plans and rewrites (a cache) | synthesize |
+| `notes_synthesis.json` | the notes after synthesis | synthesize |
+| `synthesis.json` | what synthesis did, or why it skipped or failed | synthesize |
+| `notes.json` | the finished notes | assemble |
+| `notes_edits.json` | the user's edited notes, the latest save only | the API, never a stage |
+| `usage_calls.jsonl` | one line per model call | the usage log |
+| `usage.json` | those calls' totals | the usage log, after each stage |
+
+A live recording keeps its own files in `live/`:
+
+| File or folder | What it holds | Written by |
+| --- | --- | --- |
+| `live/audio/` | the audio chunks as they arrived, by number | the API, while recording |
+| `live/frames/` | the screen stills as captured, by time and share | the API, while recording |
+| `live/audio.pcm` | the chunks decoded so far, as one stream | the audio lane |
+| `live/transcript_windows/` | each transcribed window (a cache) | the audio lane |
+| `live/transcript.json` | the transcript so far | the audio lane |
+| `live/frames.json` | the stills fed to the moment detector so far | the screen lane |
+| `live/moments.json` | the moments closed so far | the screen lane |
+| `live/selection.json` | what has been read on screen so far | the select lane |
+| `live/select_batches.json` | which moments went into each batch read, so a restarted lane reads the same batches and finds them cached | the select lane |
 
 ## Runs and the job runner
 
@@ -175,6 +222,22 @@ several stages log at once.
 *Why:* progress only flows from the engine to the client, so server-sent events are enough, and
 they pass through the desktop app's forwarding unchanged.
 
+## The Markdown export
+
+1. On request, the engine serves a session's notes (the user's edited version when there is one)
+   as one Markdown file that stands alone: each figure becomes its image, carried inside the file,
+   followed by its caption.
+2. Only images inside the session's folder are carried in. A link to the web, to a file that is
+   missing, or to anywhere outside the session is left as written.
+3. An SVG redraw is carried in as a PNG drawn from it: Markdown viewers refuse SVG carried that
+   way, because SVG can hold script.
+4. The text is written out again as standard Markdown, so its layout may be tidied. Maths is set
+   aside while that happens and put back after, since rewriting would escape its symbols.
+5. The lines that open and close boxes and steps are kept exactly as written; other Markdown apps
+   show them as plain text.
+
+*Why:* one file that opens in any Markdown app, with nothing to fetch, is what an export is for.
+
 ## Settings
 
 Every option lives in one settings class (`config.py`): the models, how hard they think, limits,
@@ -211,6 +274,7 @@ All in `backend/src/iris/`:
 - `store/layout.py`: every file in a session folder, and `write_model`.
 - `store/db.py`: the store.
 - `notes_edits.py`: which version of the notes a reader gets.
+- `export.py`: the Markdown export.
 - `events.py`: the event bus.
 - `llm/client.py`: the one OpenAI client.
 - `llm/errors.py`: error kinds and retries.
