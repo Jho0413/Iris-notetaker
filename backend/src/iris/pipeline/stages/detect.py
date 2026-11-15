@@ -1,57 +1,3 @@
-"""Detect moments: sampled frames -> moments where the screen changed and then settled.
-
-Reads:  frames.json (FrameIndex), frames/*.jpg
-Writes: moments.json (Moments)
-Emits:  MOMENT_FOUND per moment.
-
-Local work only, no model calls. Pure OpenCV +
-numpy: the work is a "has it settled, and is it different from what we had" state machine, which
-PySceneDetect's cut detectors do not model (they flag cuts, not settled states, builds or changed
-regions).
-
-How it works (``MomentDetector``, incremental so live sessions can feed it frame by frame):
-
-  1. Each frame is converted to a small blurred grayscale image (``work_width`` wide). Two images
-     "differ" by the fraction of pixels whose absolute difference exceeds ``pixel_threshold``,
-     after a 3x3 opening that removes isolated specks. Blur + pixel threshold absorb sensor and
-     compression noise; the fraction thresholds absorb small things such as a mouse cursor, a
-     blinking caret or a ticking clock.
-  2. Regions that keep changing frame after frame (video-call thumbnails, an embedded video, a
-     cursor being waved around) build up "activity" and are masked out of all comparisons. The mask
-     is dropped when it would cover most of the frame (that is a scroll or a cut, not a widget).
-  3. Each moment has a *state*: the small image of what it currently shows. A frame that matches
-     the state (difference < ``same_frac``) extends the moment. A frame that does not starts a
-     *pending* state; it is accepted once frames keep matching it for ``settle_s`` seconds.
-     Transition / animation frames never settle, so they are never accepted or picked.
-  4. An accepted state either *updates* the current moment or starts a new one:
-       - near-duplicate (difference < ``dup_frac``): update.
-       - slide build: if ``merge_builds`` (default) and the change only *adds* content (the old
-         state's edges survive in the new one: a bullet appears, a whiteboard stroke is drawn),
-         update. The moment's representative becomes the latest, most complete state.
-       - anything else (new slide, app/tab switch, scroll, something covered or erased): a new
-         moment, with ``changed_region`` = bounding box of what changed vs the previous moment
-         (None when the change spans most of the frame).
-  5. A new moment is only a *candidate* until it has lasted ``min_moment_s``. If the screen goes
-     back to the current moment first (a brief flash to another slide or a menu), the candidate is
-     discarded. If another state settles first, the candidate is dropped and its time folded in.
-     So a moment is returned by ``feed`` when its successor has proven itself.
-  6. The representative frame is the sharpest (Laplacian variance) real frame of the moment's
-     latest settled state.
-  7. Each moment records its *builds*: the first settled state, then every additive update, with
-     the region that was added. A worked example written line by line becomes one moment whose
-     builds are the lines, so notes can follow it step by step.
-  8. Scrolling a canvas (a note app, a long document) moves content without changing it. If the
-     old state's content reappears shifted vertically, still on screen, it is the same moment: a
-     build whose region is whatever newly came into view, with earlier build regions shifted to
-     match. Static parts (toolbars) are ignored when matching. Content scrolled off screen counts
-     as lost, so a long scroll still starts a new moment.
-  9. A live recording can share the screen several times (``FrameIndex.share_starts``). A share
-     ends one grid step after its last frame, or where the next share starts if sooner
-     (``share_end``): the open moment ends there (``end_share``), so what was shown is not taken
-     to be on screen while nothing is shared, and the detector starts afresh: the next share may
-     show anything at any size, and is compared only with itself.
-"""
-
 import asyncio
 import math
 from collections.abc import Callable
@@ -61,60 +7,52 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from iris.media.images import grey, shrink_to_width, size_within_width
 from iris.models import Box, Build, EventType, FrameIndex, FrameRef, Moment, Moments
 from iris.pipeline.context import StageContext
 from iris.store.layout import read_model, write_model
 
+SHARPNESS_MAX_WIDTH = 640
+
 
 @dataclass(frozen=True)
 class DetectParams:
-    """Tunables. Fractions are of the work image's pixels; times are in seconds."""
+    work_width: int = 320
+    blur_ksize: int = 5
+    pixel_threshold: int = 25
 
-    # Preprocessing
-    work_width: int = 320  # frames are downscaled to this width before comparing
-    blur_ksize: int = 5  # Gaussian blur kernel (odd) applied after downscaling
-    pixel_threshold: int = 25  # grey-level difference (0-255) for a pixel to count as changed
+    same_frac: float = 0.005
+    dup_frac: float = 0.01
 
-    # Change thresholds
-    same_frac: float = 0.005  # below this, a frame shows the same thing (cursor, caret, noise)
-    dup_frac: float = 0.01  # below this, a settled change is a near-duplicate: update, not new
+    settle_s: float = 2.0
+    min_settle_frames: int = 2
+    min_moment_s: float = 4.0
 
-    # Settling and duration
-    settle_s: float = 2.0  # a new state must hold this long to count as settled
-    min_settle_frames: int = 2  # ...and over at least this many frames
-    min_moment_s: float = 4.0  # shorter moments are folded into their neighbours
+    merge_builds: bool = True
+    additive_keep: float = 0.85
 
-    # Slide builds
-    merge_builds: bool = True  # purely additive changes update the moment instead of a new one
-    additive_keep: float = 0.85  # share of the old state's edges that must survive to be additive
+    activity_decay: float = 0.8
+    activity_threshold: float = 0.6
+    max_mask_frac: float = 0.35
 
-    # Masking of persistently changing regions (thumbnails, embedded video)
-    activity_decay: float = 0.8  # per-frame decay of the per-pixel activity average
-    activity_threshold: float = 0.6  # activity above this is masked (about 5 changes in a row)
-    max_mask_frac: float = 0.35  # no masking when it would cover more than this of the frame
+    region_dilate_work_px: int = 9
+    region_min_blob_frac: float = 0.0005
+    region_max_frac: float = 0.6
+    region_pad_frame_px: int = 8
 
-    # Changed region
-    region_dilate: int = 9  # work-pixel dilation that merges nearby changes (text) into blobs
-    region_min_blob_frac: float = 0.0005  # ignore blobs whose bounding box is smaller than this
-    region_max_frac: float = 0.6  # a region larger than this is reported as None (full screen)
-    region_pad: int = 8  # padding added around the region, in frame pixels
-
-    # Scrolling
-    scroll_max_frac: float = 0.6  # largest vertical scroll considered, as a share of the height
-    scroll_min_edges: int = 40  # moved content needed (work-image edge pixels) to judge a scroll
+    scroll_max_height_frac: float = 0.6
+    scroll_min_edge_work_px: int = 40
 
 
 @dataclass
 class _State:
-    """What a moment (or a candidate moment) currently shows."""
-
     start: float
     small: np.ndarray
     edges: np.ndarray
     frame: FrameRef
     sharpness: float
     last_t: float
-    mask_frac: float  # share of the frame masked when this state settled
+    mask_frac: float
     region: Box | None = None
     builds: list[Build] = field(default_factory=list)
 
@@ -124,7 +62,6 @@ class _State:
             self.frame, self.sharpness = ref, sharpness
 
     def replace_content(self, other: "_State", build: Build | None = None) -> None:
-        """Take the newer state's content and representative, keeping start and region."""
         if build is not None:
             self.builds.append(build)
         self.small, self.edges = other.small, other.edges
@@ -134,43 +71,36 @@ class _State:
 
 @dataclass
 class _Pending:
-    """Frames that differ from the current state and may be settling on something new."""
-
-    onset: float  # when the screen first departed from the current state
+    onset: float
     small: np.ndarray
     frames: list[tuple[float, FrameRef, float]] = field(default_factory=list)
 
 
 _OPEN_KERNEL = np.ones((3, 3), np.uint8)
 _MASK_KERNEL = np.ones((5, 5), np.uint8)
+_EMPTY_BACKGROUND_EDGE_LIMIT = 20
 
 
 class MomentDetector:
-    """Incremental moment detector. ``feed`` frames in time order, then call ``finish`` once."""
-
     def __init__(self, params: DetectParams | None = None):
         self.p = params or DetectParams()
-        self._count = 0  # moments emitted, numbering their ids across shares
+        self._count = 0
         self._new_share()
 
     def _new_share(self) -> None:
-        """Forget everything seen: the frames that follow are a new share."""
-        self._current: _State | None = None  # the open moment
-        self._next: _State | None = None  # a new moment that has not lasted min_moment_s yet
+        self._current: _State | None = None
+        self._next: _State | None = None
         self._pending: _Pending | None = None
         self._fallback: tuple[FrameRef, float] | None = None
-        self._first_t: float | None = None  # this share's first frame
-        self._share_start_count = self._count  # moments emitted before this share
-        self._work_size: tuple[int, int] | None = None  # (w, h) of work images
-        self._frame_size: tuple[int, int] = (0, 0)  # (w, h) of the latest input frame
+        self._first_t: float | None = None
+        self._share_start_count = self._count
+        self._work_size: tuple[int, int] | None = None
+        self._frame_size: tuple[int, int] = (0, 0)
         self._prev_small: np.ndarray | None = None
         self._activity: np.ndarray | None = None
-        self._mask: np.ndarray | None = None  # True where pixels are ignored
-
-    # --- public API ----------------------------------------------------------------------------
+        self._mask: np.ndarray | None = None
 
     def feed(self, t: float, frame_ref: FrameRef, image: np.ndarray) -> Moment | None:
-        """Add the next frame. Returns a moment when one closes (its successor has settled)."""
         small = self._prepare(image)
         self._update_mask(small)
         sharpness = _sharpness(image)
@@ -193,7 +123,6 @@ class MomentDetector:
             and self._current is not None
             and self._same(small, self._current.small)
         ):
-            # Back to what was on screen before the candidate proved itself: a brief flash.
             self._next = self._pending = None
             self._current.consider(t, frame_ref, sharpness, self._can_represent(self._current))
         else:
@@ -203,15 +132,10 @@ class MomentDetector:
         return self._promote()
 
     def finish(self, end_t: float) -> Moment | None:
-        """Close the last moment; use a real frame if no state ever settled.
-
-        The fallback is a candidate for downstream selection, not evidence of a stable screen.
-        An unsettled tail after an established moment still belongs to that moment.
-        """
         current, self._current = self._current, None
         fallback, self._fallback = self._fallback, None
         pending = self._pending
-        self._next = self._pending = None  # an unproven candidate is too short to stand alone
+        self._next = self._pending = None
         if current is None:
             if (
                 self._count == self._share_start_count
@@ -231,21 +155,16 @@ class MomentDetector:
         return self._emit(current, max(end_t, current.last_t))
 
     def end_share(self, end_t: float) -> Moment | None:
-        """The share ended at ``end_t`` (``share_end``): close what is open there, as ``finish``
-        does, and start afresh for the next share."""
         moment = self.finish(end_t)
         self._new_share()
         return moment
 
-    # --- frame processing ----------------------------------------------------------------------
-
     def _prepare(self, image: np.ndarray) -> np.ndarray:
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image
+        gray = grey(image)
         h, w = gray.shape
         self._frame_size = (w, h)
         if self._work_size is None:
-            ww = min(self.p.work_width, w)
-            self._work_size = (ww, max(1, round(h * ww / w)))
+            self._work_size = size_within_width(w, h, self.p.work_width)
         if (w, h) != self._work_size:
             gray = cv2.resize(gray, self._work_size, interpolation=cv2.INTER_AREA)
         k = self.p.blur_ksize
@@ -272,9 +191,8 @@ class MomentDetector:
         return float(self._mask.mean()) if self._mask is not None else 0.0
 
     def _can_represent(self, state: _State) -> bool:
-        # A growing mask means something is moving that was not when the state settled (e.g. a
-        # panel being scrolled); do not pick such frames as the representative.
-        return self._mask_frac() <= state.mask_frac + 0.02
+        mask_grew_since_settling = self._mask_frac() > state.mask_frac + 0.02
+        return not mask_grew_since_settling
 
     def _changed(self, a: np.ndarray, b: np.ndarray) -> np.ndarray:
         diff = (cv2.absdiff(a, b) > self.p.pixel_threshold).astype(np.uint8)
@@ -303,10 +221,7 @@ class MomentDetector:
             and frames[-1][0] - frames[0][0] >= self.p.settle_s - 1e-6
         )
 
-    # --- moment state machine ------------------------------------------------------------------
-
     def _accept(self) -> None:
-        """The pending frames have settled: update the current moment or start a candidate."""
         pending, self._pending = self._pending, None
         assert pending is not None
         _, ref, sharpness = max(pending.frames, key=lambda f: f[2])
@@ -335,22 +250,15 @@ class MomentDetector:
                 old.replace_content(state, absorbed)
                 return
         if self._next is not None:
-            # The candidate never lasted min_moment_s; the new one takes over its time.
             state.start = self._next.start
         state.region = self._region(self._changed(self._current.small, state.small))
         state.builds = [Build(t=round(settled_t, 3), frame=ref, region=state.region)]
         self._next = state
 
     def _absorbs(self, old: _State, new: _State, settled_t: float) -> Build | None | bool:
-        """Whether a newly settled state is the same moment as ``old``.
-
-        Returns False for a different moment, None for a near-duplicate, and the ``Build`` for an
-        additive change.
-        """
         changed = self._changed(old.small, new.small)
         small_change = cv2.countNonZero(changed) / changed.size < self.p.dup_frac
         if (self.p.merge_builds or small_change) and self._is_additive(old, new, changed):
-            # Handwriting adds little ink per line, so even small additions are builds.
             return Build(t=round(settled_t, 3), frame=new.frame, region=self._region(changed))
         if small_change:
             return None
@@ -359,24 +267,22 @@ class MomentDetector:
         return False
 
     def _scroll(self, old: _State, new: _State) -> int | None:
-        """Vertical shift (work pixels) that carries all of ``old``'s content onto ``new``."""
         h = old.small.shape[0]
         static = cv2.absdiff(old.small, new.small) <= self.p.pixel_threshold
         moving = old.edges & ~static
         if self._mask is not None:
             moving &= ~self._mask
         ys, xs = np.nonzero(moving)
-        if len(ys) < self.p.scroll_min_edges:
+        if len(ys) < self.p.scroll_min_edge_work_px:
             return None
         target = cv2.dilate(new.edges.astype(np.uint8), np.ones((3, 3), np.uint8)).astype(bool)
         best_score, best_dy = 0.0, 0
-        limit = int(h * self.p.scroll_max_frac)
+        limit = int(h * self.p.scroll_max_height_frac)
         for dy in range(-limit, limit + 1):
             if abs(dy) < 2:
                 continue
             y2 = ys + dy
             inside = (y2 >= 0) & (y2 < h)
-            # Content pushed off screen counts against the match: it is no longer visible.
             score = float(target[y2[inside], xs[inside]].sum()) / len(ys)
             if score > best_score:
                 best_score, best_dy = score, dy
@@ -392,7 +298,6 @@ class MomentDetector:
         explained = cv2.dilate(shifted.astype(np.uint8), _MASK_KERNEL).astype(bool)
         static = cv2.absdiff(old.small, new.small) <= self.p.pixel_threshold
         fresh = (new.edges & ~explained & ~static).astype(np.uint8)
-        # Earlier builds' regions refer to positions before the scroll; move them with it.
         fh = self._frame_size[1]
         shift = round(dy * fh / h)
         for build in old.builds:
@@ -407,24 +312,21 @@ class MomentDetector:
         return Build(t=round(settled_t, 3), frame=new.frame, region=region)
 
     def _is_additive(self, old: _State, new: _State, changed: np.ndarray) -> bool:
-        """True when the change only adds content: old edges in the changed area survive."""
         area = cv2.dilate(changed, _MASK_KERNEL).astype(bool)
         old_edges = old.edges & area
         n = int(old_edges.sum())
-        if n < 20:  # the change landed on empty background
+        if n < _EMPTY_BACKGROUND_EDGE_LIMIT:
             return True
         new_edges = cv2.dilate(new.edges.astype(np.uint8), np.ones((3, 3), np.uint8)).astype(bool)
         return (old_edges & new_edges).sum() / n >= self.p.additive_keep
 
     def _promote(self) -> Moment | None:
-        """Close the current moment once its candidate successor has lasted ``min_moment_s``."""
         nxt = self._next
         if nxt is None or nxt.last_t - nxt.start < self.p.min_moment_s:
             return None
         current, self._current, self._next = self._current, nxt, None
         assert current is not None
         if nxt.start - current.start < self.p.min_moment_s:
-            # Only possible for the first moment (later ones lasted min_moment_s to get here).
             nxt.start, nxt.region = current.start, None
             return None
         return self._emit(current, nxt.start)
@@ -441,25 +343,23 @@ class MomentDetector:
         )
 
     def _region(self, changed: np.ndarray) -> Box | None:
-        """Bounding box (frame pixels) of the changed blobs, or None if it spans most of it."""
-        k = self.p.region_dilate
+        k = self.p.region_dilate_work_px
         blobs = cv2.dilate(changed, np.ones((k, k), np.uint8))
         contours, _ = cv2.findContours(blobs, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         min_area = self.p.region_min_blob_frac * blobs.size
         rects = [r for r in map(cv2.boundingRect, contours) if r[2] * r[3] >= min_area]
         if not rects:
             return None
-        # Dilation grew each blob by k // 2 on every side; undo that before scaling.
-        g = k // 2
-        x0 = min(r[0] for r in rects) + g
-        y0 = min(r[1] for r in rects) + g
-        x1 = max(r[0] + r[2] for r in rects) - g
-        y1 = max(r[1] + r[3] for r in rects) - g
+        dilation_growth = k // 2
+        x0 = min(r[0] for r in rects) + dilation_growth
+        y0 = min(r[1] for r in rects) + dilation_growth
+        x1 = max(r[0] + r[2] for r in rects) - dilation_growth
+        y1 = max(r[1] + r[3] for r in rects) - dilation_growth
         if x1 <= x0 or y1 <= y0 or (x1 - x0) * (y1 - y0) > self.p.region_max_frac * blobs.size:
             return None
         fw, fh = self._frame_size
         sx, sy = fw / blobs.shape[1], fh / blobs.shape[0]
-        pad = self.p.region_pad
+        pad = self.p.region_pad_frame_px
         bx0 = max(0, int(x0 * sx) - pad)
         by0 = max(0, int(y0 * sy) - pad)
         bx1 = min(fw, int(np.ceil(x1 * sx)) + pad)
@@ -472,19 +372,11 @@ def _edges(small: np.ndarray) -> np.ndarray:
 
 
 def _sharpness(image: np.ndarray) -> float:
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image
-    h, w = gray.shape
-    if w > 640:
-        gray = cv2.resize(gray, (640, max(1, round(h * 640 / w))), interpolation=cv2.INTER_AREA)
+    gray = shrink_to_width(grey(image), SHARPNESS_MAX_WIDTH)
     return float(cv2.Laplacian(gray, cv2.CV_64F).var())
 
 
-# --- stage -------------------------------------------------------------------------------------
-
-
 def share_end(last_t: float, fps: float, next_start: float = math.inf) -> float:
-    """Where a share whose last frame is at ``last_t`` ends: one grid step later (the frame
-    stands for its grid cell), or where the next share starts, if sooner."""
     step = 1.0 / fps if fps > 0 else 0.0
     return min(last_t + step, next_start)
 
@@ -495,7 +387,6 @@ def detect_moments(
     params: DetectParams | None = None,
     on_moment: Callable[[Moment], None] | None = None,
 ) -> list[Moment]:
-    """Run the detector over a session's frames (blocking; call in a thread)."""
     detector = MomentDetector(params)
     moments: list[Moment] = []
     starts = iter(index.share_starts)
@@ -514,7 +405,7 @@ def detect_moments(
             next_start = next(starts, None)
         image = cv2.imread(str(root / ref.path), cv2.IMREAD_COLOR)
         if image is None:
-            continue  # unreadable frame: skip rather than fail the session
+            continue
         keep(detector.feed(ref.t, ref, image))
     if index.frames:
         keep(detector.finish(share_end(index.frames[-1].t, index.fps)))
@@ -522,7 +413,6 @@ def detect_moments(
 
 
 def moment_event(m: Moment) -> dict:
-    """The MOMENT_FOUND event data for a moment (also emitted by the live screen lane)."""
     return {"id": m.id, "start": m.start, "end": m.end, "frame": m.frame.path}
 
 
@@ -531,7 +421,6 @@ async def run(ctx: StageContext, params: DetectParams | None = None) -> None:
     loop = asyncio.get_running_loop()
 
     def on_moment(m: Moment) -> None:
-        # Detection runs in a worker thread; deliver events on the event loop.
         loop.call_soon_threadsafe(ctx.emit, EventType.MOMENT_FOUND, moment_event(m))
 
     moments = await asyncio.to_thread(detect_moments, ctx.paths.root, index, params, on_moment)

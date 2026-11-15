@@ -35,7 +35,6 @@ from iris.sources.browser_live import (
     finalize_audio,
     finalize_frames,
     find_cluster,
-    fit,
     missing_audio_chunks,
     split_shares,
     store_audio_chunk,
@@ -48,6 +47,7 @@ from tests.live_api import post_audio, post_frame, start_recording, stop_recordi
 from tests.media import (
     COLOURS,
     TONE_SECONDS,
+    UNREADABLE_JPEG,
     WEBM_SECONDS,
     make_media,
     make_webm,
@@ -215,7 +215,7 @@ def test_frames_sampled_on_the_grid_by_timestamp(paths: SessionPaths):
 def test_frames_downscaled_and_letterboxed_to_one_size(paths: SessionPaths):
     store_frame(paths, 0.0, 1, solid_jpeg(COLOURS[0], (640, 480)))
     store_frame(paths, 1.0, 1, solid_jpeg(COLOURS[1], (640, 240)))
-    store_frame(paths, 2.0, 1, b"\xff\xd8\xff truncated")
+    store_frame(paths, 2.0, 1, UNREADABLE_JPEG)
     index = finalize_frames(paths, fps=1.0, max_width=320)
     assert (index.width, index.height) == (320, 240)
     assert [f.t for f in index.frames] == [0.0, 1.0]
@@ -227,7 +227,7 @@ def test_frames_downscaled_and_letterboxed_to_one_size(paths: SessionPaths):
 def test_each_share_is_sized_from_its_own_first_frame(paths: SessionPaths):
     store_frame(paths, 0.0, 1, solid_jpeg(COLOURS[0], (160, 120)))
     store_frame(paths, 1.0, 1, solid_jpeg(COLOURS[1], (320, 120)))
-    store_frame(paths, 9.2, 2, b"\xff\xd8\xff truncated")
+    store_frame(paths, 9.2, 2, UNREADABLE_JPEG)
     store_frame(paths, 10.0, 2, solid_jpeg(COLOURS[2], (1280, 800)))
     store_frame(paths, 11.0, 2, solid_jpeg(COLOURS[3], (640, 400)))
     index = finalize_frames(paths, fps=1.0, max_width=640)
@@ -242,7 +242,7 @@ def test_shares_come_from_the_frames_share_numbers(paths: SessionPaths):
     for t, share, data in [
         (0.0, 1, solid_jpeg(COLOURS[0])),
         (1.0, 1, solid_jpeg(COLOURS[0])),
-        (5.0, 2, b"\xff\xd8\xff truncated"),
+        (5.0, 2, UNREADABLE_JPEG),
         (8.0, 3, solid_jpeg(COLOURS[1])),
         (9.0, 3, solid_jpeg(COLOURS[1])),
         (9.5, 4, solid_jpeg(COLOURS[2])),
@@ -252,6 +252,67 @@ def test_shares_come_from_the_frames_share_numbers(paths: SessionPaths):
     index = finalize_frames(paths, fps=1.0, max_width=320)
     assert [f.t for f in index.frames] == [0.0, 1.0, 8.0, 9.0, 10.0]
     assert index.share_starts == [8.0, 10.0]
+
+
+def frame_sizes(paths: SessionPaths, index: FrameIndex) -> list[tuple[float, tuple[int, int]]]:
+    return [(f.t, cv2.imread(str(paths.root / f.path)).shape[1::-1]) for f in index.frames]
+
+
+def test_a_share_whose_first_frames_are_unreadable_starts_at_its_first_readable_frame(
+    paths: SessionPaths,
+):
+    for t, share, data in [
+        (0.0, 1, solid_jpeg(COLOURS[0], (160, 120))),
+        (1.0, 1, solid_jpeg(COLOURS[0], (160, 120))),
+        (5.0, 2, UNREADABLE_JPEG),
+        (6.0, 2, UNREADABLE_JPEG),
+        (7.0, 2, solid_jpeg(COLOURS[1], (640, 400))),
+        (8.0, 2, solid_jpeg(COLOURS[2], (1280, 400))),
+    ]:
+        store_frame(paths, t, share, data)
+    index = finalize_frames(paths, fps=1.0, max_width=640)
+    assert index.share_starts == [7.0]
+    assert frame_sizes(paths, index) == [
+        (0.0, (160, 120)),
+        (1.0, (160, 120)),
+        (7.0, (640, 400)),
+        (8.0, (640, 400)),
+    ]
+
+
+def test_a_share_with_no_readable_frame_is_left_out(paths: SessionPaths):
+    for t, share, data in [
+        (0.0, 1, solid_jpeg(COLOURS[0])),
+        (1.0, 1, solid_jpeg(COLOURS[0])),
+        (5.0, 2, UNREADABLE_JPEG),
+        (6.0, 2, UNREADABLE_JPEG),
+        (9.0, 3, solid_jpeg(COLOURS[1])),
+    ]:
+        store_frame(paths, t, share, data)
+    index = finalize_frames(paths, fps=1.0, max_width=320)
+    assert [f.t for f in index.frames] == [0.0, 1.0, 9.0]
+    assert index.share_starts == [9.0]
+    assert sorted(p.name for p in paths.frames_dir.iterdir()) == [
+        "000000000.jpg",
+        "000001000.jpg",
+        "000009000.jpg",
+    ]
+
+
+def test_the_index_size_comes_from_the_first_share_with_a_readable_frame(paths: SessionPaths):
+    for t, share, data in [
+        (0.0, 1, UNREADABLE_JPEG),
+        (1.0, 1, UNREADABLE_JPEG),
+        (4.0, 2, UNREADABLE_JPEG),
+        (5.0, 2, solid_jpeg(COLOURS[0], (320, 200))),
+        (6.0, 2, solid_jpeg(COLOURS[1], (640, 480))),
+        (9.0, 3, solid_jpeg(COLOURS[2], (640, 480))),
+    ]:
+        store_frame(paths, t, share, data)
+    index = finalize_frames(paths, fps=1.0, max_width=640)
+    assert (index.width, index.height) == (320, 200)
+    assert index.share_starts == [9.0]
+    assert frame_sizes(paths, index) == [(5.0, (320, 200)), (6.0, (320, 200)), (9.0, (640, 480))]
 
 
 def test_frames_split_into_shares_where_the_share_number_changes():
@@ -297,13 +358,6 @@ def test_no_frames_gives_an_empty_index(paths: SessionPaths):
     assert finalize_frames(paths, fps=1.0, max_width=1280) == FrameIndex(
         fps=1.0, width=0, height=0, frames=[]
     )
-
-
-def test_fit_keeps_aspect():
-    tall = np.full((200, 50, 3), 255, np.uint8)
-    out = fit(tall, (100, 100))
-    assert out.shape == (100, 100, 3)
-    assert out[:, :30].max() == 0 and out[:, 40:60].min() == 255
 
 
 def test_live_input_is_validated(client: TestClient):

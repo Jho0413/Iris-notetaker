@@ -1,3 +1,4 @@
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -8,6 +9,42 @@ VISUALS_DIR = "visuals"
 SERVED_DIRS = (FRAMES_DIR, VISUALS_DIR)
 SOURCE_CROP_SUFFIX = ".source.jpg"
 REDRAW_SUFFIXES = frozenset({".svg", ".png", ".jpg"})
+
+MAX_AUDIO_SEQ = 999_999
+MAX_FRAME_T = 24 * 3600.0
+MAX_SHARE = 9999
+FIRST_SHARE = 1
+
+_AUDIO_CHUNK_NAME = re.compile(r"^(\d{6})\.webm$")
+_CAPTURED_FRAME_NAME = re.compile(r"^(\d{9})(?:-(\d{4}))?\.jpg$")
+
+
+def frame_name(t: float) -> str:
+    return f"{round(t * 1000):09d}.jpg"
+
+
+def frame_path(t: float) -> str:
+    return f"{FRAMES_DIR}/{frame_name(t)}"
+
+
+def captured_frame_name(t: float, share: int) -> str:
+    return f"{round(t * 1000):09d}-{share:04d}.jpg"
+
+
+def read_captured_frame_name(name: str) -> tuple[float, int] | None:
+    if m := _CAPTURED_FRAME_NAME.match(name):
+        return int(m.group(1)) / 1000, int(m.group(2) or FIRST_SHARE)
+    return None
+
+
+def audio_chunk_name(seq: int) -> str:
+    return f"{seq:06d}.webm"
+
+
+def read_audio_chunk_name(name: str) -> int | None:
+    if m := _AUDIO_CHUNK_NAME.match(name):
+        return int(m.group(1))
+    return None
 
 
 def visual_source_path(visual_id: str) -> str:
@@ -37,6 +74,12 @@ class SessionPaths:
     @property
     def live_audio_dir(self) -> Path:
         return self.root / "live" / "audio"
+
+    def live_audio_chunk(self, seq: int) -> Path:
+        return self.live_audio_dir / audio_chunk_name(seq)
+
+    def live_frame(self, t: float, share: int) -> Path:
+        return self.live_frames_dir / captured_frame_name(t, share)
 
     @property
     def live_frames_dir(self) -> Path:

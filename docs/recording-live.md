@@ -66,9 +66,13 @@ always line up. Finding what changed on screen happens in the engine, so the pag
    with growing waits, through an outage or an engine restart.
 2. The engine stores each as it arrives under the session's `live/` folder, keyed by its number
    (a chunk) or its time and share (a frame). A retry of a post that did land, or one that arrives
-   out of order, lands in the same place, so nothing is lost or doubled.
+   out of order, lands in the same place, so nothing is lost or doubled. A post that reuses a
+   stored chunk's number, or a frame's time and share, with different content is refused rather
+   than written over the recording.
 3. Once the recording has ended, any further post is refused, so nothing is added after ingest
-   has started.
+   has started. A post's whole body is read first; the check that the recording is still going
+   and the write then happen together, with nothing able to run in between, so nothing lands
+   once make notes or stop has answered.
 4. Make notes waits until the queue is empty and tells the engine how many chunks there were. If
    some never arrived, the engine refuses and lists them; since every post has been answered,
    there is nothing to resend, so the page ends anyway and the missing audio becomes silence of
@@ -101,11 +105,27 @@ flowchart LR
   still moves "transcribed to" on, so a silence never holds the notes back. When the last window
   finished has no text, the next one sent gets no context, so a sentence from before a silence
   can't be repeated over it. A cut depends only on the audio, never on how much had arrived, so a lane restarted
-  after an engine restart makes the same cuts and reuses its cached windows.
+  after an engine restart makes the same cuts and reuses its cached windows. A cut is only made
+  once a little audio past it is decoded, so a pause is confirmed, never guessed at the edge of
+  what has arrived; at the end, a last window too short to stand alone joins the one before.
+  A missing chunk is waited for a while, then decoding carries on after it, the gap stays
+  silence and the lane is marked as having missed input; the first chunk, the stream's header,
+  is waited for until notes are made. A few windows are transcribed at once, each with the text
+  committed when it is sent, and they commit strictly in order. A cached window is reused only if
+  its audio, model, context and language all still match. Every window is sent the configured
+  language, so one window misheard as another language can't carry it into the rest; the
+  transcript takes its language from the first window with speech.
 - **Screen lane:** puts frames in time order, samples and sizes them exactly as ingest will, and
-  feeds them to the same moment detector as the detect stage. A change of share closes the open
-  moment. Before anything is shared, it simply keeps up with the transcript, so it never holds
-  the notes back.
+  feeds them to the same moment detector as the detect stage, read back from disk as detect reads
+  them. Frames are held back a moment so they can be handled in time order. One that arrives too
+  late for that is skipped live; if ingest would use it, the lane is marked as having missed
+  input, so its moments aren't kept at make notes. A change of share closes the open moment.
+  Before anything is shared, it simply keeps up with the transcript, so it never holds the notes
+  back. Once a share has started, its last moment stays open until the next share's frames or
+  make notes say where it ended: nothing else can tell sharing having stopped from frames still
+  on their way. A restarted lane clears the frames it made and replays every captured one, so
+  its output is the same as if it had run all along. Its list of frames fed is rewritten every
+  so often rather than per frame, since it grows with the session.
 - **Select lane:** waits until the speech around a closed moment is transcribed, reads the moments
   in batches with the select stage's own step, and redraws each new figure in the background by
   the render stage's rules.
@@ -140,6 +160,29 @@ the others knowing; a lane whose input lane failed stops making paid calls.
 
 *Why:* live processing is best effort. The captured files stay the recording, so a lane that
 fails costs time at make notes, never the session.
+
+### Ingesting a recording
+
+Ingest turns the captured files into the same audio and frames an upload gives
+([`making-notes.md`](making-notes.md#upload-and-ingest)), and never changes them, so a session
+can be ingested again at any time.
+
+1. The chunks are decoded in order as the one stream they were cut from, and the sound is placed
+   by its timestamps: a lost chunk becomes silence of the same length rather than pulling later
+   speech earlier, and only a jump longer than codec jitter counts as a gap. After a lost chunk,
+   decoding starts again at the next point the stream can restart from, with the stream's header
+   put in front, rather than trusting the decoder to find its way through damaged data, which
+   can lose the rest of the recording. A damaged packet is skipped.
+2. The frames are picked on the same steady grid as an upload's, by their times. Each share is
+   sized from its own first readable frame, and the rest of it is scaled and centred on black to
+   that size, because detection compares frames pixel by pixel and a shared window can change
+   size mid-share. A small window shared first then doesn't shrink a whole screen shared later,
+   and frames are never compared across shares. A frame already the right size is copied as it
+   is, with no second compression; an unreadable one is skipped.
+3. A share ends one sampling step after its last frame, or where the next share starts if
+   sooner, so what was shown is only placed while it was shared. Where each share after the
+   first starts goes in the frame index. Frames captured before frames carried a share number
+   count as one share.
 
 ## When the page goes away
 
@@ -177,6 +220,9 @@ more can be recorded. The engine never ends a recording on its own.
 - `frontend/src/pages/LivePage.tsx`: the Live page
 - `backend/src/iris/api/routes/live.py`: the live API
 - `backend/src/iris/sources/browser_live.py`: how chunks and frames are stored and ingested
+- `backend/src/iris/media/frames.py`: picking, sizing and saving frames, shared by ingest and the
+  screen lane
+- `backend/src/iris/store/layout.py`: the names of the captured chunks and frames
 - `backend/src/iris/live/`: the processor, each lane, the timeline and promotion
 - `backend/src/iris/live/replay.py`: plays a recording into a running engine to measure it; it
   makes real, paid calls, so use a scratch data folder ([`development.md`](development.md))

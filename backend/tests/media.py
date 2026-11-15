@@ -44,6 +44,9 @@ def solid_jpeg(colour: tuple[int, int, int], size: tuple[int, int] = (320, 240))
     return image_bytes(img)
 
 
+UNREADABLE_JPEG = b"\xff\xd8\xff truncated"
+
+
 def mean_bgr(path: Path) -> np.ndarray:
     return cv2.imread(str(path)).reshape(-1, 3).mean(axis=0)
 

@@ -1,51 +1,3 @@
-"""Audio lane: captured WebM chunks -> transcript, while recording.
-
-Reads:  live/audio/<seq>.webm
-Writes: live/audio.pcm, live/transcript_windows/<i>_<start_ms>_<end_ms>.json, live/transcript.json
-Publishes: transcript segments and ``transcribed_to``; emits TRANSCRIPT_CHUNK per window.
-
-Two halves:
-
-**Decoding** (``LiveDecoder``, one worker thread). PyAV reads a file-like stream that follows the
-contiguous run of ``seq``: at the end of chunk n it blocks until chunk n+1 is stored, so the
-chunks decode as the one WebM stream they are cut from, never chunk by chunk. Samples go through
-``PlacedWav`` exactly as in ``finalize_audio``, into ``live/audio.pcm`` (sample i is at i / rate
-s, session time), so the live PCM is the same audio ingest writes later. If chunk n is missing
-while later ones are stored, it is waited for ``live_audio_gap_wait_s`` (wall clock); then decoding
-resumes at the next WebM cluster with the stream header prepended, the gap stays silence, and the
-lane marks ``skipped_input``. Chunk 0 (the header) has no substitute and is waited for until notes
-are asked for.
-
-**Windows** (the event loop). A window is cut at the quietest point between
-``live_window_min_s`` and ``live_window_max_s`` after the previous cut (``transcribe.QuietProfile``;
-among equally quiet points the latest, so windows are long and few). A cut is only decided once
-the whole search range plus ``CONFIRM_S`` is decoded: the cut never falls in the last moments of
-decoded audio, where a pause can't be confirmed yet, and it depends only on the audio, never on
-how much had arrived, so a lane restarted after a backend restart reproduces the same cuts and
-reuses its cached windows. Cuts are made in decoded audio, so a chunk edge is never a cut. When
-notes are asked for, the rest of the audio is cut the same way and the last window ends where the
-audio ends (stretched by up to ``CONFIRM_S`` rather than leave a tail shorter than ``MIN_TAIL_S``).
-
-Only a window's speech is sent (``iris.speech``, as for uploads), each speech stretch on its own
-with the window's prompt: a window without speech is not sent and commits empty, which still moves
-``transcribed_to`` on. Windows are transcribed with ``transcribe.transcribe_chunk``, at most
-``live_transcribe_concurrency`` at once (a window starts only while fewer than that many are
-uncommitted), each stretch retried after a temporary API error (``retry_temporary``, with
-``api_retry_delays_s``) before the lane fails; other errors fail it at once. Each window is prompted
-with the tail of the text *committed when it is sent*: normally that is the previous window (windows
-end ~10 s apart and take a few seconds to transcribe), while a backlog (a slow API, or making notes)
-is worked through concurrently with slightly older context. If the last window committed has no
-text, there is no prompt: after a silence, Whisper given the text from before it tends to repeat it.
-The cache entry records the prompt and which window it was taken from, and is reused only if its
-audio, model and prompt match the text now committed there; a damaged entry is regenerated. Every
-window is sent the configured ``transcribe_language`` (the cache records it too), so a misdetected
-first window can't carry the wrong language into the rest through the prompt. Windows commit
-strictly in order. The transcript's language is that of the first window with speech (the timeline
-keeps the first language published, and silent windows are often misdetected), in the timeline and
-``live/transcript.json`` alike. Memory stays bounded: window samples are read back from
-``live/audio.pcm``.
-"""
-
 import asyncio
 import contextlib
 import hashlib
@@ -74,7 +26,6 @@ from iris.pipeline.stages import transcribe
 from iris.sources.browser_live import (
     PlacedWav,
     RawPcm,
-    audio_chunk_path,
     audio_chunks,
     find_cluster,
     stream_header,
@@ -83,25 +34,16 @@ from iris.store.layout import SessionPaths, read_model, write_model
 
 log = logging.getLogger(__name__)
 
-CONFIRM_S = 1.0  # decoded audio needed past a window's search range before it is cut
-PROMPT_CHARS = 500  # tail of the committed transcript sent as a window's prompt (~120 tokens)
-MIN_TAIL_S = 1.0  # at the end, a shorter last window joins the one before (whisper hallucinates)
-PROGRESS_S = 5.0  # while catching up, the decoder reports progress at least this often
+CONFIRM_S = 1.0
+PROMPT_CHARS = 500
+MIN_TAIL_S = 1.0
+PROGRESS_S = 5.0
 
 
-# --- Decoding (worker thread) --------------------------------------------------------------------
-
-Wait = Literal["gap", "end", "stop"]  # why a chunk will not come: lost, recording over, shutdown
+NoChunkReason = Literal["gap", "end", "stop"]
 
 
 class LiveDecoder:
-    """Decodes captured chunks into ``live/audio.pcm`` as they arrive. ``run`` is the thread.
-
-    ``poke``, ``end`` and ``cancel`` are called from the event loop; ``samples`` (how many samples
-    of the PCM file are written and flushed) and ``skipped`` are read there. ``notify`` must be
-    thread-safe; it is called when either changes.
-    """
-
     def __init__(
         self, paths: SessionPaths, rate: int, gap_wait_s: float, notify: Callable[[], None]
     ):
@@ -117,27 +59,20 @@ class LiveDecoder:
         self._file: io.BufferedWriter | None = None
         self._wav: PlacedWav | None = None
 
-    # Event loop side
-
     def poke(self) -> None:
-        """A chunk may have been stored."""
         self._poke.set()
 
     def end(self) -> None:
-        """Notes were asked for, so nothing more arrives: decode what is stored, then return."""
         self._ending = True
         self._poke.set()
 
     def cancel(self) -> None:
-        """Return as soon as possible (the lane is shutting down)."""
         self._cancelled = True
         self._poke.set()
 
-    # Thread side
-
     def run(self) -> None:
         self.paths.live_pcm.parent.mkdir(parents=True, exist_ok=True)
-        with self.paths.live_pcm.open("wb") as f:  # a fresh lane re-decodes from chunk 0
+        with self.paths.live_pcm.open("wb") as f:
             self._file = f
             self._wav = PlacedWav(RawPcm(f), self.rate)
             self._decode_all()
@@ -148,12 +83,12 @@ class LiveDecoder:
     def _decode_all(self) -> None:
         first = self.wait_chunk(0)
         if not isinstance(first, Path):
-            if first == "gap":  # later chunks, but never the header: none of them decodable
+            if first == "gap":
                 self._skip("the first audio chunk (the stream header) never arrived")
             return
         stream = ChunkStream(self, b"", 0, first, 0)
         self._decode(stream)
-        run0 = [audio_chunk_path(self.paths, s) for s in range(stream.seq + 1)]
+        run0 = [self.paths.live_audio_chunk(s) for s in range(stream.seq + 1)]
         header: bytes | None = None
         ended, lost = stream.ended, stream.seq + 1
         while ended == "gap":
@@ -166,23 +101,20 @@ class LiveDecoder:
             found = self._find_cluster_after(lost)
             if found is None:
                 return
-            if isinstance(found, int):  # lost another chunk before finding a cluster
+            if isinstance(found, int):
                 lost = found
                 continue
             seq, offset = found
-            stream = ChunkStream(self, header, seq, audio_chunk_path(self.paths, seq), offset)
+            stream = ChunkStream(self, header, seq, self.paths.live_audio_chunk(seq), offset)
             self._decode(stream)
             ended, lost = stream.ended, stream.seq + 1
 
     def _find_cluster_after(self, lost: int) -> tuple[int, int] | int | None:
-        """The first cluster after the lost chunk, as ``(seq, offset)``. An int is another chunk
-        lost before one was found; None means the recording ended (or shutdown) first."""
         seq = self._next_stored(lost)
         if seq is None:
             return None
-        files = [audio_chunk_path(self.paths, seq)]
+        files = [self.paths.live_audio_chunk(seq)]
         while True:
-            # The last two chunks suffice: a Cluster ID can straddle one chunk boundary.
             found = find_cluster(files[-2:])
             if found is not None:
                 index, offset = found
@@ -194,7 +126,6 @@ class LiveDecoder:
             files.append(got)
 
     def _decode(self, stream: "ChunkStream") -> None:
-        """Decode one stream into the PCM file, as ``browser_live._decode_run`` does."""
         assert self._wav is not None
         with stream:
             try:
@@ -226,14 +157,13 @@ class LiveDecoder:
                     if not self._cancelled:
                         self._skip(f"live audio stream could not be read on: {e}")
 
-    def wait_chunk(self, seq: int) -> Path | Wait:
-        """Block until chunk ``seq`` is stored and return its path, or say why it never will be."""
+    def wait_chunk(self, seq: int) -> Path | NoChunkReason:
         gap_since: float | None = None
         while True:
-            self._poke.clear()  # before checking, so a poke during the checks is not lost
+            self._forget_wakeups_before_checking()
             if self._cancelled:
                 return "stop"
-            path = audio_chunk_path(self.paths, seq)
+            path = self.paths.live_audio_chunk(seq)
             if path.exists():
                 return path
             later = self._next_stored(seq) is not None
@@ -246,8 +176,11 @@ class LiveDecoder:
                 timeout = self.gap_wait_s - (time.monotonic() - gap_since)
                 if timeout <= 0:
                     return "gap"
-            self._report()  # caught up: let the lane cut windows while this waits
+            self._report()
             self._poke.wait(timeout)
+
+    def _forget_wakeups_before_checking(self) -> None:
+        self._poke.clear()
 
     def _next_stored(self, seq: int) -> int | None:
         return next((s for s, _ in audio_chunks(self.paths) if s > seq), None)
@@ -266,10 +199,6 @@ class LiveDecoder:
 
 
 class ChunkStream(io.RawIOBase):
-    """One decodable stream: ``prefix`` (the stream header after a gap, else empty), chunk ``seq``
-    from ``offset``, then each following chunk once it is stored. EOF at the end of the
-    recording, at shutdown, or at a chunk given up as lost; ``ended`` says which."""
-
     def __init__(
         self,
         decoder: LiveDecoder,
@@ -280,8 +209,8 @@ class ChunkStream(io.RawIOBase):
     ):
         self._decoder = decoder
         self._prefix = io.BytesIO(prefix)
-        self.seq = seq  # the chunk being read
-        self.ended: Wait | None = None
+        self.seq = seq
+        self.ended: NoChunkReason | None = None
         self._file: io.BufferedReader | None = path.open("rb")
         self._file.seek(offset)
 
@@ -311,27 +240,20 @@ class ChunkStream(io.RawIOBase):
         super().close()
 
 
-# --- Windows (event loop) ------------------------------------------------------------------------
-
-
 def window_cut(samples: np.ndarray, rate: int, min_len: int, max_len: int) -> int:
-    """Where a window starting at ``samples[0]`` ends: the quietest point ``min_len..max_len``
-    samples in, the latest of equally quiet ones. ``samples`` must reach past ``max_len``."""
     cut = transcribe.quiet_profile(samples, rate).quietest(min_len, max_len, target=max_len)
     return max_len if cut is None else cut
 
 
 class CachedWindow(BaseModel):
-    """One transcribed window on disk, with session-absolute timestamps."""
-
     index: int
     start: float
     end: float
     audio_sha1: str
     model: str
-    requested_language: str | None = None  # ``transcribe_language`` when sent (None: detected)
-    prompt: str  # as sent ("" for none)
-    prompt_through: int  # the last window whose text the prompt was taken from (-1: none)
+    requested_language: str | None = None
+    prompt: str
+    prompt_through: int
     language: str | None = None
     segments: list[TranscriptSegment]
 
@@ -341,8 +263,6 @@ class WindowFailed(RuntimeError):
 
 
 def _within(segments: list[TranscriptSegment], start: float, end: float) -> list[TranscriptSegment]:
-    """Segments clamped into their window and sorted. ``offset + duration`` can land a float ulp
-    past the window end, and a segment past it would precede the next window's first one."""
     clamped = []
     for seg in segments:
         a = min(max(seg.start, start), end)
@@ -377,15 +297,14 @@ class AudioLane(LiveLane):
         self.confirm = int(CONFIRM_S * self.rate)
         self.min_tail = int(MIN_TAIL_S * self.rate)
         self.concurrency = s.live_transcribe_concurrency
-        self._changed = asyncio.Event()  # something the main loop acts on may have happened
+        self._changed = asyncio.Event()
         self._commits = asyncio.Condition()
-        self._committed = 0  # windows committed, in order
-        self._segment_counts: list[int] = []  # published segments after each committed window
-        self._kept: set[str] = set()  # cache files of the committed windows
+        self._committed = 0
+        self._segment_counts: list[int] = []
+        self._kept: set[str] = set()
         self._client = None
 
     async def run(self) -> None:
-        # The longest window: the maximum, plus a short final tail joined to it.
         longest = self.max_len + max(self.confirm, self.min_tail)
         if longest * 2 + 1024 > transcribe.API_MAX_UPLOAD_BYTES:
             raise ValueError("live_window_max_s exceeds the transcription API's upload limit")
@@ -393,8 +312,8 @@ class AudioLane(LiveLane):
         paths.live_transcript_windows_dir.mkdir(parents=True, exist_ok=True)
         loop = asyncio.get_running_loop()
 
-        def notify() -> None:  # from the decoder thread
-            with contextlib.suppress(RuntimeError):  # the loop has closed
+        def notify() -> None:
+            with contextlib.suppress(RuntimeError):
                 loop.call_soon_threadsafe(self._changed.set)
 
         decoder = LiveDecoder(paths, self.rate, self.ctx.settings.live_audio_gap_wait_s, notify)
@@ -405,7 +324,6 @@ class AudioLane(LiveLane):
         try:
             await self._process(decoder, decoding, windows)
         finally:
-            # However the lane ends, the thread must not outlive it (it would block shutdown).
             decoder.cancel()
             forwarding.cancel()
             for task in windows.values():
@@ -427,9 +345,9 @@ class AudioLane(LiveLane):
         decoding: asyncio.Task[None],
         windows: dict[int, asyncio.Task[CachedWindow]],
     ) -> None:
-        cut_at = 0  # start of the next window to cut, in samples
+        cut_at = 0
         planned: deque[tuple[int, int]] = deque()
-        next_index = 0  # the next window to start
+        next_index = 0
         finished: dict[int, CachedWindow] = {}
         while True:
             self._changed.clear()
@@ -449,7 +367,7 @@ class AudioLane(LiveLane):
                 windows[next_index] = task
                 next_index += 1
             for i in [i for i, task in windows.items() if task.done()]:
-                finished[i] = windows.pop(i).result()  # a window that failed fails the lane
+                finished[i] = windows.pop(i).result()
             while self._committed in finished:
                 await self._commit(finished.pop(self._committed))
 
@@ -459,13 +377,10 @@ class AudioLane(LiveLane):
         await self._finish(decoder.samples)
 
     async def _next_cut(self, cut_at: int, decoded: int, final: bool) -> int | None:
-        """The end of the window starting at ``cut_at``, or None if it can't be decided yet."""
         remaining = decoded - cut_at
         if remaining <= 0:
             return None
         if remaining > self.max_len and (final or remaining >= self.max_len + self.confirm):
-            # Always the same span past the cut (less only at the very end), so the cut depends
-            # on the audio alone.
             end = min(decoded, cut_at + self.max_len + self.confirm)
             samples = await asyncio.to_thread(self._read, cut_at, end)
             rel = await asyncio.to_thread(
@@ -473,7 +388,7 @@ class AudioLane(LiveLane):
             )
             cut = cut_at + rel
             if final and decoded - cut < self.min_tail:
-                return decoded  # at most max_len + max(confirm, min_tail) long
+                return decoded
             return cut
         return decoded if final else None
 
@@ -508,7 +423,6 @@ class AudioLane(LiveLane):
         path = self._cache_path(i, start, end)
         cached = await asyncio.to_thread(_load_window, path)
         if cached is not None and self._reusable(cached, i, start, end, digest):
-            # Its prompt must match the text now committed where it was taken from.
             await self._wait_committed(cached.prompt_through + 1)
             if cached.prompt == self._prompt(cached.prompt_through):
                 return cached
@@ -570,8 +484,6 @@ class AudioLane(LiveLane):
             await self._commits.wait_for(lambda: self._committed >= n)
 
     def _prompt(self, through: int) -> str:
-        """The tail of the text of windows ``0..through``, for the next window's prompt; none if
-        window ``through`` has no text, so a line from before a silence can't be repeated."""
         if through < 0 or not transcribe.supports_prompt(self.model):
             return ""
         before = self._segment_counts[through - 1] if through > 0 else 0
@@ -589,14 +501,11 @@ class AudioLane(LiveLane):
         if len(text) > PROMPT_CHARS:
             text = text[-PROMPT_CHARS:]
             if " " in text:
-                text = text.split(" ", 1)[1]  # start at a word
+                text = text.split(" ", 1)[1]
         return text
 
     async def _commit(self, window: CachedWindow) -> None:
-        """Commit the next window: ``live/transcript.json`` and the event first, then the timeline,
-        so a lane that sees the watermark move finds the file already written."""
         segments = _within(window.segments, window.start, window.end)
-        # The first window with speech sets the language (the timeline keeps the first one).
         language = window.language if segments else None
         transcript = Transcript(
             language=self.timeline.language or language,
@@ -617,7 +526,6 @@ class AudioLane(LiveLane):
         self._changed.set()
 
     async def _finish(self, decoded: int) -> None:
-        """After the last commit: publish the end of the audio and drop windows of earlier cuts."""
         await self.timeline.publish_transcript([], decoded / self.rate)
         if not self._committed:
             empty = Transcript(segments=[])
