@@ -10,6 +10,7 @@ from iris import notes_format
 from iris.config import Settings
 from iris.events import EventBus
 from iris.jobs.runner import JobRunner
+from iris.llm import structured
 from iris.models import (
     BoardElement,
     Box,
@@ -256,7 +257,7 @@ def merge_rewrite(payload: dict) -> synthesize.Rewrite:
 
 
 def use(monkeypatch, fake: FakeModel) -> FakeModel:
-    monkeypatch.setattr(synthesize, "get_openai", lambda _: fake.client())
+    monkeypatch.setattr(structured, "get_openai", lambda _: fake.client())
     return fake
 
 
@@ -576,7 +577,7 @@ async def test_a_failing_synthesis_keeps_the_assembled_notes(ctx, monkeypatch, f
         async def parse(**kwargs):
             return parsed_response(None, refusal="no")
 
-        monkeypatch.setattr(synthesize, "get_openai", lambda _: fake_openai(parse=parse))
+        monkeypatch.setattr(structured, "get_openai", lambda _: fake_openai(parse=parse))
     elif fail == "missing_key":
         ctx.settings.openai_api_key = None
     await assemble.run(ctx)
@@ -776,7 +777,7 @@ async def test_generate_uses_strict_structured_output(tmp_path, monkeypatch, mod
         return chat_completion(*([] if mode == "empty" else [message]))
 
     async with sdk_client(handle) as client:
-        monkeypatch.setattr(synthesize, "get_openai", lambda _: client)
+        monkeypatch.setattr(structured, "get_openai", lambda _: client)
         if mode == "ok":
             got = await synthesize.generate(ctx, "p", "{}", synthesize.EditPlan, "low")
             assert got == plan

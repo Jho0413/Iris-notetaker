@@ -13,6 +13,7 @@ from iris.api.routes import events as events_route
 from iris.config import Settings
 from iris.events import EventBus
 from iris.jobs.runner import JobRunner
+from iris.llm import structured
 from iris.llm.client import MissingAPIKey
 from iris.llm.errors import (
     ErrorKind,
@@ -356,7 +357,7 @@ def decisions(*ids: str):
 
 def fake_vision(monkeypatch, *responses) -> AsyncMock:
     parse = AsyncMock(side_effect=list(responses))
-    monkeypatch.setattr(select, "get_openai", lambda _: fake_openai(parse=parse))
+    monkeypatch.setattr(structured, "get_openai", lambda _: fake_openai(parse=parse))
     return parse
 
 

@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from iris.llm import structured
 from iris.llm.errors import UserFacingError
 from iris.models import (
     NOTHING_TO_WRITE,
@@ -112,7 +113,7 @@ async def test_long_transcript_preserved_and_failed_parts_resume(setup):
     parts = write.plan_parts(transcript, Selection(visuals=[]), 2000)
     assert len(parts) > 2
     assert "".join(r["text"] for p in parts for r in p.records) == original
-    assert all(len(write._json(p.records)) <= 2000 for p in parts)
+    assert all(len(structured.payload_json(p.records)) <= 2000 for p in parts)
     generate.side_effect = [section(), RuntimeError("offline")]
     with pytest.raises(RuntimeError, match="offline"):
         await write.run(ctx)
@@ -199,7 +200,7 @@ async def test_real_sdk_response_parsing(tmp_path, monkeypatch, mode):
         return chat_completion(*messages, model=ctx.settings.notes_model)
 
     async with sdk_client(handle) as client:
-        monkeypatch.setattr(write, "get_openai", lambda _: client)
+        monkeypatch.setattr(structured, "get_openai", lambda _: client)
         if mode == "ok":
             assert await write.generate_section(ctx, "{}") == section()
         else:
@@ -211,7 +212,7 @@ def test_upload_pipeline_reaches_export(client, tmp_path, monkeypatch):
     from iris.pipeline.stages import render, select, transcribe
 
     fake = PipelineOpenAI()
-    install_get_openai(monkeypatch, fake, write, select, transcribe, render)
+    install_get_openai(monkeypatch, fake, structured, transcribe, render)
     recording = make_media(tmp_path / "talk.mp4", seconds=2)
     result = client.post("/api/sessions", files={"file": ("talk.mp4", recording.read_bytes())})
     assert result.status_code == 201

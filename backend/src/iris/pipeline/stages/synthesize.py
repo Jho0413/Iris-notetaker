@@ -38,8 +38,6 @@ matches the current notes draft and selection.
 """
 
 import asyncio
-import hashlib
-import json
 import logging
 import re
 from collections import Counter
@@ -54,9 +52,8 @@ from markdown_it.token import Token
 from pydantic import BaseModel
 
 from iris import notes_format
-from iris.llm import usage
-from iris.llm.client import get_openai
-from iris.llm.errors import describe, retry_temporary
+from iris.llm import structured, usage
+from iris.llm.errors import describe
 from iris.markdown import MATH
 from iris.models import (
     Moment,
@@ -178,10 +175,6 @@ class RewrittenSection(BaseModel):
 
 class Rewrite(BaseModel):
     sections: list[RewrittenSection]
-
-
-def _json(value: object) -> str:
-    return json.dumps(value, ensure_ascii=False, sort_keys=True)
 
 
 # --- Local sweep ----------------------------------------------------------------------------------
@@ -531,21 +524,16 @@ def validate_rewrite(rewrite: Rewrite, group: Group, sections: list[str]) -> dic
 async def generate[M: BaseModel](
     ctx: StageContext, prompt: str, payload: str, schema: type[M], effort: str
 ) -> M:
-    response = await get_openai(ctx.settings).chat.completions.parse(
+    return await structured.parse(
+        ctx.settings,
         model=ctx.settings.synthesis_model,
-        messages=[{"role": "system", "content": prompt}, {"role": "user", "content": payload}],
-        response_format=schema,
-        reasoning_effort=effort,
-        max_completion_tokens=32_000,  # includes reasoning tokens
+        prompt=prompt,
+        content=payload,
+        schema=schema,
+        effort=effort,
+        what="synthesis model",
+        max_tokens=structured.MAX_COMPLETION_TOKENS,
     )
-    if not response.choices:
-        raise ValueError("synthesis model returned no choices")
-    message = response.choices[0].message
-    if message.refusal:
-        raise ValueError(f"synthesis model refused: {message.refusal}")
-    if message.parsed is None:
-        raise ValueError("synthesis model returned no parsed output")
-    return message.parsed
 
 
 async def cached[M: BaseModel, R](
@@ -559,31 +547,16 @@ async def cached[M: BaseModel, R](
 ) -> R:
     """A model result checked by ``check``, from ``synthesis_cache/`` when model, prompt and inputs
     match. A damaged or failing entry is regenerated; only results that pass are stored."""
-    key = hashlib.sha256(
-        _json(
-            {
-                "prompt": prompt,
-                "model": ctx.settings.synthesis_model,
-                "schema": schema.model_json_schema(),
-                "payload": payload,
-            }
-        ).encode()
-    ).hexdigest()
-    ctx.paths.synthesis_cache_dir.mkdir(exist_ok=True)
-    path = ctx.paths.synthesis_cache_dir / f"{key}.json"
-    try:
-        return check(read_model(path, schema))
-    except (FileNotFoundError, ValueError):
-        pass
+    key = structured.request_key(prompt, ctx.settings.synthesis_model, schema, payload)
     with usage.purpose(purpose):
-        result = await retry_temporary(
+        return await structured.cached(
+            ctx.paths.synthesis_cache_dir / f"{key}.json",
+            schema,
+            check,
             lambda: generate(ctx, prompt, payload, schema, effort),
-            ctx.settings.api_retry_delays_s,
+            delays=ctx.settings.api_retry_delays_s,
             what=f"session {ctx.session_id}: {purpose}",
         )
-    checked = check(result)
-    write_model(path, result)
-    return checked
 
 
 # --- The pass -------------------------------------------------------------------------------------
@@ -677,7 +650,7 @@ async def synthesize(ctx: StageContext) -> tuple[SynthesisReport, SynthesizedDra
         {"index": i, "heading": notes_format.heading(s), "visual_ids": markers(s)}
         for i, s in enumerate(sections)
     ]
-    plan_payload = _json(
+    plan_payload = structured.payload_json(
         {
             "title": draft.title,
             "session_type": draft.session_type,
@@ -701,11 +674,8 @@ async def synthesize(ctx: StageContext) -> tuple[SynthesisReport, SynthesizedDra
         report.reason = "no edits planned"
         return report, None
 
-    effort = (
-        ctx.settings.synthesis_reasoning_effort
-        or ctx.settings.notes_reasoning_effort
-        or ctx.settings.reasoning_effort
-    )
+    s = ctx.settings
+    effort = structured.effort(s, s.synthesis_reasoning_effort, s.notes_reasoning_effort)
     limit = asyncio.Semaphore(REWRITE_CONCURRENCY)
 
     async def rewrite(group: Group) -> dict[int, str] | None:
@@ -718,7 +688,7 @@ async def synthesize(ctx: StageContext) -> tuple[SynthesisReport, SynthesizedDra
                 budget -= len(text)
                 if text:
                     context.append({"index": i, "markdown": text})
-            payload = _json(
+            payload = structured.payload_json(
                 {
                     "title": draft.title,
                     "session_type": draft.session_type,
@@ -794,7 +764,7 @@ async def run(ctx: StageContext) -> None:
         report, result = await synthesize(ctx)
     except Exception as exc:  # synthesis is a polish: the assembled notes stay on any failure
         log.warning("synthesis failed for session %s", ctx.session_id, exc_info=True)
-        report = SynthesisReport(status="failed", reason=describe(exc)[:500])
+        report = SynthesisReport(status="failed", reason=describe(exc)[: usage.MAX_ERROR_CHARS])
         result = None
     if result is None:
         ctx.paths.notes_synthesis.unlink(missing_ok=True)

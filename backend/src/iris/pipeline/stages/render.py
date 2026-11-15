@@ -33,9 +33,9 @@ from typing import Literal
 import openai
 from pydantic import BaseModel
 
-from iris.llm import usage
+from iris.llm import structured, usage
 from iris.llm.client import get_openai
-from iris.llm.errors import ErrorKind, classify, describe, first_error
+from iris.llm.errors import ErrorKind, classify, describe, gather_units
 from iris.models import EventType, RenderAs, RenderedVisual, Renders, Selection, Visual
 from iris.pipeline.context import StageContext
 from iris.store.layout import read_model, write_model
@@ -90,7 +90,6 @@ fails if it:
 List each problem concretely, as an instruction to fix it.
 """
 
-MAX_PROBLEM_CHARS = 500  # an error's description in renders.json
 
 RENDERERS: dict[RenderAs, tuple[RenderAs, ...]] = {
     "svg": ("svg", "image"),
@@ -111,32 +110,17 @@ class Check(BaseModel):
 # --- model calls -------------------------------------------------------------------------------
 
 
-def _data_url(data: bytes, mime: str) -> str:
-    return f"data:{mime};base64,{base64.b64encode(data).decode()}"
-
-
 def _brief(visual: Visual) -> str:
     return json.dumps(
         {"caption": visual.caption, "description": visual.description}, ensure_ascii=False
     )
 
 
-def _parsed[M: BaseModel](completion, what: str) -> M:
-    if not completion.choices:
-        raise ValueError(f"{what}: no response")
-    message = completion.choices[0].message
-    if message.refusal:
-        raise ValueError(f"{what}: refused: {message.refusal}")
-    if message.parsed is None:
-        raise ValueError(f"{what}: no parsed response")
-    return message.parsed
-
-
 def _effort(ctx: StageContext, call: Literal["diagram", "check"]) -> str:
-    """Per-call reasoning effort (``IRIS_DIAGRAM_/CHECK_REASONING_EFFORT``), else the default."""
     s = ctx.settings
-    override = s.diagram_reasoning_effort if call == "diagram" else s.check_reasoning_effort
-    return override or s.reasoning_effort
+    return structured.effort(
+        s, s.diagram_reasoning_effort if call == "diagram" else s.check_reasoning_effort
+    )
 
 
 async def draw_svg(
@@ -145,23 +129,23 @@ async def draw_svg(
     """Returns (svg file bytes, png preview for checking)."""
     content = [
         {"type": "text", "text": _brief(visual)},
-        {"type": "image_url", "image_url": {"url": _data_url(source, "image/jpeg")}},
+        structured.image_part(source, "image/jpeg"),
     ]
     if feedback:
         content.append(
             {"type": "text", "text": json.dumps({"feedback_from_previous_attempt": feedback})}
         )
     with usage.purpose("svg"):
-        completion = await get_openai(ctx.settings).chat.completions.parse(
+        drawing = await structured.parse(
+            ctx.settings,
             model=ctx.settings.diagram_model,
-            messages=[
-                {"role": "system", "content": SVG_PROMPT},
-                {"role": "user", "content": content},
-            ],
-            response_format=SvgDrawing,
-            reasoning_effort=_effort(ctx, "diagram"),
+            prompt=SVG_PROMPT,
+            content=content,
+            schema=SvgDrawing,
+            effort=_effort(ctx, "diagram"),
+            what="diagram model",
         )
-    svg = sanitize_svg(_parsed(completion, "diagram model").svg)
+    svg = sanitize_svg(drawing.svg)
     png = await asyncio.to_thread(rasterize_svg, svg)
     return svg.encode(), png
 
@@ -194,29 +178,19 @@ async def draw_image(
 
 async def check(ctx: StageContext, visual: Visual, source: bytes, candidate: bytes) -> Check:
     with usage.purpose("figure_check"):
-        completion = await get_openai(ctx.settings).chat.completions.parse(
+        result = await structured.parse(
+            ctx.settings,
             model=ctx.settings.vision_model,
-            messages=[
-                {"role": "system", "content": CHECK_PROMPT},
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": _brief(visual)},
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": _data_url(source, "image/jpeg")},
-                        },
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": _data_url(candidate, "image/png")},
-                        },
-                    ],
-                },
+            prompt=CHECK_PROMPT,
+            content=[
+                {"type": "text", "text": _brief(visual)},
+                structured.image_part(source, "image/jpeg"),
+                structured.image_part(candidate, "image/png"),
             ],
-            response_format=Check,
-            reasoning_effort=_effort(ctx, "check"),
+            schema=Check,
+            effort=_effort(ctx, "check"),
+            what="vision model",
         )
-    result = _parsed(completion, "vision model")
     # A check that lists problems has not passed, whatever its flag says.
     return Check(matches=result.matches and not result.problems, problems=result.problems)
 
@@ -341,7 +315,7 @@ def _error_fallback(
         render_as="screenshot",
         verified=False,
         attempts=attempts,
-        problems=[f"Redraw failed: {reason}"[:MAX_PROBLEM_CHARS]],
+        problems=[f"Redraw failed: {reason}"[: usage.MAX_ERROR_CHARS]],
     )
 
 
@@ -364,14 +338,10 @@ async def run(ctx: StageContext) -> None:
         ordered = [done[v.id] for v in selection.visuals if v.id in done]
         write_model(ctx.paths.renders, Renders(visuals=ordered))
 
-    # A figure only raises on a blocking error (others give the source crop); then the stage has
-    # failed, and the task group cancels the figures still rendering.
-    try:
-        async with asyncio.TaskGroup() as group:
-            for visual in selection.visuals:
-                group.create_task(one(visual))
-    except BaseExceptionGroup as error:
-        raise first_error(error) from None
+    outcomes = await gather_units(one(visual) for visual in selection.visuals)
+    for outcome in outcomes:
+        if isinstance(outcome, Exception):
+            raise outcome
     write_model(ctx.paths.renders, Renders(visuals=[done[v.id] for v in selection.visuals]))
     remove_stale(ctx, {r.path for r in done.values()})
 

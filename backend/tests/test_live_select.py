@@ -10,6 +10,7 @@ from iris.live import LiveProcessor
 from iris.live.screen import ScreenLane
 from iris.live.select import SelectBatches, SelectLane
 from iris.live.timeline import Lane, LiveTimeline
+from iris.llm import structured
 from iris.models import (
     Alignment,
     EventType,
@@ -107,7 +108,7 @@ def ctx(tmp_path: Path, events: list) -> StageContext:
 @pytest.fixture
 def vision(monkeypatch) -> FakeVision:
     fake = FakeVision()
-    monkeypatch.setattr(select, "get_openai", lambda _: fake_openai(parse=fake.parse))
+    monkeypatch.setattr(structured, "get_openai", lambda _: fake_openai(parse=fake.parse))
     return fake
 
 
@@ -510,7 +511,7 @@ async def test_a_failed_select_call_fails_the_lane(ctx: StageContext, monkeypatc
     async def parse(**_kwargs):
         raise RuntimeError("rate limited")
 
-    monkeypatch.setattr(select, "get_openai", lambda _: fake_openai(parse=parse))
+    monkeypatch.setattr(structured, "get_openai", lambda _: fake_openai(parse=parse))
     driver = Driver(ctx).start()
     await driver.close(0)
     await driver.transcribe(0, to=100)

@@ -10,7 +10,6 @@ content-addressed per-batch cache so interrupted runs can resume without paying 
 """
 
 import asyncio
-import base64
 import hashlib
 import json
 import shutil
@@ -21,8 +20,7 @@ import cv2
 from openai.types.chat import ChatCompletionContentPartParam
 from pydantic import BaseModel
 
-from iris.llm.client import get_openai
-from iris.llm.errors import retry_temporary
+from iris.llm import structured
 from iris.models import (
     AlignedMoment,
     Alignment,
@@ -239,34 +237,22 @@ def prepare_batch(
         digest.update(metadata.encode())
         digest.update(hashlib.sha256(raw).digest())
         content.append({"type": "text", "text": metadata})
-        content.append(
-            {
-                "type": "image_url",
-                "image_url": {
-                    "url": "data:image/jpeg;base64," + base64.b64encode(raw).decode(),
-                    "detail": "high",
-                },
-            }
-        )
+        content.append(structured.image_part(raw, "image/jpeg", "high"))
         frames.append(PreparedFrame(path, width, height))
     return PreparedBatch(content, frames, digest.hexdigest())
 
 
 async def choose(ctx: StageContext, content: list[ChatCompletionContentPartParam]) -> Decisions:
-    completion = await get_openai(ctx.settings).chat.completions.parse(
-        model=ctx.settings.vision_model,
-        messages=[{"role": "system", "content": PROMPT}, {"role": "user", "content": content}],
-        response_format=Decisions,
-        reasoning_effort=ctx.settings.select_reasoning_effort or ctx.settings.reasoning_effort,
+    s = ctx.settings
+    return await structured.parse(
+        s,
+        model=s.vision_model,
+        prompt=PROMPT,
+        content=content,
+        schema=Decisions,
+        effort=structured.effort(s, s.select_reasoning_effort),
+        what="vision model selection",
     )
-    if not completion.choices:
-        raise ValueError("vision model returned no selection")
-    message = completion.choices[0].message
-    if message.refusal:
-        raise ValueError(f"vision model refused selection: {message.refusal}")
-    if message.parsed is None:
-        raise ValueError("vision model returned no parsed selection")
-    return message.parsed
 
 
 def render(source: Path, target: Path, crop: Box | None) -> None:
@@ -284,16 +270,6 @@ def render(source: Path, target: Path, crop: Box | None) -> None:
         tmp.replace(target)
     finally:
         tmp.unlink(missing_ok=True)
-
-
-def cached_decisions(cache: Path, batch: list[AlignedMoment]) -> Decisions | None:
-    """The cached decisions for a batch, or None if missing or invalid (never trusted)."""
-    try:
-        result = read_model(cache, Decisions)
-        validate_decisions(result, batch)
-    except (FileNotFoundError, ValueError):
-        return None
-    return result
 
 
 @dataclass
@@ -318,24 +294,23 @@ async def read_batch(
     order across batches. Saves each figure's source crop and emits VISUAL_SELECTED. Used by
     ``run`` and by the live select lane, so both make the same calls and cache entries.
     """
-    cache_dir = ctx.paths.selection_batches_dir
-    cache_dir.mkdir(exist_ok=True)
     ctx.paths.visuals_dir.mkdir(exist_ok=True)
     prepared = await asyncio.to_thread(
         prepare_batch, ctx, batch, summarize(earlier[-EARLIER_MOMENTS:])
     )
-    cache = cache_dir / f"{prepared.cache_key}.json"
-    result = cached_decisions(cache, batch)
-    if result is None:
-        # Invalid JSON, schema, encoding or decisions are a cache miss. Replace the
-        # entry only after a fresh response passes the same validation.
-        result = await retry_temporary(
-            lambda: choose(ctx, prepared.content),
-            ctx.settings.api_retry_delays_s,
-            what=f"session {ctx.session_id}: selection batch",
-        )
-        validate_decisions(result, batch)
-    write_model(cache, result)
+
+    def accept(decisions: Decisions) -> Decisions:
+        validate_decisions(decisions, batch)
+        return decisions
+
+    result = await structured.cached(
+        ctx.paths.selection_batches_dir / f"{prepared.cache_key}.json",
+        Decisions,
+        accept,
+        lambda: choose(ctx, prepared.content),
+        delays=ctx.settings.api_retry_delays_s,
+        what=f"session {ctx.session_id}: selection batch",
+    )
     out = BatchResult(contents=[], visuals=[], rejected_moment_ids=[])
     by_id = {d.moment_id: d for d in result.decisions}
     for item, frame in zip(batch, prepared.frames, strict=True):

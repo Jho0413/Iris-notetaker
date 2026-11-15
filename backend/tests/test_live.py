@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 from iris.config import Settings
 from iris.live import audio as audio_lane
 from iris.live.replay import file_frames
+from iris.llm import structured
 from iris.llm.errors import UserFacingError
 from iris.llm.usage import append_record
 from iris.main import create_app
@@ -21,7 +22,7 @@ from iris.models import (
     FrameIndex,
     UsageRecord,
 )
-from iris.pipeline.stages import render, select, transcribe, write
+from iris.pipeline.stages import render, transcribe
 from iris.pipeline.stages.transcribe import read_wav
 from iris.sources.browser_live import (
     CLUSTER_ID,
@@ -474,7 +475,7 @@ def test_make_notes_after_an_engine_restart(settings: Settings, webm: bytes):
 def test_live_session_produces_notes_like_an_upload(
     client: TestClient, webm: bytes, settings: Settings, monkeypatch
 ):
-    install_get_openai(monkeypatch, PipelineOpenAI(), write, select, transcribe, render, audio_lane)
+    install_get_openai(monkeypatch, PipelineOpenAI(), structured, transcribe, render, audio_lane)
     sid = start_recording(client)
     chunks = split(webm)
     order = list(range(len(chunks)))

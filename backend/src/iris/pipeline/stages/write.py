@@ -15,8 +15,6 @@ while recording and this stage reuses them when notes are made:
 """
 
 import bisect
-import hashlib
-import json
 import math
 import re
 from dataclasses import dataclass
@@ -27,8 +25,8 @@ from markdown_it.token import Token
 from pydantic import BaseModel
 
 from iris import notes_format
-from iris.llm.client import get_openai
-from iris.llm.errors import UserFacingError, retry_temporary
+from iris.llm import structured
+from iris.llm.errors import UserFacingError
 from iris.markdown import protect_math
 from iris.models import NOTHING_TO_WRITE, EventType, NotesDraft, Selection, SessionType, Transcript
 from iris.pipeline.context import StageContext
@@ -127,12 +125,8 @@ class WritingPart:
         return {r["id"] for r in self.records if r["kind"] == "visual"}
 
 
-def _json(value: object) -> str:
-    return json.dumps(value, ensure_ascii=False, sort_keys=True)
-
-
 def _array_len(sizes: list[int]) -> int:
-    """``len(_json(records))`` from the records' own JSON lengths (``, `` between items)."""
+    """The JSON length of ``records`` from their own lengths (``, `` between items)."""
     return 2 + sum(sizes) + 2 * max(len(sizes) - 1, 0)
 
 
@@ -154,7 +148,7 @@ def evidence_records(transcript: Transcript, selection: Selection, budget: int) 
             low, high = 0, len(remaining)
             while low < high:
                 mid = (low + high + 1) // 2
-                if len(_json([{**record, "text": remaining[:mid]}])) <= budget:
+                if len(structured.payload_json([{**record, "text": remaining[:mid]}])) <= budget:
                     low = mid
                 else:
                     high = mid - 1
@@ -223,7 +217,7 @@ def split_parts(
     for record in evidence_records(transcript, selection, budget):
         if not record["start"] < before:
             break  # records are in time order
-        size = len(_json(record))
+        size = len(structured.payload_json(record))
         if _array_len([size]) > budget:
             raise ValueError("visual metadata exceeds notes context budget")
         while current and _array_len([*sizes, size]) > budget:
@@ -322,21 +316,17 @@ def section_markdown(section: WrittenSection) -> str:
 
 
 async def generate_section(ctx: StageContext, payload: str) -> WrittenSection:
-    response = await get_openai(ctx.settings).chat.completions.parse(
-        model=ctx.settings.notes_model,
-        messages=[{"role": "system", "content": PROMPT}, {"role": "user", "content": payload}],
-        response_format=WrittenSection,
-        reasoning_effort=ctx.settings.notes_reasoning_effort or ctx.settings.reasoning_effort,
-        max_completion_tokens=32_000,  # includes reasoning tokens
+    s = ctx.settings
+    return await structured.parse(
+        s,
+        model=s.notes_model,
+        prompt=PROMPT,
+        content=payload,
+        schema=WrittenSection,
+        effort=structured.effort(s, s.notes_reasoning_effort),
+        what="notes model",
+        max_tokens=structured.MAX_COMPLETION_TOKENS,
     )
-    if not response.choices:
-        raise ValueError("notes model returned no choices")
-    message = response.choices[0].message
-    if message.refusal:
-        raise ValueError(f"notes model refused: {message.refusal}")
-    if message.parsed is None:
-        raise ValueError("notes model returned no parsed section")
-    return message.parsed
 
 
 def section_payload(
@@ -354,7 +344,7 @@ def section_payload(
 
     ``earlier`` defaults to ``first is not None``. The live draft lane sets it for a later part
     when the first part could not be written, so that part is still written as a continuation."""
-    return _json(
+    return structured.payload_json(
         {
             "records": part.records,
             "earlier_parts": first is not None if earlier is None else earlier,
@@ -367,16 +357,7 @@ def section_payload(
 
 
 def section_key(ctx: StageContext, payload: str) -> str:
-    return hashlib.sha256(
-        _json(
-            {
-                "prompt": PROMPT,
-                "model": ctx.settings.notes_model,
-                "schema": WrittenSection.model_json_schema(),
-                "payload": payload,
-            }
-        ).encode()
-    ).hexdigest()
+    return structured.request_key(PROMPT, ctx.settings.notes_model, WrittenSection, payload)
 
 
 def section_cache_path(ctx: StageContext, payload: str) -> Path:
@@ -395,21 +376,22 @@ async def write_section(
     """The validated section for ``part``, from the cache (``notes_sections/``) or one model
     call. Used by this stage and by the live draft lane, so both share the cache."""
     payload = section_payload(part, language=language, first=first, later=later, earlier=earlier)
-    cache = section_cache_path(ctx, payload)
-    try:
-        section = read_model(cache, WrittenSection)
+
+    def accept(section: WrittenSection) -> WrittenSection:
         validate_section(section, part, first)
-    except (FileNotFoundError, ValueError):
-        section = await retry_temporary(
-            lambda: generate_section(ctx, payload),
-            ctx.settings.api_retry_delays_s,
-            what=f"session {ctx.session_id}: notes section",
-        )
-        section = repaired(section)
-        validate_section(section, part, first)
-        cache.parent.mkdir(exist_ok=True)
-        write_model(cache, section)
-    return section
+        return section
+
+    async def make() -> WrittenSection:
+        return repaired(await generate_section(ctx, payload))
+
+    return await structured.cached(
+        section_cache_path(ctx, payload),
+        WrittenSection,
+        accept,
+        make,
+        delays=ctx.settings.api_retry_delays_s,
+        what=f"session {ctx.session_id}: notes section",
+    )
 
 
 def draft_of(sections: list[WrittenSection], parts: int) -> NotesDraft:
