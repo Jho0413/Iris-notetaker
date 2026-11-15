@@ -19,11 +19,6 @@ from tests.test_detect import SLIDE_A, SLIDE_B, SLIDE_C, Deck, three_slides
 from tests.test_live import COLOURS, jpeg
 
 
-@pytest.fixture
-def events() -> list[tuple[EventType, dict]]:
-    return []
-
-
 def make_ctx(tmp_path: Path, events: list, **settings) -> StageContext:
     return StageContext(
         session_id="s1",

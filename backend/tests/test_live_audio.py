@@ -67,11 +67,6 @@ def webm() -> bytes:
     return speech_webm()
 
 
-@pytest.fixture
-def paths(tmp_path: Path) -> SessionPaths:
-    return SessionPaths(tmp_path / "s1").ensure()
-
-
 def settings(tmp_path: Path, **overrides) -> Settings:
     values = {
         "data_dir": tmp_path / "data",

@@ -7,6 +7,8 @@ from fastapi.testclient import TestClient
 from iris import speech
 from iris.config import Settings
 from iris.main import create_app
+from iris.models import EventType
+from iris.store.layout import SessionPaths
 
 
 @pytest.fixture
@@ -18,6 +20,16 @@ def settings(tmp_path: Path) -> Settings:
 def client(settings: Settings):
     with TestClient(create_app(settings)) as c:
         yield c
+
+
+@pytest.fixture
+def events() -> list[tuple[EventType, dict]]:
+    return []
+
+
+@pytest.fixture
+def paths(tmp_path: Path) -> SessionPaths:
+    return SessionPaths(tmp_path / "s1").ensure()
 
 
 def loud_slices(samples: np.ndarray, rate: int) -> np.ndarray:

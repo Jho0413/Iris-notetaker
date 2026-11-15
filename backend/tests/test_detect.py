@@ -260,11 +260,6 @@ def test_empty_detector_finishes_with_nothing():
 
 
 @pytest.fixture
-def events() -> list[tuple[EventType, dict]]:
-    return []
-
-
-@pytest.fixture
 def ctx(tmp_path: Path, events: list) -> StageContext:
     return StageContext(
         session_id="s1",

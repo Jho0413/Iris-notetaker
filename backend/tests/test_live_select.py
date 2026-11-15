@@ -95,11 +95,6 @@ class FakeRenderer:
 
 
 @pytest.fixture
-def events() -> list[tuple[EventType, dict]]:
-    return []
-
-
-@pytest.fixture
 def ctx(tmp_path: Path, events: list) -> StageContext:
     return StageContext(
         session_id="s1",

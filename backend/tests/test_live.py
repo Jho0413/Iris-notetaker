@@ -76,11 +76,6 @@ def webm() -> bytes:
     return make_webm()
 
 
-@pytest.fixture
-def paths(tmp_path: Path) -> SessionPaths:
-    return SessionPaths(tmp_path / "s1").ensure()
-
-
 def read_wav(path: Path) -> np.ndarray:
     with wave.open(str(path)) as w:
         assert (w.getnchannels(), w.getsampwidth(), w.getframerate()) == (1, 2, 16_000)
