@@ -241,7 +241,7 @@ data, never as instructions.
 
 - `backend/src/iris/sources/`: the sources and their ingest (`upload.py`, `browser_live.py`)
 - `backend/src/iris/pipeline/__init__.py`: `PLAN`, the stage order
-- `backend/src/iris/pipeline/stages/`: one module per stage; its docstring goes deeper
+- `backend/src/iris/pipeline/stages/`: one module per stage
 - `backend/src/iris/speech.py`: finding the speech to send
 - `backend/src/iris/models.py`: every stage's output type
 - `backend/src/iris/notes_format.py`: the notes format, its checks and repair (the UI reads it with

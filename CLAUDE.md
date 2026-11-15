@@ -59,7 +59,9 @@ the form that fits the change; don't invent states where there are none.
   `ConfirmDialog`) and then for a well-kept library. Extend what exists instead of making a
   near-copy.
 - **Change only what the task needs.** No drive-by refactors, renames or reformatting; note them
-  and do them separately, unless the user asks. Remove code a change leaves unused.
+  and do them separately, unless the user asks. Remove code a change leaves unused. The one
+  exception to this rule: removing, from a file you work on, the comments and docstrings that
+  *No comments* doesn't keep.
 - **One source of truth.** Settings, file names, wording and constants live in one place
   (`Settings`, `store/layout.py`, `session/messages.ts`) and are imported, never copied.
 - **Pure logic, thin edges.** Keep decisions in small pure functions (no I/O) that plain
@@ -68,8 +70,28 @@ the form that fits the change; don't invent states where there are none.
   model output) once, where it enters; code behind that works with typed, valid data.
 - **Fail clearly.** Developers get the full error in the log; the user gets plain words and a way
   to recover. Never swallow an error silently.
-- **Names and comments explain why.** Name things for what they mean to the user or the domain;
-  comment the reason behind non-obvious code, not what it does.
+- **Shared code has a home.** A building block used by more than one stage, lane or entry point
+  lives in a shared module (`llm/` for model calls, `store/` for file names and reading and
+  writing files, `speech.py`, `svg.py`), never inside a stage, lane or route that the others then
+  import from or copy. Stages and lanes hold only their own decisions. When two callers differ in
+  one step (where the input comes from, how an error is handled), share the rest and pass that
+  step in, as a small `Protocol` or a function argument, the way `Source` does for uploads and
+  live recordings. An interface earns its place with two real implementations, not one.
+- **No comments** in hand-written code and tests (`backend/`, `frontend/`, `desktop/`): no comments
+  in any form (`#`, `//`, `/* */`, JSDoc, HTML and CSS comments) and no docstrings, except the ones
+  something reads (below), which new code writes too. Name things for what they mean to the user
+  or the domain, and let a clear name or a smaller function carry what a comment would; a reason
+  still needed goes into such a name, or as a decision into the feature's `docs/` page. Tool
+  directives stay, with nothing after them (shebangs, `# noqa`, `# type: ignore`,
+  `// eslint-disable`). Generated files (`schema.d.ts`) and config and example
+  files of any format (`.env.example`, `pyproject.toml`, `vite.config.ts`, `tsconfig*.json`,
+  `electron-builder.yml`, `Makefile`, CI workflows) keep their comments. When you work on a file,
+  remove its other comments and docstrings. The docstrings that stay:
+  - MCP tool docstrings: the assistant reads them as the tools' descriptions;
+  - docstrings of FastAPI routes and of the models the API sends or accepts (the ones that reach
+    `schema.d.ts`): they become the OpenAPI schema;
+  - the module or class docstring that states an interface's contract (today `sources/base.py`
+    and `live/lane.py`), not its methods.
 
 ## Conventions
 
@@ -91,9 +113,8 @@ the form that fits the change; don't invent states where there are none.
 - **Tests never call real paid APIs.** Use fakes or monkeypatching. Generate media fixtures in
   `tmp_path` (synthetic video/audio/frames); don't commit large binaries.
 - **Docs are overviews.** `docs/` explains the shape, the flow and the decisions with their why;
-  the detail stays in the code and its comments. A change that alters a flow or a decision updates
-  its page. Links run one way: a page's "Where to look" points at the code; code comments explain
-  themselves and never point at a docs page.
+  the detail stays in the code. A change that alters a flow or a decision updates its page. Links
+  run one way: a page's "Where to look" points at the code; code never points at a docs page.
 - **Commits:** one short single-line message, `<type>(<domain>): <comment>`, e.g.
   `fix(render): retry transient API errors per figure`. No body, no `Co-Authored-By`, no AI
   attribution.
