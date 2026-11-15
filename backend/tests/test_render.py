@@ -12,8 +12,7 @@ from iris.pipeline.stages import assemble, render
 from iris.store.layout import read_model, write_model
 from iris.svg import rasterize_svg, sanitize_svg
 from tests.builders import figure_to_render, stage_ctx
-
-SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 10"><rect width="20"/></svg>'
+from tests.fakes import SVG
 
 
 @pytest.fixture

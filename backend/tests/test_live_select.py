@@ -28,6 +28,7 @@ from iris.sources.browser_live import store_frame
 from iris.store.layout import read_model, write_model
 from tests.api_errors import connection_error
 from tests.builders import stage_ctx
+from tests.fakes import Drawer
 from tests.media import image_bytes, three_slides
 from tests.waiting import eventually, settle
 
@@ -283,49 +284,26 @@ async def test_figures_render_in_the_background_and_a_failure_is_not_fatal(
 async def test_live_renders_hit_the_render_cache(
     ctx: StageContext, vision: FakeVision, monkeypatch, events: list
 ):
-    drawn = []
-
-    async def draw(_ctx, visual, _source, _feedback):
-        drawn.append(visual.id)
-        svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2 1"><rect width="2"/></svg>'
-        return svg.encode(), b"preview"
-
-    async def check(*_args):
-        return render.Check(matches=True, problems=[])
-
-    monkeypatch.setitem(render.DRAWERS, "svg", (draw, "svg"))
-    monkeypatch.setattr(render, "check", check)
+    drawer = Drawer(monkeypatch)
     driver = Driver(ctx).start()
     await driver.close(0)
     await driver.transcribe(0, to=100)
     await driver.selected(10)
     await eventually(lambda: any(kind == EventType.VISUAL_RENDERED for kind, _ in events))
     timeline = await driver.stop()
-    assert drawn == ["v000001"]
+    assert drawer.calls == ["v000001"]
     assert (ctx.paths.visuals_dir / "v000001.svg").is_file()
 
     write_model(ctx.paths.selection, timeline.selection())
     await render.run(ctx)
-    assert drawn == ["v000001"]
+    assert drawer.calls == ["v000001"]
 
 
 async def test_an_api_error_in_a_live_render_gives_the_source_crop_uncached(
     ctx: StageContext, vision: FakeVision, monkeypatch, events: list
 ):
-    drawn = []
-
-    async def draw(_ctx, visual, _source, _feedback):
-        drawn.append(visual.id)
-        if len(drawn) == 1:
-            raise connection_error()
-        svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2 1"><rect width="2"/></svg>'
-        return svg.encode(), b"preview"
-
-    async def check(*_args):
-        return render.Check(matches=True, problems=[])
-
-    monkeypatch.setitem(render.DRAWERS, "svg", (draw, "svg"))
-    monkeypatch.setattr(render, "check", check)
+    drawer = Drawer(monkeypatch)
+    drawer.errors["v000001"] = connection_error()
     driver = Driver(ctx).start()
     await driver.close(0)
     await driver.transcribe(0, to=100)
@@ -341,9 +319,10 @@ async def test_an_api_error_in_a_live_render_gives_the_source_crop_uncached(
     }
     assert not list(ctx.paths.render_cache_dir.glob("*.json"))
 
+    del drawer.errors["v000001"]
     write_model(ctx.paths.selection, timeline.selection())
     await render.run(ctx)
-    assert drawn == ["v000001", "v000001"]
+    assert drawer.calls == ["v000001", "v000001"]
     [rendered] = read_model(ctx.paths.renders, Renders).visuals
     assert rendered.verified and rendered.render_as == "svg"
 

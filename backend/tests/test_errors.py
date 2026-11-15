@@ -46,15 +46,14 @@ from iris.models import (
     Visual,
 )
 from iris.pipeline import STAGES
-from iris.pipeline.stages import render, select, write
+from iris.pipeline.stages import select, write
 from iris.store.db import SessionStore
 from iris.store.layout import read_model, write_model
 from tests.api_errors import connection_error, status_error, timeout_error
 from tests.builders import aligned_moments, figure_to_render, section
+from tests.fakes import Drawer
 from tests.media import make_audio, make_media, write_wav
 from tests.waiting import wait_for_stage, wait_for_status
-
-SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 10"><rect width="20"/></svg>'
 
 
 @pytest.mark.parametrize(
@@ -218,32 +217,6 @@ def with_figures(ctx, monkeypatch, *ids: str) -> list[Visual]:
     write_model(ctx.paths.transcript, Transcript(segments=[segment]))
     monkeypatch.setattr(write, "generate_section", AsyncMock(return_value=section(ids)))
     return visuals
-
-
-class Drawer:
-    def __init__(self, monkeypatch):
-        self.errors: dict[str, BaseException] = {}
-        self.calls: list[str] = []
-        self.hold: dict[str, asyncio.Event] = {}
-        self.cancelled: list[str] = []
-        monkeypatch.setitem(render.DRAWERS, "svg", (self.draw, "svg"))
-        monkeypatch.setitem(render.DRAWERS, "image", (self.draw, "png"))
-        monkeypatch.setattr(render, "check", self.check)
-
-    async def draw(self, _ctx, visual, _source, _feedback):
-        self.calls.append(visual.id)
-        try:
-            if visual.id in self.hold:
-                await self.hold[visual.id].wait()
-        except asyncio.CancelledError:
-            self.cancelled.append(visual.id)
-            raise
-        if visual.id in self.errors:
-            raise self.errors[visual.id]
-        return SVG.encode(), b"preview"
-
-    async def check(self, *_args):
-        return render.Check(matches=True, problems=[])
 
 
 @pytest.mark.parametrize(
