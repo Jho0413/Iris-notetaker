@@ -1,9 +1,7 @@
-import json
 import random
 from datetime import UTC, datetime
 from fractions import Fraction
 from pathlib import Path
-from types import SimpleNamespace
 
 import av
 import cv2
@@ -12,6 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from iris.config import Settings
+from iris.live import audio as audio_lane
 from iris.live.replay import file_frames
 from iris.llm.errors import UserFacingError
 from iris.llm.usage import append_record
@@ -22,6 +21,7 @@ from iris.models import (
     FrameIndex,
     UsageRecord,
 )
+from iris.pipeline.stages import render, select, transcribe, write
 from iris.pipeline.stages.transcribe import read_wav
 from iris.sources.browser_live import (
     CLUSTER_ID,
@@ -41,7 +41,8 @@ from iris.sources.browser_live import (
     store_frame,
 )
 from iris.store.layout import SessionPaths, read_model, session_paths
-from tests.builders import post_audio, post_frame, section, stage_ctx, start, stop
+from tests.builders import post_audio, post_frame, stage_ctx, start, stop
+from tests.fakes import PipelineOpenAI, install_get_openai
 from tests.media import (
     COLOURS,
     TONE_SECONDS,
@@ -469,55 +470,10 @@ def test_make_notes_after_an_engine_restart(settings: Settings, webm: bytes):
     assert len(read_16k_wav(audio)) / 16_000 == pytest.approx(WEBM_SECONDS, abs=0.1)
 
 
-def fake_openai(monkeypatch) -> None:
-    from iris.live import audio
-    from iris.pipeline.stages import render, select, transcribe, write
-
-    async def parse(**kwargs):
-        schema = kwargs["response_format"]
-        if schema is select.Decisions:
-            content = kwargs["messages"][1]["content"]
-            ids = [json.loads(p["text"])["moment_id"] for p in content[1:] if p["type"] == "text"]
-            figure = select.ElementDecision(
-                kind="figure",
-                content="A coloured slide",
-                build=0,
-                region=None,
-                caption="Coloured slide",
-                render_as="svg",
-            )
-            result = select.Decisions(
-                decisions=[select.Decision(moment_id=m, keep=True, elements=[figure]) for m in ids]
-            )
-        elif schema is render.SvgDrawing:
-            svg = (
-                '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 9 9"><rect width="9"/></svg>'
-            )
-            result = render.SvgDrawing(svg=svg)
-        elif schema is render.Check:
-            result = render.Check(matches=True, problems=[])
-        else:
-            payload = json.loads(kwargs["messages"][1]["content"])
-            result = section([r["id"] for r in payload["records"] if r["kind"] == "visual"])
-        message = SimpleNamespace(parsed=result, refusal=None)
-        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
-
-    async def transcribe_audio(**kwargs):
-        segments = [{"start": 0, "end": 2, "text": "Ship the prototype. Alex will test it."}]
-        return {"language": "english", "segments": segments}
-
-    fake = SimpleNamespace(
-        chat=SimpleNamespace(completions=SimpleNamespace(parse=parse)),
-        audio=SimpleNamespace(transcriptions=SimpleNamespace(create=transcribe_audio)),
-    )
-    for module in (write, select, transcribe, render, audio):
-        monkeypatch.setattr(module, "get_openai", lambda _: fake)
-
-
 def test_live_session_produces_notes_like_an_upload(
     client: TestClient, webm: bytes, settings: Settings, monkeypatch
 ):
-    fake_openai(monkeypatch)
+    install_get_openai(monkeypatch, PipelineOpenAI(), write, select, transcribe, render, audio_lane)
     sid = start(client)
     chunks = split(webm)
     order = list(range(len(chunks)))

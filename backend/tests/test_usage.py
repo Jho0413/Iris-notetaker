@@ -30,14 +30,14 @@ from iris.models import (
     UsageRecord,
 )
 from iris.pipeline.context import StageContext
-from iris.pipeline.stages import render, select
+from iris.pipeline.stages import render
 from iris.store.db import SessionStore
 from iris.store.layout import SessionPaths, read_model, session_paths, write_model
-from tests.builders import figure_to_render, section, stage_ctx
+from tests.builders import figure_to_render, stage_ctx
+from tests.fakes import PipelineOpenAI, install_client
 from tests.media import make_media
 from tests.waiting import wait_until_idle
 
-SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 9 9"><rect width="9"/></svg>'
 IMAGE = b"\x89PNG generated"
 
 CHAT_USAGE = {"prompt": 1000, "cached": 200, "completion": 500, "reasoning": 300}
@@ -73,43 +73,18 @@ def image_response():
     )
 
 
-class FakeOpenAI:
+class FakeOpenAI(PipelineOpenAI):
     def __init__(self):
-        self.calls: list[dict] = []
-        self.chat = SimpleNamespace(completions=SimpleNamespace(parse=self.parse))
+        super().__init__()
         self.images = SimpleNamespace(generate=self.generate)
-        self.audio = SimpleNamespace(transcriptions=SimpleNamespace(create=self.transcribe))
 
-    async def parse(self, **kwargs):
-        self.calls.append(kwargs)
-        schema = kwargs.get("response_format")
-        if schema is None:
-            result = None
-        elif schema is select.Decisions:
-            content = kwargs["messages"][1]["content"]
-            ids = [json.loads(p["text"])["moment_id"] for p in content[1:] if p["type"] == "text"]
-            figure = select.ElementDecision(
-                kind="figure",
-                content="A coloured slide",
-                build=0,
-                region=None,
-                caption="Colored slide",
-                render_as="svg",
-            )
-            result = select.Decisions(
-                decisions=[select.Decision(moment_id=i, keep=True, elements=[figure]) for i in ids]
-            )
-        elif schema is render.SvgDrawing:
-            result = render.SvgDrawing(svg=SVG)
-        elif schema is render.Check:
-            candidate = kwargs["messages"][1]["content"][2]["image_url"]["url"]
-            passed = candidate.endswith(base64.b64encode(IMAGE).decode())
-            result = render.Check(matches=passed, problems=[] if passed else ["wrong shape"])
-        else:
-            payload = json.loads(kwargs["messages"][1]["content"])
-            ids = [r["id"] for r in payload["records"] if r["kind"] == "visual"]
-            result = section(ids)
+    def respond(self, result, kwargs):
         return chat_response(result, model=kwargs["model"])
+
+    def check(self, kwargs) -> render.Check:
+        candidate = kwargs["messages"][1]["content"][2]["image_url"]["url"]
+        passed = candidate.endswith(base64.b64encode(IMAGE).decode())
+        return render.Check(matches=passed, problems=[] if passed else ["wrong shape"])
 
     async def generate(self, **kwargs):
         self.calls.append(kwargs)
@@ -117,17 +92,14 @@ class FakeOpenAI:
 
     async def transcribe(self, **kwargs):
         self.calls.append(kwargs)
-        return {
-            "language": "english",
-            "segments": [{"start": 0, "end": 2, "text": "Ship the prototype. Alex will test it."}],
-            "usage": {"type": "duration", "seconds": WHISPER_SECONDS},
-        }
+        heard = await super().transcribe(**kwargs)
+        return {**heard, "usage": {"type": "duration", "seconds": WHISPER_SECONDS}}
 
 
 @pytest.fixture
 def fake(monkeypatch) -> FakeOpenAI:
     fake = FakeOpenAI()
-    monkeypatch.setattr(llm_client, "_client", lambda _key: fake)
+    install_client(monkeypatch, fake)
     return fake
 
 

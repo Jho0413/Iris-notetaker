@@ -2,7 +2,6 @@ import json
 import time
 from functools import cache
 from pathlib import Path
-from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -12,7 +11,6 @@ from iris.config import Settings
 from iris.live import Lane, LiveTimeline, promote
 from iris.live.audio import AudioLane
 from iris.live.replay import chunk_webm, encode_webm
-from iris.llm import client as llm_client
 from iris.llm.usage import read_usage
 from iris.main import create_app
 from iris.models import (
@@ -34,10 +32,10 @@ from iris.models import (
 )
 from iris.pipeline import PLAN, STAGES
 from iris.pipeline.context import StageContext
-from iris.pipeline.stages import render, select, synthesize
 from iris.store.layout import SessionPaths, read_model, session_paths
-from tests.builders import post_audio, post_frame, section, stage_ctx, start, stop
-from tests.media import WEBM_RATE, image_bytes, slide, tone
+from tests.builders import post_audio, post_frame, stage_ctx, start, stop
+from tests.fakes import PipelineOpenAI, install_client
+from tests.media import WEBM_RATE, image_bytes, slide, tone, wav_seconds
 from tests.waiting import wait_for_done
 
 SECONDS = 120
@@ -66,55 +64,19 @@ def screen_at(t: float) -> bytes:
     return image_bytes(slide(title, shape=shape))
 
 
-class FakeOpenAI:
-    def __init__(self):
-        self.chat = SimpleNamespace(completions=SimpleNamespace(parse=self.parse))
-        self.audio = SimpleNamespace(transcriptions=SimpleNamespace(create=self.transcribe))
-
+class FakeOpenAI(PipelineOpenAI):
     async def transcribe(self, **kwargs):
         data = kwargs["file"][1]
-        seconds = (len(data) - 44) / 2 / 16_000
         text = f"Point {len(data) % 9973} about the slide on screen, with its working explained."
-        return {"language": "english", "segments": [{"start": 0, "end": seconds, "text": text}]}
-
-    async def parse(self, **kwargs):
-        schema = kwargs["response_format"]
-        if schema is select.Decisions:
-            content = kwargs["messages"][1]["content"]
-            ids = [json.loads(p["text"])["moment_id"] for p in content[1:] if p["type"] == "text"]
-            figure = select.ElementDecision(
-                kind="figure",
-                content="A coloured slide",
-                build=0,
-                region=None,
-                caption="Coloured slide",
-                render_as="svg",
-            )
-            result = select.Decisions(
-                decisions=[select.Decision(moment_id=m, keep=True, elements=[figure]) for m in ids]
-            )
-        elif schema is render.SvgDrawing:
-            svg = (
-                '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 9 9"><rect width="9"/></svg>'
-            )
-            result = render.SvgDrawing(svg=svg)
-        elif schema is render.Check:
-            result = render.Check(matches=True, problems=[])
-        elif schema is synthesize.EditPlan:
-            result = synthesize.EditPlan(edits=[])
-        else:
-            payload = json.loads(kwargs["messages"][1]["content"])
-            ids = [r["id"] for r in payload["records"] if r["kind"] == "visual"]
-            result = section(ids)
-        message = SimpleNamespace(parsed=result, refusal=None)
-        return SimpleNamespace(choices=[SimpleNamespace(message=message)], usage=None)
+        segment = {"start": 0, "end": wav_seconds(data), "text": text}
+        return {"language": "english", "segments": [segment]}
 
 
 @pytest.fixture
 def fake(monkeypatch) -> FakeOpenAI:
-    client = FakeOpenAI()
-    monkeypatch.setattr(llm_client, "_client", lambda _key: client)
-    return client
+    fake = FakeOpenAI()
+    install_client(monkeypatch, fake)
+    return fake
 
 
 def live_settings(tmp_path: Path, **overrides) -> Settings:
