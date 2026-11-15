@@ -179,5 +179,5 @@ def test_an_image_part_carries_a_data_url_and_its_detail():
     assert structured.image_part(b"\x01", "image/jpeg", "high")["image_url"]["detail"] == "high"
 
 
-def test_the_payload_is_compact_sorted_and_keeps_unicode():
+def test_the_payload_is_sorted_and_keeps_unicode():
     assert structured.payload_json({"b": "café", "a": 1}) == '{"a": 1, "b": "café"}'
