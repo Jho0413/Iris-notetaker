@@ -70,7 +70,9 @@ def test_a_damaged_transcript_is_refused_in_plain_words_and_logged(
 
 
 def make_session_with_notes(client: TestClient, settings: Settings, title: str) -> str:
-    return session_with_notes(client.app.state.store, settings, title, markdown="Body text.")[0]
+    return session_with_notes(
+        client.app.state.store, settings, title, markdown="Body text.", format_version=1
+    )[0]
 
 
 @pytest.mark.parametrize(

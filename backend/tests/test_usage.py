@@ -108,7 +108,6 @@ def ctx(tmp_path) -> StageContext:
 
 
 def test_pipeline_records_every_call_and_cached_rerun_costs_nothing(tmp_path, fake):
-
     settings = Settings(data_dir=tmp_path / "data", openai_api_key="test", render_attempts=1)
     with TestClient(create_app(settings)) as client:
         recording = make_media(tmp_path / "talk.mp4", seconds=2)

@@ -34,7 +34,7 @@ from iris.store.layout import SessionPaths, read_model, write_model
 from tests.api_errors import connection_error, status_error
 from tests.builders import stage_ctx
 from tests.fakes import fake_openai, install_client
-from tests.media import SPEECH_RATE, split, tone, wav_seconds
+from tests.media import SPEECH_RATE, WEBM_RATE, split, tone, wav_seconds
 
 SECONDS = 12
 WORDS = [
@@ -51,7 +51,7 @@ WORDS = [
 
 
 def speech_webm(words=WORDS, seconds: int = SECONDS) -> bytes:
-    src_rate, n = 48_000, 960
+    src_rate, n = WEBM_RATE, 960
     t = np.arange(seconds * src_rate) / src_rate
     starts = (np.arange(len(t)) // n * n) / src_rate
     loud = np.zeros(len(t), bool)
