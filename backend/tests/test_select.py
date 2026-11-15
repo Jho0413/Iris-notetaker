@@ -15,7 +15,13 @@ from iris.models import (
 from iris.pipeline.stages import select
 from iris.store.layout import read_model, write_model
 from tests.builders import aligned_moments, stage_ctx
-from tests.fakes import fake_openai, parsed_response
+from tests.fakes import (
+    answer_message,
+    chat_completion,
+    fake_openai,
+    parsed_response,
+    sdk_client,
+)
 
 
 @pytest.fixture
@@ -238,10 +244,6 @@ def test_long_context_is_bounded_and_changes_invalidate_cache(setup):
 
 @pytest.mark.parametrize("valid", [True, False])
 async def test_selection_through_sdk_parser(setup, monkeypatch, valid):
-    import json
-
-    import httpx
-    from openai import AsyncOpenAI
     from pydantic import ValidationError
 
     ctx, items, _, _ = setup
@@ -254,31 +256,10 @@ async def test_selection_through_sdk_parser(setup, monkeypatch, valid):
         result = select.Decisions(decisions=[decision("m0")]).model_dump()
         if not valid:
             del result["decisions"][0]["keep"]
-        return httpx.Response(
-            200,
-            json={
-                "id": "test-completion",
-                "object": "chat.completion",
-                "created": 0,
-                "model": ctx.settings.vision_model,
-                "choices": [
-                    {
-                        "index": 0,
-                        "finish_reason": "stop",
-                        "message": {
-                            "role": "assistant",
-                            "content": json.dumps(result),
-                        },
-                    }
-                ],
-            },
-        )
+        message = answer_message(json.dumps(result))
+        return chat_completion(message, model=ctx.settings.vision_model)
 
-    async with AsyncOpenAI(
-        api_key="test-only",
-        max_retries=0,
-        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handle)),
-    ) as client:
+    async with sdk_client(handle) as client:
         monkeypatch.setattr(select, "get_openai", lambda _: client)
         if valid:
             await select.run(ctx)

@@ -37,7 +37,14 @@ from iris.store.db import SessionStore
 from iris.store.layout import read_model, session_paths, write_model
 from tests.api_errors import connection_error, status_error
 from tests.builders import stage_ctx
-from tests.fakes import fake_openai, parsed_response
+from tests.fakes import (
+    answer_message,
+    chat_completion,
+    fake_openai,
+    parsed_response,
+    refusal_message,
+    sdk_client,
+)
 from tests.media import image_bytes
 
 
@@ -756,9 +763,6 @@ async def test_prompts_get_session_text_as_json_data(ctx, monkeypatch):
 
 @pytest.mark.parametrize("mode", ["ok", "refusal", "empty"])
 async def test_generate_uses_strict_structured_output(tmp_path, monkeypatch, mode):
-    import httpx
-    from openai import AsyncOpenAI
-
     ctx = stage_ctx(tmp_path)
     plan = synthesize.EditPlan.model_validate({"edits": [edit("merge", [0, 1])]})
 
@@ -766,28 +770,12 @@ async def test_generate_uses_strict_structured_output(tmp_path, monkeypatch, mod
         payload = json.loads(request.content)
         assert payload["response_format"]["json_schema"]["strict"]
         assert payload["model"] == ctx.settings.synthesis_model
-        message = {"role": "assistant", "content": plan.model_dump_json()}
+        message = answer_message(plan.model_dump_json())
         if mode == "refusal":
-            message = {"role": "assistant", "content": None, "refusal": "Cannot comply"}
-        choices = (
-            [] if mode == "empty" else [{"index": 0, "finish_reason": "stop", "message": message}]
-        )
-        return httpx.Response(
-            200,
-            json={
-                "id": "t",
-                "object": "chat.completion",
-                "created": 0,
-                "model": "m",
-                "choices": choices,
-            },
-        )
+            message = refusal_message("Cannot comply")
+        return chat_completion(*([] if mode == "empty" else [message]))
 
-    async with AsyncOpenAI(
-        api_key="test",
-        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handle)),
-        max_retries=0,
-    ) as client:
+    async with sdk_client(handle) as client:
         monkeypatch.setattr(synthesize, "get_openai", lambda _: client)
         if mode == "ok":
             got = await synthesize.generate(ctx, "p", "{}", synthesize.EditPlan, "low")

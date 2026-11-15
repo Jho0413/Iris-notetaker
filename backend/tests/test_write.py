@@ -19,7 +19,14 @@ from iris.models import (
 from iris.pipeline.stages import assemble, write
 from iris.store.layout import read_model, write_model
 from tests.builders import markdown_images, section, stage_ctx
-from tests.fakes import PipelineOpenAI, install_get_openai
+from tests.fakes import (
+    PipelineOpenAI,
+    answer_message,
+    chat_completion,
+    install_get_openai,
+    refusal_message,
+    sdk_client,
+)
 from tests.media import make_media
 from tests.waiting import wait_for_status
 
@@ -179,8 +186,6 @@ def test_changed_style_rejected():
 
 @pytest.mark.parametrize("mode", ["ok", "refusal", "empty", "invalid"])
 async def test_real_sdk_response_parsing(tmp_path, monkeypatch, mode):
-    import httpx
-    from openai import AsyncOpenAI
     from pydantic import ValidationError
 
     ctx = stage_ctx(tmp_path)
@@ -189,28 +194,11 @@ async def test_real_sdk_response_parsing(tmp_path, monkeypatch, mode):
         payload = json.loads(request.content)
         assert payload["response_format"]["json_schema"]["strict"]
         content = section().model_dump_json() if mode == "ok" else "{}"
-        message = {"role": "assistant", "content": content}
-        if mode == "refusal":
-            message = {"role": "assistant", "content": None, "refusal": "Cannot comply"}
-        choices = (
-            [] if mode == "empty" else [{"index": 0, "finish_reason": "stop", "message": message}]
-        )
-        return httpx.Response(
-            200,
-            json={
-                "id": "test",
-                "object": "chat.completion",
-                "created": 0,
-                "model": ctx.settings.notes_model,
-                "choices": choices,
-            },
-        )
+        message = refusal_message("Cannot comply") if mode == "refusal" else answer_message(content)
+        messages = [] if mode == "empty" else [message]
+        return chat_completion(*messages, model=ctx.settings.notes_model)
 
-    async with AsyncOpenAI(
-        api_key="test",
-        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handle)),
-        max_retries=0,
-    ) as client:
+    async with sdk_client(handle) as client:
         monkeypatch.setattr(write, "get_openai", lambda _: client)
         if mode == "ok":
             assert await write.generate_section(ctx, "{}") == section()

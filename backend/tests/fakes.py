@@ -109,11 +109,11 @@ class Drawer:
         return render.Check(matches=True, problems=[])
 
 
-def answer(content: str) -> dict:
+def answer_message(content: str) -> dict:
     return {"role": "assistant", "content": content}
 
 
-def refusal(text: str) -> dict:
+def refusal_message(text: str) -> dict:
     return {"role": "assistant", "content": None, "refusal": text}
 
 
