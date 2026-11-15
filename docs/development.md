@@ -113,11 +113,11 @@ is public).
 ## Settings
 
 Settings are `IRIS_*` environment variables, plus the key as `OPENAI_API_KEY`; the full list is in
-`backend/src/iris/config.py` and most are in `backend/.env.example`. The Settings page saves what
-a user can change to `settings.json` in the data folder; an environment variable or `.env` line
-wins over it, and the page shows that setting as locked. A damaged `settings.json` never stops
-Iris starting: an unreadable file is ignored whole and an invalid value on its own, each with a
-warning in the log, and the next save from the page replaces the file. `.env` and `data/` are read from the
+`backend/src/iris/config.py` and most are in `backend/.env.example`. The Settings page saves what a
+user can change to `settings.json` in the data folder; an environment variable or `.env` line wins
+over it, and the page shows that setting as locked. A damaged `settings.json` never stops Iris
+starting: an unreadable file is ignored whole and an invalid value on its own, each with a warning
+in the log, and the next save from the page replaces the file. `.env` and `data/` are read from the
 current folder, so run the engine and the CLI from `backend/`.
 
 ## Debugging a failed session

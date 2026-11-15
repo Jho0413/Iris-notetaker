@@ -273,7 +273,8 @@ All in `backend/src/iris/`:
 - `main.py`: creates the app: the store, the event bus, the runner, the token check.
 - `api/routes/`: the routes, by area (sessions, live input, progress, usage, settings).
 - `jobs/runner.py`: runs, cut-off runs and how a failure is recorded.
-- `store/layout.py`: every file in a session folder, and `write_model`.
+- `store/layout.py`: every file in a session folder, writing files whole (`write_model`), and
+  keeping paths inside the session.
 - `store/db.py`: the store.
 - `notes_edits.py`: which version of the notes a reader gets.
 - `export.py`: the Markdown export.
