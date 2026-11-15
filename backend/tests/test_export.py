@@ -2,31 +2,11 @@ import base64
 from pathlib import Path
 
 import pytest
-from markdown_it import MarkdownIt
 
 from iris.export import export_markdown_embedded
-from iris.models import FrameRef, Notes, NotesVisual, SessionType, Visual
+from iris.models import FrameRef, Visual
 from iris.pipeline.stages.assemble import resolve_markers
-
-
-def notes(markdown, visuals=(), format_version=2):
-    return Notes(
-        session_id="s1",
-        session_type=SessionType.MEETING,
-        title="Review",
-        markdown=markdown,
-        visuals=[NotesVisual(**v.model_dump()) for v in visuals],
-        format_version=format_version,
-    )
-
-
-def images(markdown):
-    return [
-        child
-        for block in MarkdownIt().parse(markdown)
-        for child in (block.children or [])
-        if child.type == "image"
-    ]
+from tests.builders import markdown_images, notes
 
 
 @pytest.mark.parametrize(
@@ -51,13 +31,13 @@ def test_assembly_to_export_preserves_caption_and_embeds(tmp_path, caption):
     )
     markdown = resolve_markers("[visual:v1]", [visual])
     exported = export_markdown_embedded(notes(markdown, [visual]), tmp_path)
-    image = images(exported)[0]
+    image = markdown_images(exported)[0]
     assert (
         image.attrGet("src")
         == "data:image/jpeg;base64," + base64.b64encode(b"real image bytes").decode()
     )
     assert "".join(t.content for t in image.children) == caption
-    assert len(images(exported)) == 1
+    assert len(markdown_images(exported)) == 1
 
 
 def test_multiple_reference_images_titles_and_parentheses(tmp_path):
@@ -66,7 +46,7 @@ def test_multiple_reference_images_titles_and_parentheses(tmp_path):
         '![Revenue [USD]](<chart (1).png> "First")\n\n![second][chart]\n\n'
         '[chart]: <chart (1).png> "Second"'
     )
-    output = images(export_markdown_embedded(notes(md), tmp_path))
+    output = markdown_images(export_markdown_embedded(notes(md), tmp_path))
     assert len(output) == 2
     assert all(i.attrGet("src") == "data:image/png;base64,cG5n" for i in output)
     assert [i.attrGet("title") for i in output] == ["First", "Second"]
@@ -89,7 +69,7 @@ def test_code_and_nonlocal_images_remain_unembedded(tmp_path):
     assert "data:image/jpeg;base64," not in exported
     assert "`![example](local.jpg)`" in exported
     assert "![example](local.jpg)" in exported
-    assert [i.attrGet("src") for i in images(exported)] == [
+    assert [i.attrGet("src") for i in markdown_images(exported)] == [
         "https://example.com/image.jpg",
         "missing.jpg",
         "../outside.jpg",
@@ -108,7 +88,9 @@ def test_code_and_nonlocal_images_remain_unembedded(tmp_path):
 def test_export_preserves_image_destinations(tmp_path, destination):
     original = f"![image](<{destination}>)"
     exported = export_markdown_embedded(notes(original), tmp_path)
-    assert images(exported)[0].attrGet("src") == images(original)[0].attrGet("src")
+    assert markdown_images(exported)[0].attrGet("src") == markdown_images(original)[0].attrGet(
+        "src"
+    )
 
 
 def test_export_api_embeds_captioned_image(client, settings):
@@ -134,7 +116,7 @@ def test_export_api_embeds_captioned_image(client, settings):
     assert response.headers["content-disposition"] == (
         "attachment; filename=\"Review.md\"; filename*=UTF-8''Review.md"
     )
-    image = images(response.text)[0]
+    image = markdown_images(response.text)[0]
     assert image.attrGet("src") == "data:image/jpeg;base64,aW1hZ2UgYnl0ZXM="
     assert "".join(t.content for t in image.children) == visual.caption
 
@@ -179,7 +161,9 @@ def test_export_keeps_boxes_and_steps_and_embeds_figures_inside_them(tmp_path):
     assert "At the bottom, $P_1 * W$ points up." in lines
     assert ":::box[Key idea]{color=blue}" in lines and "- two" in lines
     assert lines.count(":::") == 2
-    assert [i.attrGet("src") for i in images(exported)] == ["data:image/jpeg;base64,aW1hZ2U="]
+    assert [i.attrGet("src") for i in markdown_images(exported)] == [
+        "data:image/jpeg;base64,aW1hZ2U="
+    ]
     assert "*Forces \\[N\\]*" in exported or "*Forces [N]*" in exported
     assert "gone" not in exported
     assert "```\n:::box\n```" in exported
@@ -198,4 +182,4 @@ def test_export_upgrades_old_notes(tmp_path):
     old = "**Answer:** It works.\n\n![Chart](visuals/v1.jpg)\n*Chart*"
     exported = export_markdown_embedded(notes(old, [visual], format_version=1), tmp_path)
     assert ":::box[Answer]{color=green}\n\nIt works." in exported
-    assert len(images(exported)) == 1
+    assert len(markdown_images(exported)) == 1

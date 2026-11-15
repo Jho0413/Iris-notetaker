@@ -4,8 +4,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from iris.config import Settings
-from iris.models import UNREADABLE_UPLOAD, Notes, SessionType, SourceKind
+from iris.models import UNREADABLE_UPLOAD, Notes, SourceKind
 from iris.store.layout import read_model, session_paths, write_model
+from tests.builders import session_with_notes
 from tests.waiting import wait_for_status
 
 
@@ -69,17 +70,7 @@ def test_a_damaged_transcript_is_refused_in_plain_words_and_logged(
 
 
 def make_session_with_notes(client: TestClient, settings: Settings, title: str) -> str:
-    session = client.app.state.store.create(title, SourceKind.UPLOAD)
-    paths = session_paths(settings.sessions_dir, session.id).ensure()
-    notes = Notes(
-        session_id=session.id,
-        session_type=SessionType.MEETING,
-        title=title,
-        markdown="Body text.",
-        visuals=[],
-    )
-    write_model(paths.notes, notes)
-    return session.id
+    return session_with_notes(client.app.state.store, settings, title, markdown="Body text.")[0]
 
 
 @pytest.mark.parametrize(

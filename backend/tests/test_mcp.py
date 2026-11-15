@@ -23,10 +23,8 @@ from iris.mcp_server import (
 from iris.models import (
     GENERIC_FAILURE,
     FailureKind,
-    FrameRef,
     Notes,
     NotesEdits,
-    NotesVisual,
     SessionStatus,
     SessionType,
     SourceKind,
@@ -35,6 +33,7 @@ from iris.notes_edits import generated_hash
 from iris.notes_text import MAX_PASSAGES_PER_SESSION, MAX_QUERY_WORDS
 from iris.store.db import SessionStore
 from iris.store.layout import session_paths, write_model
+from tests.builders import notes_visual, session_with_notes
 from tests.media import image_bytes
 
 GENERATED = "Intro.\n\n# Forces\nGravity pulls down.\n\n::figure{#v1}"
@@ -61,28 +60,22 @@ def add_session(
     markdown: str | None = GENERATED,
     notes_title: str = "Loops and forces",
 ) -> str:
-    session = store.create(title, SourceKind.BROWSER_LIVE)
-    store.update(session.id, status=status)
-    paths = session_paths(settings.sessions_dir, session.id).ensure()
-    if markdown is not None:
-        notes = Notes(
-            session_id=session.id,
-            session_type=SessionType.LECTURE,
-            title=notes_title,
+    if markdown is None:
+        sid = store.create(title, SourceKind.BROWSER_LIVE).id
+        session_paths(settings.sessions_dir, sid).ensure()
+    else:
+        sid, _ = session_with_notes(
+            store,
+            settings,
+            title,
+            source=SourceKind.BROWSER_LIVE,
+            notes_title=notes_title,
             markdown=markdown,
-            visuals=[
-                NotesVisual(
-                    id="v1",
-                    moment_id="m1",
-                    frame=FrameRef(t=0, path="frames/0.jpg"),
-                    caption="Forces on a loop",
-                    path="visuals/v1.svg",
-                )
-            ],
-            format_version=2,
+            visuals=[notes_visual()],
+            session_type=SessionType.LECTURE,
         )
-        write_model(paths.notes, notes)
-    return session.id
+    store.update(sid, status=status)
+    return sid
 
 
 def save_edits(settings: Settings, sid: str, markdown: str, *, stale: bool = False) -> None:

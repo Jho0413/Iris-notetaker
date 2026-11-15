@@ -1,6 +1,6 @@
 import pytest
 
-from iris.models import FrameRef, Notes, NotesVisual, SessionType
+from iris.models import Notes, SessionType
 from iris.notes_text import (
     MAX_PASSAGES_PER_SESSION,
     SNIPPET_CHARS,
@@ -12,24 +12,15 @@ from iris.notes_text import (
     snippet,
     with_figures_as_text,
 )
+from tests.builders import notes, notes_visual
 
 
 def notes_with(markdown: str) -> Notes:
-    return Notes(
-        session_id="s1",
+    return notes(
+        markdown,
+        [notes_visual(caption="Forces on a\nloop")],
         session_type=SessionType.LECTURE,
         title="Loops",
-        markdown=markdown,
-        visuals=[
-            NotesVisual(
-                id="v1",
-                moment_id="m1",
-                frame=FrameRef(t=0, path="frames/0.jpg"),
-                caption="Forces on a\nloop",
-                path="visuals/v1.svg",
-            )
-        ],
-        format_version=2,
     )
 
 

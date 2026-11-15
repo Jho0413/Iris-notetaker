@@ -1,17 +1,12 @@
 import pytest
 
 from iris import notes_format as nf
-from iris.models import FrameRef, Notes, NotesVisual, SessionType
+from iris.models import Notes, SessionType
+from tests.builders import notes_visual
 
 
 def messages(markdown: str, ids: set[str] = frozenset()) -> list[tuple[int, str]]:
     return [(p.line, p.message) for p in nf.validate(markdown, set(ids))]
-
-
-def visual(vid: str, path: str) -> NotesVisual:
-    return NotesVisual(
-        id=vid, moment_id="m1", frame=FrameRef(t=0, path="frames/0.jpg"), caption="c", path=path
-    )
 
 
 def test_each_close_closes_the_most_recent_block_still_open():
@@ -198,7 +193,7 @@ $W$ is constant.
 
 
 def test_upgrade_legacy_groups_cards_as_the_old_reading_view_did():
-    visuals = [visual("v000001", "visuals/v000001.svg")]
+    visuals = [notes_visual("v000001", "visuals/v000001.svg")]
     upgraded = nf.upgrade_legacy(LEGACY_WORKED, visuals)
     assert upgraded == UPGRADED_WORKED
     assert nf.validate(upgraded, {"v000001"}) == []
@@ -217,7 +212,7 @@ def test_upgrade_legacy_process_steps_with_figures_and_a_result():
         "---\n\n"
         "**Summary:** Done."
     )
-    upgraded = nf.upgrade_legacy(md, [visual("v1", "visuals/v1.png")])
+    upgraded = nf.upgrade_legacy(md, [notes_visual("v1", "visuals/v1.png")])
     assert upgraded == (
         "Intro.\n\n"
         "::figure{#v1}\n\n"
