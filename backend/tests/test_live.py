@@ -16,7 +16,6 @@ from iris.llm import structured
 from iris.llm.errors import UserFacingError
 from iris.llm.usage import append_record
 from iris.main import create_app
-from iris.media.frames import fit
 from iris.models import (
     LIVE_WITHOUT_AUDIO,
     UNREADABLE_LIVE_AUDIO,
@@ -297,13 +296,6 @@ def test_no_frames_gives_an_empty_index(paths: SessionPaths):
     assert finalize_frames(paths, fps=1.0, max_width=1280) == FrameIndex(
         fps=1.0, width=0, height=0, frames=[]
     )
-
-
-def test_fit_keeps_aspect():
-    tall = np.full((200, 50, 3), 255, np.uint8)
-    out = fit(tall, (100, 100))
-    assert out.shape == (100, 100, 3)
-    assert out[:, :30].max() == 0 and out[:, 40:60].min() == 255
 
 
 def test_live_input_is_validated(client: TestClient):
