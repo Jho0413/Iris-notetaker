@@ -1,24 +1,3 @@
-"""Command line entry point.
-
-iris serve [--secrets-from-stdin]   run the API (http://127.0.0.1:8000); the desktop app
-                                    passes the OpenAI key and API token on stdin
-                                    (iris/launch_secrets.py)
-iris process <file>                 create a session from a recording and run the pipeline
-iris run <session_id> [--from S]    re-run a session's pipeline, optionally from stage S
-iris stage <session_id> <stage>     run one stage on its own (reads/writes session files)
-iris cost [<session_id>]            model usage and cost per stage, model and purpose
-                                    (the most recent session if no id is given)
-iris mcp                            a read-only MCP server on stdin/stdout, for AI assistants
-                                    to list, read and search the notes (iris/mcp_server.py)
-iris show <session_id>              dev tool: a session's status and, if it failed, the stage,
-                                    what the user was told and the raw error (never served by
-                                    the API)
-iris replay-live <file>... [--url U] [--speed X]
-                                    dev tool: play recordings into a running backend's live API
-                                    in real time (or X times faster), as the browser would, and
-                                    report latency and cost (iris/live/replay.py)
-"""
-
 import argparse
 import asyncio
 import sys
@@ -37,7 +16,7 @@ from iris.user_settings import load_settings
 
 
 def _runner() -> JobRunner:
-    settings = load_settings()  # with what the Settings page saved, as the server runs sessions
+    settings = load_settings()
     settings.sessions_dir.mkdir(parents=True, exist_ok=True)
     return JobRunner(SessionStore(settings.db_path), EventBus(), settings)
 
@@ -53,16 +32,27 @@ async def _process(file: Path) -> None:
     print(runner.store.get(session.id))
 
 
-async def _run(session_id: str, from_stage: Stage | None) -> None:
+def _no_session(session_id: str) -> int:
+    print(f"no session {session_id}", file=sys.stderr)
+    return 1
+
+
+async def _run(session_id: str, from_stage: Stage | None) -> int:
     runner = _runner()
+    if runner.store.get(session_id) is None:
+        return _no_session(session_id)
     await runner.run(session_id, from_stage)
     print(runner.store.get(session_id))
+    return 0
 
 
-async def _stage(session_id: str, stage: Stage) -> None:
+async def _stage(session_id: str, stage: Stage) -> int:
     runner = _runner()
+    if runner.store.get(session_id) is None:
+        return _no_session(session_id)
     await runner.run_stage(runner.context(session_id), stage)
     print(f"{stage} done")
+    return 0
 
 
 def _serve(host: str, port: int, reload: bool, secrets_from_stdin: bool) -> int:
@@ -71,7 +61,7 @@ def _serve(host: str, port: int, reload: bool, secrets_from_stdin: bool) -> int:
     if not secrets_from_stdin:
         uvicorn.run("iris.main:app", host=host, port=port, reload=reload)
         return 0
-    if reload:  # reload re-imports iris.main in a new process, which has no stdin line to read
+    if reload:
         print("iris serve: --reload can't be used with --secrets-from-stdin", file=sys.stderr)
         return 2
     try:
@@ -83,9 +73,6 @@ def _serve(host: str, port: int, reload: bool, secrets_from_stdin: bool) -> int:
 
     uvicorn.run(create_app(settings), host=host, port=port)
     return 0
-
-
-# --- iris show --------------------------------------------------------------------------------
 
 
 def format_show(session: Session, detail: FailureDetail | None) -> str:
@@ -112,15 +99,11 @@ def _show(session_id: str) -> int:
     try:
         session = store.get(session_id)
         if session is None:
-            print(f"no session {session_id}", file=sys.stderr)
-            return 1
+            return _no_session(session_id)
         print(format_show(session, store.failure_detail(session_id)))
     finally:
         store.close()
     return 0
-
-
-# --- iris cost --------------------------------------------------------------------------------
 
 
 def _usd(totals: UsageTotals) -> str:
@@ -171,7 +154,7 @@ def _cost(session_id: str | None) -> int:
     if session_id is None:
         store = SessionStore(settings.db_path)
         try:
-            sessions = store.list()  # newest first
+            sessions = store.list()
         finally:
             store.close()
         if not sessions:
@@ -180,18 +163,15 @@ def _cost(session_id: str | None) -> int:
         session_id = sessions[0].id
     paths = session_paths(settings.sessions_dir, session_id)
     if not paths.root.is_dir():
-        print(f"no session {session_id}", file=sys.stderr)
-        return 1
+        return _no_session(session_id)
     print(format_usage(session_id, read_usage(paths.usage_log)))
     return 0
 
 
 def _mcp() -> None:
-    from iris.mcp_server import create_server  # the MCP SDK loads only for this command
+    from iris.mcp_server import create_server
 
-    # No .env: the assistant starts this in whatever folder it likes (Claude Code and Cursor use
-    # the open project), whose .env is not Iris's. The config's environment alone applies.
-    create_server(Settings(_env_file=None)).run()  # stdio
+    create_server(Settings(_env_file=None)).run()
 
 
 def main() -> None:
@@ -238,9 +218,9 @@ def main() -> None:
     elif args.cmd == "process":
         asyncio.run(_process(args.file))
     elif args.cmd == "run":
-        asyncio.run(_run(args.session_id, args.from_stage))
+        sys.exit(asyncio.run(_run(args.session_id, args.from_stage)))
     elif args.cmd == "stage":
-        asyncio.run(_stage(args.session_id, args.stage))
+        sys.exit(asyncio.run(_stage(args.session_id, args.stage)))
     elif args.cmd == "cost":
         sys.exit(_cost(args.session_id))
     elif args.cmd == "show":
