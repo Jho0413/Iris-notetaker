@@ -124,9 +124,10 @@ class JobRunner:
             sorted(map(str, timeline.failed)),
             sorted(map(str, timeline.skipped_input)),
         )
-        for stage in promoted:
-            await self.promote_stage(ctx, timeline, stage)
-        await self._run_plan(ctx, promote.remaining_plan(promoted))
+        for promoting, running in promote.live_steps(promoted):
+            for stage in promoting:
+                await self.promote_stage(ctx, timeline, stage)
+            await self._run_plan(ctx, [running])
 
     async def promote_stage(self, ctx: StageContext, timeline: LiveTimeline, stage: Stage) -> None:
         self.store.update(ctx.session_id, current_stage=stage)

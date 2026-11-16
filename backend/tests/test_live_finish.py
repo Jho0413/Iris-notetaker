@@ -219,6 +219,20 @@ def test_a_live_session_is_finished_at_stop_with_only_the_open_work_left(
     promoted = [s for kind, s, p in stages if p and kind == "stage_finished"]
     ran = [s for kind, s, p in stages if not p and kind == "stage_finished"]
     assert promoted == ["transcribe", "detect", "select"]
+    started = [(s, p) for kind, s, p in stages if kind == "stage_started"]
+    by_group = {
+        ("ingest", False): 0,
+        ("transcribe", True): 1,
+        ("detect", True): 1,
+        ("align", False): 2,
+        ("select", True): 3,
+        ("write", False): 4,
+        ("render", False): 4,
+        ("assemble", False): 5,
+        ("synthesize", False): 6,
+    }
+    assert set(started) == set(by_group)
+    assert [by_group[s] for s in started] == sorted(by_group.values())
     assert ran == ["ingest", "align", "write", "render", "assemble", "synthesize"] or ran == [
         "ingest",
         "align",
@@ -370,7 +384,7 @@ def test_a_skipped_frame_promotes_the_transcript_and_runs_from_detect(
     app_client: TestClient, recording, monkeypatch
 ):
     client = app_client
-    draft_at_detect = draft_seen_at(monkeypatch, Stage.DETECT)
+    draft_at_select = draft_seen_at(monkeypatch, Stage.SELECT)
     sid = start_recording(client)
     processor = client.app.state.runner.live.get(sid)  # type: ignore[attr-defined]
     timeline: LiveTimeline = processor.timeline
@@ -392,7 +406,7 @@ def test_a_skipped_frame_promotes_the_transcript_and_runs_from_detect(
     promoted = [s for kind, s, p in stages if p and kind == "stage_finished"]
     ran = [s for kind, s, p in stages if not p and kind == "stage_finished"]
     assert promoted == ["transcribe"]
-    assert draft_at_detect == [False]
+    assert draft_at_select == [False]
     assert ran[:4] == ["ingest", "detect", "align", "select"]
     assert read_model(root / "transcript.json", Transcript) == timeline.transcript()
     after = by_stage(calls(client, sid)[before:])
@@ -570,7 +584,12 @@ async def test_a_complete_timeline_promotes_everything(tmp_path: Path):
     c = stage_ctx(tmp_path, live=True)
     tl = await timeline_with_work(c)
     assert promote.promotable(c, tl) == promote.EVERYTHING
-    assert promote.remaining_plan(promote.EVERYTHING) == [[Stage.ALIGN], *PLAN[4:]]
+    assert promote.live_steps(promote.EVERYTHING) == [
+        ([Stage.TRANSCRIBE, Stage.DETECT], []),
+        ([], [Stage.ALIGN]),
+        ([Stage.SELECT], []),
+        *[([], group) for group in PLAN[4:]],
+    ]
 
 
 @pytest.mark.parametrize(
@@ -599,9 +618,10 @@ async def test_unusable_screen_work_promotes_only_the_transcript(tmp_path: Path,
     tl = await timeline_with_work(c)
     spoil(tl, c)
     assert promote.promotable(c, tl) == promote.TRANSCRIPT_ONLY
-    plan = promote.remaining_plan(promote.TRANSCRIPT_ONLY)
-    assert plan[0] == [Stage.DETECT] and Stage.TRANSCRIBE not in sum(plan, [])
-    assert plan[1:] == PLAN[2:]
+    assert promote.live_steps(promote.TRANSCRIPT_ONLY) == [
+        ([Stage.TRANSCRIBE], [Stage.DETECT]),
+        *[([], group) for group in PLAN[2:]],
+    ]
 
 
 @pytest.mark.parametrize(
@@ -618,7 +638,7 @@ async def test_unusable_audio_promotes_nothing(tmp_path: Path, spoil):
     await spoil(tl)
     assert promote.promotable(c, tl) == ()
     assert promote.promotable(c, None) == ()
-    assert promote.remaining_plan(()) == PLAN[1:]
+    assert promote.live_steps(()) == [([], group) for group in PLAN[1:]]
 
 
 async def test_promotion_writes_the_timeline_as_it_is(tmp_path: Path):

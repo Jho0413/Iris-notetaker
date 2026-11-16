@@ -178,12 +178,13 @@ the others knowing; a lane whose input lane failed stops making paid calls.
    free, so only what was still open when recording stopped is paid for. A lane still running
    after a set time is cancelled and counts as failed, so a stuck lane delays the notes by at most
    that long; if the run itself is cancelled (the engine shutting down), the lanes stop with it.
-2. Promotion keeps the lanes' work as far as it holds together, in pipeline order. If the audio,
-   screen and select lanes all finished cleanly, the transcript, moments and selection become the
-   stages' outputs; align, which makes no model call, runs on them as it would after an upload, and
-   the run goes on to write, where the sections written live and the figures redrawn live are
-   cache hits. If only the audio lane did, the run goes on from
-   detect, so the speech isn't transcribed twice. Otherwise (the audio lane failed or missed a
+2. Promotion keeps the lanes' work as far as it holds together, in pipeline order: each step is
+   either promoted or run, in its turn. If the audio, screen and select lanes all finished
+   cleanly, the transcript and moments become transcribe's and detect's outputs, align, which
+   makes no model call, runs on them as it would after an upload, the selection becomes select's
+   output, and the run goes on to write, where the sections written live and the figures redrawn
+   live are cache hits. If only the audio lane did, the run goes on from detect, so the speech
+   isn't transcribed twice. Otherwise (the audio lane failed or missed a
    chunk) the full pipeline runs, as for an upload.
 
    What is written is exactly what the timeline holds, in its order, since the sections written

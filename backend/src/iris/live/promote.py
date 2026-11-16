@@ -54,11 +54,12 @@ def promotable(ctx: StageContext, tl: LiveTimeline | None) -> tuple[Stage, ...]:
     return EVERYTHING
 
 
-def remaining_plan(promoted: tuple[Stage, ...]) -> list[list[Stage]]:
-    groups = [
-        [s for s in group if s not in promoted] for group in PLAN if Stage.INGEST not in group
+def live_steps(promoted: tuple[Stage, ...]) -> list[tuple[list[Stage], list[Stage]]]:
+    return [
+        ([s for s in group if s in promoted], [s for s in group if s not in promoted])
+        for group in PLAN
+        if Stage.INGEST not in group
     ]
-    return [group for group in groups if group]
 
 
 async def promote(ctx: StageContext, tl: LiveTimeline, stage: Stage) -> dict:
