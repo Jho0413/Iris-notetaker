@@ -105,17 +105,16 @@ flowchart LR
   exactly as for an upload ([`making-notes.md`](making-notes.md#sending-only-speech)); a window
   with none isn't sent, but still moves "transcribed to" on, so a silence never holds the notes
   back. When the last window finished has no text, the next one sent gets no context, so a
-  sentence from before a silence
-  can't be repeated over it. A cut depends only on the audio, never on how much had arrived, so a lane restarted
-  after an engine restart makes the same cuts and reuses its cached windows. A cut is only made
-  once a little audio past it is decoded, so a pause is confirmed, never guessed at the edge of
-  what has arrived; at the end, a last window too short to stand alone joins the one before.
-  A missing chunk is waited for a while, then decoding carries on after it, the gap stays
-  silence and the lane is marked as having missed input; the first chunk, the stream's header,
-  is waited for until notes are made. A few windows are transcribed at once, each with the text
-  committed when it is sent, and they commit strictly in order. A cached window is reused only if
-  its audio, model, context and language all still match. Every window is sent the configured
-  language, so one window misheard as another language can't carry it into the rest; the
+  sentence from before a silence can't be repeated over it. A cut depends only on the audio,
+  never on how much had arrived, so a lane restarted after an engine restart makes the same cuts and
+  reuses its cached windows. A cut is only made once a little audio past it is decoded, so a pause
+  is confirmed, never guessed at the edge of what has arrived; at the end, a last window too short
+  to stand alone joins the one before. A missing chunk is waited for a while, then decoding carries
+  on after it, the gap stays silence and the lane is marked as having missed input; the first chunk,
+  the stream's header, is waited for until notes are made. A few windows are transcribed at once,
+  each with the text committed when it is sent, and they commit strictly in order. A cached window
+  is reused only if its audio, model, context and language all still match. Every window is sent the
+  configured language, so one window misheard as another language can't carry it into the rest; the
   transcript takes its language from the first window with speech.
 - **Screen lane:** puts frames in time order, samples and sizes them exactly as ingest will, and
   feeds them to the same moment detector as the detect stage, read back from disk as detect reads
@@ -176,11 +175,14 @@ can be ingested again at any time.
    put in front, rather than trusting the decoder to find its way through damaged data, which
    can lose the rest of the recording. A damaged packet is skipped.
 
-   Ingest and the audio lane join the chunks and restart after a lost one with the same code.
-   They differ only in where the next chunk comes from (ingest has them all; the lane waits for
-   the browser) and in what a part that can't be read means: ingest stops with a message saying
-   what to do, while the lane skips it, marks itself as having missed input and carries on, since
-   ingest will decode the recording again anyway.
+   Ingest and the audio lane join the chunks and restart from the next cluster with the same
+   building blocks: joining the chunks into one stream, taking the stream's header and finding
+   the next point it can restart from. Each decides for itself when to restart: ingest has every
+   chunk, so it sees the gaps up front and restarts after each one, while the lane waits for the
+   browser, counts a chunk as lost only once it has waited long enough, and looks for the restart
+   point in the chunks as they arrive. They also differ in what a part that can't be read means:
+   ingest stops with a message saying what to do, while the lane skips it, marks itself as having
+   missed input and carries on, since ingest will decode the recording again anyway.
 2. The frames are picked on the same steady grid as an upload's, by their times. Each share is
    sized from its own first readable frame, and the rest of it is scaled and centred on black to
    that size, because detection compares frames pixel by pixel and a shared window can change
@@ -230,8 +232,9 @@ more can be recorded. The engine never ends a recording on its own.
 - `backend/src/iris/sources/browser_live.py`: how chunks and frames are stored and ingested
 - `backend/src/iris/media/frames.py`: picking, sizing and saving frames, shared by ingest and the
   screen lane
-- `backend/src/iris/media/webm.py`: joining the chunks into one stream and restarting after a
-  lost one, shared by ingest and the audio lane, and placing the sound by its timestamps
+- `backend/src/iris/media/webm.py`: joining the chunks into one stream, finding the stream's
+  header and the next cluster to restart from, and placing the sound by its timestamps, the
+  building blocks ingest and the audio lane each restart with
 - `backend/src/iris/store/layout.py`: the names of the captured chunks and frames, and of the
   cached transcript windows
 - `backend/src/iris/live/`: the processor, each lane, the timeline and promotion
