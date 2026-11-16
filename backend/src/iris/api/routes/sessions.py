@@ -12,9 +12,9 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, PlainTextResponse
 from pydantic import BaseModel, ConfigDict, StringConstraints
 
+from iris.api import deps
 from iris.api.deps import PathsDep, RunnerDep, SessionDep, SettingsDep, StoreDep
-from iris.config import Settings
-from iris.llm.usage import forget_total, with_cost
+from iris.llm.usage import forget_total
 from iris.models import Notes, NotesEdits, Session, SourceKind, Stage, Transcript
 from iris.notes.edits import MAX_EDITED_CHARS, as_read, read_notes
 from iris.notes.export import export_markdown_embedded
@@ -34,10 +34,6 @@ log = logging.getLogger(__name__)
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
 
-def _with_cost(session: Session, settings: Settings) -> Session:
-    return with_cost(session, session_paths(settings.sessions_dir, session.id).usage_log)
-
-
 @router.get("", response_model=list[Session])
 def list_sessions(store: StoreDep, settings: SettingsDep) -> list[Session]:
     """Every session, newest first, each with its model cost so far.
@@ -45,7 +41,7 @@ def list_sessions(store: StoreDep, settings: SettingsDep) -> list[Session]:
     Costs come from running totals that read only what each call log gained since the last
     list, so polling the list while sessions process stays cheap (``iris.llm.usage``).
     """
-    return [_with_cost(s, settings) for s in store.list()]
+    return [deps.session_with_cost(s, settings) for s in store.list()]
 
 
 @router.post("", response_model=Session, status_code=201)
@@ -62,12 +58,12 @@ async def create_upload_session(
     paths = session_paths(settings.sessions_dir, session.id).ensure()
     await asyncio.to_thread(save_upload, paths, name, file.file)
     runner.start(session.id)
-    return store.get(session.id)  # type: ignore[return-value]
+    return deps.find_session(session.id, store)
 
 
 @router.get("/{session_id}", response_model=Session)
 def get_session(session: SessionDep, settings: SettingsDep) -> Session:
-    return _with_cost(session, settings)
+    return deps.session_with_cost(session, settings)
 
 
 TITLE_MAX_CHARS = 200
@@ -91,16 +87,12 @@ def rename_session(
     sets the session's title (the notes keep their own), so the name stays through re-runs, and
     the exported file is named after it."""
     store.update(session.id, title=body.title)
-    renamed = store.get(session.id)
-    if renamed is None:
-        raise HTTPException(404, "session not found")
-    return _with_cost(renamed, settings)
+    return deps.current_session(session.id, store, settings)
 
 
 @router.delete("/{session_id}", status_code=204)
 async def delete_session(session: SessionDep, paths: PathsDep, store: StoreDep, runner: RunnerDep):
-    if runner.is_running(session.id):
-        raise HTTPException(409, "session is processing")
+    deps.refuse_while_processing(session.id, runner)
     store.delete(session.id)
     await runner.live.cancel(session.id)
     await asyncio.to_thread(shutil.rmtree, paths.root, ignore_errors=True)
@@ -116,11 +108,9 @@ async def rerun(
     from_stage: Stage | None = None,
 ) -> Session:
     """Re-run the pipeline, optionally from a given stage; finished stages are kept."""
-    if runner.is_running(session.id):
-        raise HTTPException(409, "session is already processing")
+    deps.refuse_while_processing(session.id, runner)
     runner.start(session.id, from_stage)
-    session = store.get(session.id)  # type: ignore[assignment]
-    return await asyncio.to_thread(_with_cost, session, settings)
+    return await asyncio.to_thread(deps.current_session, session.id, store, settings)
 
 
 def _readable[T](paths: SessionPaths, what: str, read: Callable[[], T]) -> T:
@@ -168,8 +158,7 @@ def save_notes_edits(
     first problem in plain words. 409 while the session is processing.
     """
     generated = _readable(paths, "notes", lambda: read_model(paths.notes, Notes))
-    if runner.is_running(session.id):
-        raise HTTPException(409, "session is processing")
+    deps.refuse_while_processing(session.id, runner)
     if problems := validate(body.markdown, {v.id for v in generated.visuals}):
         first = problems[0]
         raise HTTPException(422, f"Line {first.line}: {first.message}")
@@ -181,8 +170,7 @@ def save_notes_edits(
 @router.delete("/{session_id}/notes/edits", status_code=204)
 def delete_notes_edits(session: SessionDep, paths: PathsDep, runner: RunnerDep) -> None:
     """Restore the generated notes: the user's edits are removed."""
-    if runner.is_running(session.id):
-        raise HTTPException(409, "session is processing")
+    deps.refuse_while_processing(session.id, runner)
     paths.notes_edits.unlink(missing_ok=True)
 
 

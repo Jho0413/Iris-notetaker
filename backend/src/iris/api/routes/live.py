@@ -4,9 +4,9 @@ from typing import Annotated
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
+from iris.api import deps
 from iris.api.deps import BusDep, PathsDep, RunnerDep, SessionDep, SettingsDep, StoreDep
 from iris.live import Lane
-from iris.llm.usage import with_cost
 from iris.models import EventType, Session, SessionStatus, SourceKind
 from iris.sources.browser_live import (
     JPEG_MAGIC,
@@ -50,9 +50,7 @@ RECORDING_OR_STOPPED = frozenset({SessionStatus.RECORDING, SessionStatus.STOPPED
 def _require_live_now(
     store: SessionStore, session_id: str, statuses: frozenset[SessionStatus] = RECORDING
 ) -> Session:
-    session = store.get(session_id)
-    if session is None:
-        raise HTTPException(404, "session not found")
+    session = deps.find_session(session_id, store)
     if session.source != SourceKind.BROWSER_LIVE or session.status not in statuses:
         raise HTTPException(409, "session is not recording")
     return session
@@ -80,7 +78,7 @@ async def start_live(
     session_paths(settings.sessions_dir, session.id).ensure()
     store.update(session.id, status=SessionStatus.RECORDING)
     runner.live.ensure(session.id)
-    return store.get(session.id)  # type: ignore[return-value]
+    return deps.find_session(session.id, store)
 
 
 @router.post("/{session_id}/audio", status_code=204)
@@ -151,6 +149,7 @@ async def end_live(
     paths: PathsDep,
     store: StoreDep,
     runner: RunnerDep,
+    settings: SettingsDep,
     body: LiveEnd | None = None,
 ) -> Session:
     """Make notes: stop recording (if it hasn't stopped already, ``/stop``) and finish the
@@ -176,7 +175,7 @@ async def end_live(
     runner.live.ensure(session.id)
     store.update(session.id, status=SessionStatus.PROCESSING)
     runner.start(session.id)
-    return await asyncio.to_thread(with_cost, store.get(session.id), paths.usage_log)  # type: ignore[arg-type]
+    return await asyncio.to_thread(deps.current_session, session.id, store, settings)
 
 
 @router.post(
@@ -184,7 +183,9 @@ async def end_live(
     response_model=Session,
     responses={409: {"description": "Not recording: making notes, finished or failed"}},
 )
-async def stop_live(session: SessionDep, paths: PathsDep, store: StoreDep, bus: BusDep) -> Session:
+async def stop_live(
+    session: SessionDep, store: StoreDep, settings: SettingsDep, bus: BusDep
+) -> Session:
     """Stop recording without making notes: for a recording whose page went away (closed or
     reloaded, or the desktop app quit or crashed), so leaving never makes notes nobody asked for.
 
@@ -196,4 +197,4 @@ async def stop_live(session: SessionDep, paths: PathsDep, store: StoreDep, bus: 
     if current.status == SessionStatus.RECORDING:
         store.update(session.id, status=SessionStatus.STOPPED)
         bus.publish(session.id, EventType.STATUS, {"status": SessionStatus.STOPPED})
-    return await asyncio.to_thread(with_cost, store.get(session.id), paths.usage_log)  # type: ignore[arg-type]
+    return await asyncio.to_thread(deps.current_session, session.id, store, settings)
