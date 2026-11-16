@@ -47,6 +47,10 @@ def read_audio_chunk_name(name: str) -> int | None:
     return None
 
 
+def transcript_cache_name(index: int, start: int, end: int, rate: int) -> str:
+    return f"{index}_{round(start * 1000 / rate)}_{round(end * 1000 / rate)}.json"
+
+
 def visual_source_path(visual_id: str) -> str:
     return f"{VISUALS_DIR}/{visual_id}{SOURCE_CROP_SUFFIX}"
 
@@ -97,6 +101,9 @@ class SessionPaths:
     def live_transcript_windows_dir(self) -> Path:
         return self.live_dir / "transcript_windows"
 
+    def live_transcript_window(self, index: int, start: int, end: int, rate: int) -> Path:
+        return self.live_transcript_windows_dir / transcript_cache_name(index, start, end, rate)
+
     @property
     def live_transcript(self) -> Path:
         return self.live_dir / "transcript.json"
@@ -132,6 +139,9 @@ class SessionPaths:
     @property
     def transcript_chunks_dir(self) -> Path:
         return self.root / "transcript_chunks"
+
+    def transcript_chunk(self, index: int, start: int, end: int, rate: int) -> Path:
+        return self.transcript_chunks_dir / transcript_cache_name(index, start, end, rate)
 
     @property
     def transcript(self) -> Path:

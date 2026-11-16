@@ -2,17 +2,20 @@ import asyncio
 import hashlib
 import logging
 from collections import Counter
-from pathlib import Path
 
 import numpy as np
-from pydantic import BaseModel
 
 from iris import speech
 from iris.llm.client import get_openai
 from iris.llm.errors import gather_units
-from iris.llm.transcription import ChunkTranscript, returns_segments, transcribe_stretch_at
+from iris.llm.transcription import (
+    CachedChunk,
+    ChunkTranscript,
+    returns_segments,
+    transcribe_stretch_at,
+)
 from iris.media.audio import fits_transcription_upload, quiet_profile, read_wav
-from iris.models import EventType, Transcript, TranscriptSegment
+from iris.models import EventType, Transcript
 from iris.pipeline.context import StageContext
 from iris.store.layout import read_model, write_model
 
@@ -69,17 +72,6 @@ def chunk_lengths_for(model: str) -> tuple[float, float]:
     return TEXT_ONLY_TARGET_CHUNK_S, TEXT_ONLY_MAX_CHUNK_S
 
 
-class CachedChunk(BaseModel):
-    index: int
-    start: float
-    end: float
-    audio_sha1: str
-    model: str
-    requested_language: str | None = None
-    language: str | None = None
-    segments: list[TranscriptSegment]
-
-
 class TranscribeError(RuntimeError):
     pass
 
@@ -113,12 +105,7 @@ async def run(
         raise ValueError(f"max chunk of {max_s}s at {rate} Hz exceeds the API's upload limit")
 
     chunks = plan_chunks(samples, rate, target_s, max_s, search_s)
-    cache_dir = ctx.paths.transcript_chunks_dir
-    cache_dir.mkdir(parents=True, exist_ok=True)
     results: dict[int, CachedChunk] = {}
-
-    def cache_path(i: int, s: int, e: int) -> Path:
-        return cache_dir / f"{i}_{round(s * 1000 / rate)}_{round(e * 1000 / rate)}.json"
 
     def finish(chunk: CachedChunk) -> None:
         results[chunk.index] = chunk
@@ -130,7 +117,7 @@ async def run(
     todo: list[tuple[int, int, int, str]] = []
     for i, (s, e) in enumerate(chunks):
         digest = hashlib.sha1(samples[s:e]).hexdigest()
-        path = cache_path(i, s, e)
+        path = ctx.paths.transcript_chunk(i, s, e, rate)
         if path.exists():
             try:
                 cached = read_model(path, CachedChunk)
@@ -183,7 +170,7 @@ async def run(
                 language=next((r.language for r in transcripts if r.language), None),
                 segments=[seg for r in transcripts for seg in r.segments],
             )
-            write_model(cache_path(i, s, e), chunk)
+            write_model(ctx.paths.transcript_chunk(i, s, e, rate), chunk)
             finish(chunk)
 
         outcomes = await gather_units(one(*t) for t in todo)

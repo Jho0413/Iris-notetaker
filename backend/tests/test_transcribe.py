@@ -11,7 +11,7 @@ import pytest
 
 from iris.config import Settings
 from iris.llm import transcription
-from iris.llm.transcription import transcribe_chunk
+from iris.llm.transcription import CachedChunk, transcribe_chunk
 from iris.media.audio import encode_wav
 from iris.models import EventType, Transcript
 from iris.pipeline.context import StageContext
@@ -437,7 +437,7 @@ async def test_a_chunk_without_speech_is_not_sent_and_is_cached_empty(ctx, monke
     assert client.audio.transcriptions.calls == []
     assert read_model(ctx.paths.transcript, Transcript).segments == []
     [path] = ctx.paths.transcript_chunks_dir.glob("*.json")
-    cached = read_model(path, transcribe.CachedChunk)
+    cached = read_model(path, CachedChunk)
     assert cached.segments == [] and cached.language is None
 
     def no_client(_settings):
@@ -487,7 +487,7 @@ async def test_a_chunk_without_speech_never_sets_the_language(ctx, monkeypatch):
     use_client(monkeypatch, client)
     await transcribe.run(ctx, **SMALL)
     chunks = sorted(
-        (read_model(p, transcribe.CachedChunk) for p in ctx.paths.transcript_chunks_dir.iterdir()),
+        (read_model(p, CachedChunk) for p in ctx.paths.transcript_chunks_dir.iterdir()),
         key=lambda c: c.index,
     )
     assert chunks[0].segments == [] and chunks[0].language is None

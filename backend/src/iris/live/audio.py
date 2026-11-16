@@ -11,7 +11,6 @@ from pathlib import Path
 
 import av
 import numpy as np
-from pydantic import BaseModel
 
 from iris import speech
 from iris.live.lane import LiveLane
@@ -19,7 +18,12 @@ from iris.live.timeline import Lane, LiveTimeline
 from iris.llm import usage
 from iris.llm.client import get_openai
 from iris.llm.errors import describe
-from iris.llm.transcription import ChunkTranscript, supports_prompt, transcribe_stretch_at
+from iris.llm.transcription import (
+    CachedChunk,
+    ChunkTranscript,
+    supports_prompt,
+    transcribe_stretch_at,
+)
 from iris.media.audio import fits_transcription_upload, quiet_profile
 from iris.media.webm import ChunkStream, NoChunkReason, PlacedWav, find_cluster, stream_header
 from iris.models import EventType, Stage, Transcript, TranscriptSegment
@@ -195,17 +199,9 @@ def window_cut(samples: np.ndarray, rate: int, min_len: int, max_len: int) -> in
     return max_len if cut is None else cut
 
 
-class CachedWindow(BaseModel):
-    index: int
-    start: float
-    end: float
-    audio_sha1: str
-    model: str
-    requested_language: str | None = None
+class CachedWindow(CachedChunk):
     prompt: str
     prompt_through: int
-    language: str | None = None
-    segments: list[TranscriptSegment]
 
 
 class WindowFailed(RuntimeError):
@@ -350,10 +346,6 @@ class AudioLane(LiveLane):
             raise RuntimeError(f"live/audio.pcm is shorter than the {end} samples decoded")
         return samples
 
-    def _cache_path(self, i: int, start: int, end: int) -> Path:
-        ms = f"{round(start * 1000 / self.rate)}_{round(end * 1000 / self.rate)}"
-        return self.ctx.paths.live_transcript_windows_dir / f"{i}_{ms}.json"
-
     def _reusable(self, cached: CachedWindow, i: int, start: int, end: int, digest: str) -> bool:
         t0, t1 = start / self.rate, end / self.rate
         return (
@@ -370,7 +362,7 @@ class AudioLane(LiveLane):
     async def _window(self, i: int, start: int, end: int) -> CachedWindow:
         samples = await asyncio.to_thread(self._read, start, end)
         digest = hashlib.sha1(samples).hexdigest()
-        path = self._cache_path(i, start, end)
+        path = self.ctx.paths.live_transcript_window(i, start, end, self.rate)
         cached = await asyncio.to_thread(_load_window, path)
         if cached is not None and self._reusable(cached, i, start, end, digest):
             await self._wait_committed(cached.prompt_through + 1)
@@ -463,7 +455,9 @@ class AudioLane(LiveLane):
         self._committed += 1
         self._segment_counts.append(len(self.timeline.segments))
         start, end = round(window.start * self.rate), round(window.end * self.rate)
-        self._kept.add(self._cache_path(window.index, start, end).name)
+        self._kept.add(
+            self.ctx.paths.live_transcript_window(window.index, start, end, self.rate).name
+        )
         async with self._commits:
             self._commits.notify_all()
         self._changed.set()

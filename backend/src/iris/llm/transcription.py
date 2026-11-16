@@ -14,6 +14,17 @@ class ChunkTranscript(BaseModel):
     segments: list[TranscriptSegment]
 
 
+class CachedChunk(BaseModel):
+    index: int
+    start: float
+    end: float
+    audio_sha1: str
+    model: str
+    requested_language: str | None = None
+    language: str | None = None
+    segments: list[TranscriptSegment]
+
+
 def _field(obj: Any, name: str, default: Any = None) -> Any:
     if isinstance(obj, dict):
         return obj.get(name, default)
