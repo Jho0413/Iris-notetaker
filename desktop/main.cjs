@@ -92,19 +92,6 @@ function rememberWelcomeShown() {
   const err = appState.set(WELCOME_SHOWN, true)
   if (err) log(`[app] couldn't remember the welcome was shown: ${err.message}`)
 }
-// Decrypted once per launch: each decrypt reads the Keychain, and an app whose signature changed
-// (every rebuild, for an ad-hoc signed app) makes macOS ask the user each time.
-// A failed load is remembered too: a key macOS won't decrypt (e.g. Deny on the Keychain prompt)
-// isn't asked for again at each engine start in the same launch.
-let apiKey = null
-let keyLoaded = false
-function currentKey() {
-  if (!keyLoaded) {
-    apiKey = keystore.load()
-    keyLoaded = true
-  }
-  return apiKey
-}
 const backend = new Backend({
   command: (port, token) =>
     backendCommand({
@@ -115,7 +102,7 @@ const backend = new Backend({
       port,
       token,
       parentPid: process.pid,
-      apiKey: currentKey(),
+      apiKey: keystore.load(),
       env: process.env,
     }),
   logFile: path.join(LOGS, 'backend.log'),
@@ -145,8 +132,13 @@ const WEB_PREFERENCES = {
   devTools: !PACKAGED,
 }
 
-function background() {
-  return nativeTheme.shouldUseDarkColors ? '#0e0f13' : '#f6f6f9'
+function newWindow({ preload, ...options }) {
+  return new BrowserWindow({
+    show: false,
+    ...options,
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#0e0f13' : '#f6f6f9',
+    webPreferences: { ...WEB_PREFERENCES, ...(preload && { preload: path.join(PAGES, preload) }) },
+  })
 }
 
 /** Show the main window, making it if it was closed. With `show: false` it is only made if
@@ -159,17 +151,13 @@ function showMainWindow({ show = true } = {}) {
     mainWindow.focus()
     return mainWindow
   }
-  const win = new BrowserWindow({
+  const win = newWindow({
     width: 1280,
     height: 860,
     minWidth: 720,
     minHeight: 520,
     title: 'Iris',
-    show: false,
-    backgroundColor: background(),
-    // The UI's bridge to the app: changeKey, removeKey and savePdf, plus the menu bar's recording
-    // relay, checked per call (policy.fromIrisWindow).
-    webPreferences: { ...WEB_PREFERENCES, preload: path.join(PAGES, 'preload-main.cjs') },
+    preload: 'preload-main.cjs',
   })
   mainWindow = win
   if (show) win.once('ready-to-show', () => win.show())
@@ -237,10 +225,6 @@ function loadUi(win) {
   else win.loadFile(path.join(PAGES, 'starting.html'))
 }
 
-function showingUi(win) {
-  return policy.isIrisUrl(win.webContents.getURL())
-}
-
 // ---- API key ---------------------------------------------------------------------------------
 
 /** Show the key screen. Resolves true once a key is saved, false if closed without one. */
@@ -252,7 +236,7 @@ function askForKey(mode) {
   let resolve
   const promise = new Promise((r) => (resolve = r))
   keyPrompt = { resolve, promise }
-  keyWindow = new BrowserWindow({
+  keyWindow = newWindow({
     // Sized by its content area, with room for the longest message under the field (two lines),
     // so the window never scrolls: about 460px of content plus the page's 64px of padding.
     width: 560,
@@ -262,11 +246,9 @@ function askForKey(mode) {
     minimizable: false,
     fullscreenable: false,
     title: 'OpenAI API key',
-    show: false,
-    backgroundColor: background(),
     parent: mode !== 'first' && mainWindow ? mainWindow : undefined,
     modal: mode !== 'first' && Boolean(mainWindow),
-    webPreferences: { ...WEB_PREFERENCES, preload: path.join(PAGES, 'preload-key.cjs') },
+    preload: 'preload-key.cjs',
   })
   const win = keyWindow
   win.once('ready-to-show', () => win.show())
@@ -280,23 +262,22 @@ function askForKey(mode) {
   return promise
 }
 
-/** IPC from one of the app's own pages (`page`, e.g. key.html) showing in `win`, only. */
-function fromDesktopPage(event, win, page) {
-  const url = event.senderFrame?.url ?? ''
-  return Boolean(win) && event.sender === win.webContents && policy.isDesktopPage(url, PAGES) && new URL(url).pathname.endsWith(`/${page}`)
+function handleFrom(allowed, channel, answer) {
+  ipcMain.handle(channel, (event, ...args) => {
+    if (!allowed(event)) throw new Error('not allowed')
+    return answer(...args)
+  })
 }
 
 function fromKeyScreen(event) {
-  return fromDesktopPage(event, keyWindow, 'key.html')
+  return policy.fromDesktopPage(event, keyWindow, path.join(PAGES, 'key.html'))
 }
 
-ipcMain.handle('iris-key:has', (event) => {
-  if (!fromKeyScreen(event)) throw new Error('not allowed')
-  return keystore.has()
-})
+function fromMainWindow(event) {
+  return policy.fromIrisWindow(event, mainWindow)
+}
 
-ipcMain.handle('iris-key:save', async (event, key) => {
-  if (!fromKeyScreen(event)) throw new Error('not allowed')
+handleFrom(fromKeyScreen, 'iris-key:save', async (key) => {
   // The window and prompt that asked: the check below can take seconds, and if that window is
   // closed meanwhile (the user cancelled) nothing is stored, nor does a newer window get answered.
   const win = keyWindow
@@ -305,30 +286,25 @@ ipcMain.handle('iris-key:save', async (event, key) => {
   const result = await saveNewKey(key, {
     check: checkKeyWithOpenAI,
     stillOpen: () => keyWindow === win && !win.isDestroyed(),
-    store: (checked) => keystore.save(checked),
+    store: keystore.save,
   })
   if (!result.ok) {
     if (result.cancelled) log('[key] the key window was closed during the check; nothing saved')
     else if (result.reason) log(`[key] a new API key did not pass the check with OpenAI (${result.reason}); not saved`)
     return { ok: false, error: result.error }
   }
-  apiKey = result.key
-  keyLoaded = true
   log('[key] saved a new API key')
   prompt?.resolve(true)
   win?.close()
   return { ok: true }
 })
 
-ipcMain.handle('iris-key:cancel', (event) => {
-  if (!fromKeyScreen(event)) throw new Error('not allowed')
-  keyWindow?.close()
-})
+handleFrom(fromKeyScreen, 'iris-key:cancel', () => keyWindow?.close())
 
 /** Add or replace the key (menu, Settings, the no-key banner). Resolves true once the engine
  * runs with the new key, false if the user cancelled or a session is busy. */
 async function changeKey() {
-  const mode = currentKey() ? 'change' : 'add'
+  const mode = keystore.load() ? 'change' : 'add'
   if (await refuseKeyWhileBusy(mode)) return false
   if (!(await askForKey(mode))) return false
   await restartBackend()
@@ -339,36 +315,19 @@ async function changeKey() {
  * removed, false if the user cancelled or a session is busy. */
 async function removeKey() {
   if (await refuseKeyWhileBusy('remove')) return false
-  const { response } = await dialog.showMessageBox(mainWindow ?? undefined, {
-    type: 'warning',
-    buttons: ['Remove Key', 'Cancel'],
-    defaultId: 1,
-    cancelId: 1,
-    message: 'Remove the OpenAI key?',
-    detail: 'Iris can’t make notes until you add a key again.',
-  })
-  if (response !== 0) return false
+  if (!(await confirm('Remove the OpenAI key?', 'Iris can’t make notes until you add a key again.', 'Remove Key'))) return false
   keystore.clear()
-  apiKey = null
-  keyLoaded = true
   log('[key] removed the API key')
   await restartBackend()
   return true
 }
 
-ipcMain.handle('iris-app:change-key', async (event) => {
-  if (!policy.fromIrisWindow(event, mainWindow)) throw new Error('not allowed')
-  return { done: await changeKey() }
-})
+handleFrom(fromMainWindow, 'iris-app:change-key', async () => ({ done: await changeKey() }))
 
-ipcMain.handle('iris-app:remove-key', async (event) => {
-  if (!policy.fromIrisWindow(event, mainWindow)) throw new Error('not allowed')
-  return { done: await removeKey() }
-})
+handleFrom(fromMainWindow, 'iris-app:remove-key', async () => ({ done: await removeKey() }))
 
 // Export PDF: the page as printed (its print stylesheet), saved where the user chooses.
-ipcMain.handle('iris-app:save-pdf', async (event, title) => {
-  if (!policy.fromIrisWindow(event, mainWindow)) throw new Error('not allowed')
+handleFrom(fromMainWindow, 'iris-app:save-pdf', async (title) => {
   const win = mainWindow
   const { canceled, filePath } = await dialog.showSaveDialog(win, {
     defaultPath: path.join(app.getPath('downloads'), pdfFileName(title)),
@@ -450,7 +409,7 @@ async function pickSource() {
   }
   if (picker !== state) return chosen // cancelled while listing (closePicker)
 
-  const win = new BrowserWindow({
+  const win = newWindow({
     width: 760,
     height: 620,
     minWidth: 480,
@@ -459,9 +418,7 @@ async function pickSource() {
     minimizable: false,
     fullscreenable: false,
     title: 'Record with Iris',
-    show: false,
-    backgroundColor: background(),
-    webPreferences: { ...WEB_PREFERENCES, preload: path.join(PAGES, 'preload-picker.cjs') },
+    preload: 'preload-picker.cjs',
   })
   state.win = win
   // Started from the menu bar, Iris may not be the active app: bring the picker to the front, and
@@ -483,16 +440,12 @@ async function pickSource() {
 }
 
 function fromPicker(event) {
-  return fromDesktopPage(event, picker?.win, 'picker.html')
+  return policy.fromDesktopPage(event, picker?.win, path.join(PAGES, 'picker.html'))
 }
 
-ipcMain.handle('iris-picker:snapshot', (event) => {
-  if (!fromPicker(event)) throw new Error('not allowed')
-  return picker.page
-})
+handleFrom(fromPicker, 'iris-picker:snapshot', () => picker.page)
 
-ipcMain.handle('iris-picker:choose', (event, id) => {
-  if (!fromPicker(event)) throw new Error('not allowed')
+handleFrom(fromPicker, 'iris-picker:choose', (id) => {
   const state = picker
   const valid = state.list && pickerRules.chosenId(state.list, id)
   if (!valid) throw new Error('not offered')
@@ -500,15 +453,9 @@ ipcMain.handle('iris-picker:choose', (event, id) => {
   state.win.close()
 })
 
-ipcMain.handle('iris-picker:cancel', (event) => {
-  if (!fromPicker(event)) throw new Error('not allowed')
-  picker.win.close()
-})
+handleFrom(fromPicker, 'iris-picker:cancel', () => picker.win.close())
 
-ipcMain.handle('iris-picker:open-settings', (event) => {
-  if (!fromPicker(event)) throw new Error('not allowed')
-  shell.openExternal(pickerRules.SCREEN_SETTINGS_URL)
-})
+handleFrom(fromPicker, 'iris-picker:open-settings', () => void shell.openExternal(pickerRules.SCREEN_SETTINGS_URL))
 
 // ---- menu bar --------------------------------------------------------------------------------
 
@@ -600,11 +547,11 @@ function menuBarEvent(event) {
 }
 
 ipcMain.on('iris-app:record-listening', (event) => {
-  if (policy.fromIrisWindow(event, mainWindow)) menuBarEvent({ type: 'listening' })
+  if (fromMainWindow(event)) menuBarEvent({ type: 'listening' })
 })
 
 ipcMain.on('iris-app:recording', (event, report) => {
-  if (policy.fromIrisWindow(event, mainWindow)) menuBarEvent({ type: 'report', report })
+  if (fromMainWindow(event)) menuBarEvent({ type: 'report', report })
 })
 
 // ---- backend ---------------------------------------------------------------------------------
@@ -635,7 +582,7 @@ async function startBackend() {
 }
 
 function showUiWhenReady() {
-  if (mainWindow && backend.info() && !showingUi(mainWindow)) mainWindow.loadURL(UI_URL)
+  if (mainWindow && backend.info() && !policy.isIrisUrl(mainWindow.webContents.getURL())) mainWindow.loadURL(UI_URL)
 }
 
 async function restartBackend() {
@@ -696,13 +643,17 @@ async function busySessions() {
 async function confirmBusy(message, detail, button = 'Continue', describe = busyDetail) {
   const busy = await busySessions()
   if (!busy.length) return true
+  return confirm(message, detail ? `${detail}\n\n${describe(busy)}` : describe(busy), button)
+}
+
+async function confirm(message, detail, button) {
   const { response } = await dialog.showMessageBox(mainWindow ?? undefined, {
     type: 'warning',
     buttons: [button, 'Cancel'],
     defaultId: 1,
     cancelId: 1,
     message,
-    detail: detail ? `${detail}\n\n${describe(busy)}` : describe(busy),
+    detail,
   })
   return response === 0
 }
@@ -722,14 +673,7 @@ async function refuseKeyWhileBusy(action) {
 
 /** "Open full size" on a figure: the file in its own window (no preload; the guards apply). */
 function openFigure(url) {
-  const win = new BrowserWindow({
-    width: 1200,
-    height: 900,
-    title: 'Iris figure',
-    backgroundColor: background(),
-    webPreferences: WEB_PREFERENCES,
-  })
-  win.loadURL(url)
+  newWindow({ width: 1200, height: 900, title: 'Iris figure', show: true }).loadURL(url)
 }
 
 function openOutside(url) {
@@ -879,14 +823,16 @@ function buildMenu() {
 
 // ---- lifecycle -------------------------------------------------------------------------------
 
+function showIris() {
+  if (app.isReady() && !keyWindow) showMainWindow()
+  else keyWindow?.focus()
+}
+
 if (!app.requestSingleInstanceLock()) {
   // Another Iris is running: it focuses its window (second-instance), this one leaves.
   app.quit()
 } else {
-  app.on('second-instance', () => {
-    if (app.isReady() && !keyWindow) showMainWindow()
-    else keyWindow?.focus()
-  })
+  app.on('second-instance', showIris)
 
   app.whenReady().then(async () => {
     log(`[app] starting ${app.getVersion()} (${PACKAGED ? 'packaged' : 'development'}), data in ${USER_DATA}`)
@@ -899,7 +845,7 @@ if (!app.requestSingleInstanceLock()) {
     // development the repo's backend/.env can supply the key. Without a key Iris still opens: the
     // Library and Settings say notes can't be made, with Add key….
     if (PACKAGED) {
-      const hasKey = Boolean(currentKey())
+      const hasKey = Boolean(keystore.load())
       if (shouldWelcome({ hasKey, seen: appState.get(WELCOME_SHOWN) === true })) {
         rememberWelcomeShown() // before asking: closing or quitting from the welcome counts too
         if (!(await askForKey('first'))) log('[key] set up later: opening without an API key')
@@ -914,9 +860,7 @@ if (!app.requestSingleInstanceLock()) {
 
   // macOS: closing the window keeps Iris (and notes being made) running; the Dock icon reopens it.
   app.on('window-all-closed', () => {})
-  app.on('activate', () => {
-    if (app.isReady() && !keyWindow) showMainWindow()
-  })
+  app.on('activate', showIris)
 
   let quitAsk = null // the pending "Quit Iris?" check: another Cmd-Q waits for it
   app.on('before-quit', (event) => {

@@ -1,5 +1,5 @@
-// The key screen. window.irisKey comes from preload-key.cjs: save(), cancel() and hasApiKey()
-// (unused here); the stored key is never sent back to this page. Saving checks the new key with
+// The key screen. window.irisKey comes from preload-key.cjs: save() and cancel(); the stored
+// key is never sent back to this page. Saving checks the new key with
 // OpenAI first.
 //
 // mode=first (first run): two steps, Welcome then Connect, with Next and Back; "Set up later"

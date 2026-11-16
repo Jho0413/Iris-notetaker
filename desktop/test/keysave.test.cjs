@@ -14,14 +14,13 @@ function deps({ check = { ok: true }, open = true, storeThrows = null } = {}) {
     store: (key) => {
       log.push(['store', key])
       if (storeThrows) throw new Error(storeThrows)
-      return key
     },
   }
 }
 
 test('a good key is checked, then stored', async () => {
   const d = deps()
-  assert.deepEqual(await saveNewKey(`  ${KEY}\n`, d), { ok: true, key: KEY })
+  assert.deepEqual(await saveNewKey(`  ${KEY}\n`, d), { ok: true })
   assert.deepEqual(d.log, [['check', KEY], ['stillOpen'], ['store', KEY]])
 })
 

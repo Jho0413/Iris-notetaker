@@ -33,19 +33,21 @@ test('checkApiKey', () => {
   }
 })
 
-test('save encrypts, load decrypts, file is private', () => {
+test('save encrypts, load decrypts, file is private, and load follows save and clear', () => {
   const file = tmpFile()
   const store = createKeyStore({ safeStorage: fakeSafeStorage(), file })
   assert.equal(store.has(), false)
   assert.equal(store.load(), null)
-  assert.equal(store.save(`${KEY}\n`), KEY) // returns the key as stored
+  store.save(`${KEY}\n`)
   assert.equal(store.has(), true)
   assert.equal(store.load(), KEY)
+  assert.equal(createKeyStore({ safeStorage: fakeSafeStorage(), file }).load(), KEY)
   assert.ok(!fs.readFileSync(file).toString().includes(KEY), 'the key is never on disk in plain text')
   assert.equal(fs.statSync(file).mode & 0o777, 0o600)
   assert.ok(!fs.existsSync(file + '.tmp'))
   store.clear()
   assert.equal(store.has(), false)
+  assert.equal(store.load(), null)
 })
 
 test('save refuses bad keys and missing encryption, storing nothing', () => {
@@ -62,4 +64,17 @@ test('a key that cannot be decrypted loads as null (ask again)', () => {
   const store = createKeyStore({ safeStorage: fakeSafeStorage(), file })
   assert.equal(store.has(), true)
   assert.equal(store.load(), null)
+})
+
+test('load reads the key once, a failed read too', () => {
+  const file = tmpFile()
+  createKeyStore({ safeStorage: fakeSafeStorage(), file }).save(KEY)
+  const store = createKeyStore({ safeStorage: fakeSafeStorage(), file })
+  assert.equal(store.load(), KEY)
+  fs.writeFileSync(file, 'garbage')
+  assert.equal(store.load(), KEY)
+  const unreadable = createKeyStore({ safeStorage: fakeSafeStorage(), file })
+  assert.equal(unreadable.load(), null)
+  store.save(KEY)
+  assert.equal(unreadable.load(), null)
 })

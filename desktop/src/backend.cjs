@@ -13,11 +13,12 @@ const fs = require('node:fs')
 const http = require('node:http')
 const net = require('node:net')
 const path = require('node:path')
+const { TOKEN_HEADER } = require('./routes.cjs')
 
-const TOKEN_HEADER = 'x-iris-token'
 const LOG_ROTATE_BYTES = 10 * 1024 * 1024
 const LOG_DRAIN_MS = 2000 // after exit, how long the log waits for the rest of the output
 const REQUEST_TIMEOUT_MS = 3000 // the app's own API requests (getJson, post)
+const HEALTH_TIMEOUT_MS = 2000
 
 /** A port nothing is listening on right now, on 127.0.0.1. */
 function freePort() {
@@ -78,18 +79,21 @@ function secretsLine({ apiKey, token }) {
   return JSON.stringify({ openai_api_key: apiKey || null, api_token: token }) + '\n'
 }
 
-/** GET /api/health with the token: true once it answers 200. */
-function checkHealth(port, token, timeoutMs = 2000) {
+function requestWithToken(method, { port, token }, apiPath, timeoutMs) {
   return new Promise((resolve) => {
-    const req = http.get(
-      { host: '127.0.0.1', port, path: '/api/health', headers: { [TOKEN_HEADER]: token }, timeout: timeoutMs },
+    const req = http.request(
+      { method, host: '127.0.0.1', port, path: apiPath, headers: { [TOKEN_HEADER]: token }, timeout: timeoutMs },
       (res) => {
-        res.resume()
-        resolve(res.statusCode === 200)
+        let body = ''
+        res.setEncoding('utf8')
+        res.on('data', (c) => (body += c))
+        res.on('end', () => resolve({ status: res.statusCode, body }))
+        res.on('error', () => resolve(null))
       },
     )
     req.on('timeout', () => req.destroy())
-    req.on('error', () => resolve(false))
+    req.on('error', () => resolve(null))
+    req.end()
   })
 }
 
@@ -215,7 +219,7 @@ class Backend extends EventEmitter {
     exited.then((e) => (gone = e))
     while (!gone) {
       if (this.stopping) break
-      if (await checkHealth(port, token)) {
+      if ((await requestWithToken('GET', { port, token }, '/api/health', HEALTH_TIMEOUT_MS))?.status === 200) {
         if (this.stopping || gone) break
         healthy = true
         this.ready = { port, token }
@@ -262,7 +266,7 @@ class Backend extends EventEmitter {
   /** GET an API path with the token (the app's own checks, e.g. sessions in progress at quit):
    * its JSON on a 200, else null. */
   async getJson(apiPath, timeoutMs = REQUEST_TIMEOUT_MS) {
-    const answer = await this._call('GET', apiPath, timeoutMs)
+    const answer = this.ready && (await requestWithToken('GET', this.ready, apiPath, timeoutMs))
     if (answer?.status !== 200) return null
     try {
       return JSON.parse(answer.body)
@@ -274,30 +278,8 @@ class Backend extends EventEmitter {
   /** POST to an API path with the token and no body (the app's own actions, e.g. stopping a
    * recording at quit): the status code, or 0 if the backend didn't answer. */
   async post(apiPath, timeoutMs = REQUEST_TIMEOUT_MS) {
-    return (await this._call('POST', apiPath, timeoutMs))?.status ?? 0
-  }
-
-  /** One request with the token: `{status, body}`, or null if the backend isn't up or didn't
-   * answer in time. Never rejects. */
-  _call(method, apiPath, timeoutMs) {
-    const ready = this.ready
-    if (!ready) return Promise.resolve(null)
-    return new Promise((resolve) => {
-      const req = http.request(
-        { method, host: '127.0.0.1', port: ready.port, path: apiPath, headers: { [TOKEN_HEADER]: ready.token }, timeout: timeoutMs },
-        (res) => {
-          let body = ''
-          res.setEncoding('utf8')
-          res.on('data', (c) => (body += c))
-          res.on('end', () => resolve({ status: res.statusCode, body }))
-          res.on('error', () => resolve(null))
-        },
-      )
-      req.on('timeout', () => req.destroy())
-      req.on('error', () => resolve(null))
-      req.end()
-    })
+    return (this.ready && (await requestWithToken('POST', this.ready, apiPath, timeoutMs)))?.status ?? 0
   }
 }
 
-module.exports = { Backend, REQUEST_TIMEOUT_MS, backendCommand, checkHealth, freePort, newToken, secretsLine }
+module.exports = { Backend, REQUEST_TIMEOUT_MS, backendCommand, freePort, newToken, secretsLine }

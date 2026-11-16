@@ -183,12 +183,7 @@ test('a backend ignoring SIGTERM is killed', async () => {
 })
 
 test('a command that cannot run rejects with the reason', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'iris-backend-'))
-  const backend = new Backend({
-    command: () => ({ cmd: path.join(dir, 'no-such-python'), args: [], cwd: dir, env: {} }),
-    logFile: path.join(dir, 'backend.log'),
-    startTimeoutMs: 2000,
-  })
+  const { backend } = fakeBackend('ok', { command: () => ({ cmd: '/no-such-dir/no-such-python', args: [], cwd: os.tmpdir(), env: {} }) })
   await assert.rejects(backend.start(), /could not start: .*ENOENT/)
   assert.equal(backend.running, false)
 })
@@ -251,23 +246,17 @@ test('stop before the process is spawned cancels the start too', async () => {
 })
 
 test('stop is bounded even when a grandchild keeps the output pipes open', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'iris-backend-'))
-  const backend = new Backend({
-    command: (port, token) => ({
-      cmd: process.execPath,
-      args: [path.join(__dirname, 'fake-wrapper.cjs'), String(port)],
-      cwd: dir,
-      env: { PATH: process.env.PATH, EXIT_AFTER_MS: '5000' },
-      stdin: secretsLine({ apiKey: null, token }),
-    }),
-    logFile: path.join(dir, 'backend.log'),
-    startTimeoutMs: 3000,
-    stopTimeoutMs: 300,
+  const { backend, logFile } = fakeBackend('ok', { stopTimeoutMs: 300 })
+  const command = backend.command
+  backend.command = (port, token) => ({
+    ...command(port, token),
+    args: [path.join(__dirname, 'fake-wrapper.cjs'), String(port)],
+    env: { PATH: process.env.PATH, EXIT_AFTER_MS: '5000' },
   })
   await backend.start()
   const t0 = Date.now()
   await backend.stop() // SIGTERM ignored → SIGKILL after 300 ms; the grandchild still holds the pipes
   const took = Date.now() - t0
   assert.ok(took < 4000, `stop took ${took} ms`)
-  assert.match(fs.readFileSync(path.join(dir, 'backend.log'), 'utf8'), /backend exited \(code null, signal SIGKILL\)/)
+  assert.match(fs.readFileSync(logFile, 'utf8'), /backend exited \(code null, signal SIGKILL\)/)
 })

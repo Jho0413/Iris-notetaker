@@ -64,4 +64,4 @@ function forward(request, apiPath, target) {
   })
 }
 
-module.exports = { forward, API_CSP }
+module.exports = { forward }

@@ -21,7 +21,8 @@ async function saveNewKey(input, { check, stillOpen, store }) {
   if (!result.ok) return { ok: false, error: result.error ?? '', reason: result.reason }
   if (!stillOpen()) return { ok: false, error: '', cancelled: true }
   try {
-    return { ok: true, key: store(checked.key) }
+    store(checked.key)
+    return { ok: true }
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) }
   }

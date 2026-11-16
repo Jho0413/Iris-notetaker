@@ -23,6 +23,7 @@ function checkApiKey(input) {
  * @param {string} opts.file  where the encrypted key lives
  */
 function createKeyStore({ safeStorage, file }) {
+  let loaded
   return {
     has() {
       return fs.existsSync(file)
@@ -41,11 +42,13 @@ function createKeyStore({ safeStorage, file }) {
       const tmp = `${file}.tmp`
       fs.writeFileSync(tmp, data, { mode: 0o600 })
       fs.renameSync(tmp, file)
-      return checked.key
+      loaded = checked.key
     },
 
     /** The stored key, or null if there is none or it can't be decrypted (then ask again). */
     load() {
+      if (loaded !== undefined) return loaded
+      loaded = null
       let data
       try {
         data = fs.readFileSync(file)
@@ -54,14 +57,16 @@ function createKeyStore({ safeStorage, file }) {
       }
       try {
         const key = safeStorage.decryptString(data)
-        return checkApiKey(key).ok ? key : null
+        loaded = checkApiKey(key).ok ? key : null
       } catch {
         return null
       }
+      return loaded
     },
 
     clear() {
       fs.rmSync(file, { force: true })
+      loaded = null
     },
   }
 }

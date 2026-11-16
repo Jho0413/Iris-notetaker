@@ -1,7 +1,6 @@
 // What Iris windows may load, open and use, as pure functions (tested in test/policy.test.cjs).
 // main.cjs applies them to every web contents.
 
-const path = require('node:path')
 const { fileURLToPath } = require('node:url')
 const routes = require('./routes.cjs')
 
@@ -10,18 +9,6 @@ function isIrisUrl(url) {
   try {
     const u = new URL(url)
     return u.protocol === `${routes.SCHEME}:` && u.host === routes.HOST && !u.username && !u.password
-  } catch {
-    return false
-  }
-}
-
-/** One of the app's own pages (key screen, starting screen) inside `pagesDir`. */
-function isDesktopPage(url, pagesDir) {
-  try {
-    const u = new URL(url)
-    if (u.protocol !== 'file:') return false
-    const file = fileURLToPath(u)
-    return routes.isInside(path.resolve(pagesDir), path.resolve(file)) && file.endsWith('.html')
   } catch {
     return false
   }
@@ -77,19 +64,28 @@ function permissionCheckAllowed(permission, requestingOrigin) {
  * screen) loaded in the same window. Used for the main window's bridge (pages/preload-main.cjs).
  */
 function fromIrisWindow(event, win) {
-  const frame = event?.senderFrame
-  return Boolean(
-    win && !win.isDestroyed?.() && event.sender === win.webContents && frame && frame.parent === null &&
-      isIrisUrl(frame.url),
-  )
+  return isIrisUrl(senderTopFrame(event, win)?.url)
+}
+
+function fromDesktopPage(event, win, pageFile) {
+  try {
+    return fileURLToPath(senderTopFrame(event, win)?.url) === pageFile
+  } catch {
+    return false
+  }
+}
+
+function senderTopFrame(event, win) {
+  const frame = event.senderFrame
+  return win && !win.isDestroyed() && event.sender === win.webContents && frame?.parent === null ? frame : null
 }
 
 module.exports = {
   isIrisUrl,
-  isDesktopPage,
   isSessionFileUrl,
   externalUrl,
   permissionAllowed,
   permissionCheckAllowed,
   fromIrisWindow,
+  fromDesktopPage,
 }
