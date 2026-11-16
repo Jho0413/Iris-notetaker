@@ -8,7 +8,6 @@ test('the live page asks before stopping a recording', () => {
     assert.equal(prompt.message, 'Stop recording?', url)
     assert.equal(prompt.buttons[prompt.leave], 'Stop Recording')
     assert.equal(prompt.buttons[prompt.cancelId], 'Keep Recording')
-    // Leaving stops the recording without notes (the page sends stop): the library makes them.
     assert.equal(
       prompt.detail,
       'Iris is recording. If you leave this page, the recording stops and what was recorded is kept: make notes from it in the library.',
@@ -25,7 +24,7 @@ test('an unsaved settings change never mentions recording', () => {
   assert.equal(prompt.message, 'Leave without saving?')
   assert.doesNotMatch(`${prompt.message} ${prompt.detail} ${prompt.buttons}`, /record/i)
   assert.equal(prompt.buttons[prompt.cancelId], 'Keep Editing')
-  assert.equal(prompt.defaultId, prompt.cancelId) // Return keeps the change
+  assert.equal(prompt.defaultId, prompt.cancelId)
 })
 
 test('quitting with an unsaved change asks too', () => {

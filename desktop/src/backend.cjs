@@ -1,11 +1,3 @@
-// Starts, watches and stops the Iris backend (the engine) for the desktop app. Plain Node, so it
-// is tested without Electron (test/backend.test.cjs).
-//
-// Each start picks a free port and a fresh random token. The backend gets the app's pid in its
-// environment (it exits if the app dies: iris/parent.py), and the token and the API key as one
-// line of JSON on its stdin (iris/launch_secrets.py): any process of the same user can read
-// another's environment (`ps eww <pid>`), but not its stdin.
-
 const { spawn: spawnProcess } = require('node:child_process')
 const crypto = require('node:crypto')
 const { EventEmitter } = require('node:events')
@@ -16,11 +8,10 @@ const path = require('node:path')
 const { TOKEN_HEADER } = require('./routes.cjs')
 
 const LOG_ROTATE_BYTES = 10 * 1024 * 1024
-const LOG_DRAIN_MS = 2000 // after exit, how long the log waits for the rest of the output
-const REQUEST_TIMEOUT_MS = 3000 // the app's own API requests (getJson, post)
+const LOG_DRAIN_MS = 2000
+const REQUEST_TIMEOUT_MS = 3000
 const HEALTH_TIMEOUT_MS = 2000
 
-/** A port nothing is listening on right now, on 127.0.0.1. */
 function freePort() {
   return new Promise((resolve, reject) => {
     const server = net.createServer()
@@ -41,16 +32,6 @@ function newToken() {
   return crypto.randomBytes(32).toString('base64url')
 }
 
-/**
- * How to run the backend.
- * Packaged: the bundled Python, isolated (-I: no PYTHON* variables, user site or cwd on the
- * path), unbuffered (-u, so the log is live) and never writing bytecode into the app (-B; it is
- * precompiled at build time), in a clean environment, with userData as both
- * its data folder and cwd (a .env there still applies). `python -m iris`, not `bin/iris`: the
- * console script's shebang holds the build machine's path.
- * Development: `uv run` in the repo's backend/, through a login shell so uv is on PATH when the
- * app is opened with `open`; the repo's backend/.env and data/ apply, as with `make dev`.
- */
 function backendCommand({ packaged, resourcesPath, repoDir, userData, port, token, parentPid, apiKey, env }) {
   const serve = ['-m', 'iris', 'serve', '--host', '127.0.0.1', '--port', String(port), '--secrets-from-stdin']
   const stdin = secretsLine({ apiKey, token })
@@ -74,7 +55,6 @@ function backendCommand({ packaged, resourcesPath, repoDir, userData, port, toke
   }
 }
 
-/** The line `iris serve --secrets-from-stdin` reads: the key (null if none) and the token. */
 function secretsLine({ apiKey, token }) {
   return JSON.stringify({ openai_api_key: apiKey || null, api_token: token }) + '\n'
 }
@@ -97,31 +77,14 @@ function requestWithToken(method, { port, token }, apiPath, timeoutMs) {
   })
 }
 
-/** Move a big log aside (one old copy kept), so logs don't grow forever. */
 function rotateLog(file) {
   try {
     if (fs.statSync(file).size > LOG_ROTATE_BYTES) fs.renameSync(file, `${file}.1`)
   } catch {
-    // no log yet
   }
 }
 
-/**
- * The backend process. Emits 'exit' ({code, signal, expected, duringStart}) when it stops:
- * `expected` is false when it stopped on its own; `duringStart` is true when it never became
- * healthy (start() rejects for that). A crash is `!expected && !duringStart`.
- */
 class Backend extends EventEmitter {
-  /**
-   * @param {object} opts
-   * @param {(port: number, token: string) => {cmd: string, args: string[], cwd: string, env: object, stdin?: string}} opts.command
- *   `stdin` is written to the process's stdin, which is then closed.
-   * @param {string} opts.logFile
-   * @param {(line: string) => void} [opts.log]
-   * @param {number} [opts.startTimeoutMs]  first launch of a fresh install takes ~40 s (macOS checks each native library)
-   * @param {number} [opts.stopTimeoutMs]   then SIGKILL
-   * @param {typeof spawnProcess} [opts.spawn]
-   */
   constructor({ command, logFile, log = () => {}, startTimeoutMs = 180_000, stopTimeoutMs = 10_000, spawn = spawnProcess }) {
     super()
     this.command = command
@@ -131,13 +94,12 @@ class Backend extends EventEmitter {
     this.stopTimeoutMs = stopTimeoutMs
     this.spawn = spawn
     this.child = null
-    this.ready = null // {port, token} once healthy
+    this.ready = null
     this.stopping = false
-    this.starting = null // the start() under way
-    this.logClosed = Promise.resolve() // settles once the last process's log is written
+    this.starting = null
+    this.logClosed = Promise.resolve()
   }
 
-  /** Where the page's API requests go, or null while the backend isn't up. */
   info() {
     return this.ready
   }
@@ -146,15 +108,10 @@ class Backend extends EventEmitter {
     return this.child !== null
   }
 
-  /**
-   * Start and wait until healthy. Rejects if it exits or doesn't answer in time; the error has
-   * `stopped: true` when stop() ended the start. One start at a time: calling start() again while
-   * one is under way returns the same promise, so there is never a second backend process.
-   */
   start() {
     if (this.starting) return this.starting
     if (this.child) return Promise.reject(new Error('backend already running'))
-    this.stopping = false // set before the first await, so stop() from here on cancels this start
+    this.stopping = false
     this.starting = this._start().finally(() => (this.starting = null))
     return this.starting
   }
@@ -171,9 +128,6 @@ class Backend extends EventEmitter {
     fs.mkdirSync(cwd, { recursive: true })
     const child = this.spawn(cmd, args, { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] })
     this.child = child
-    // A process that exits (or never starts) before reading its stdin makes the write fail with
-    // EPIPE. Unhandled, that error would crash the app; the exit itself is reported below. The
-    // line holds the key, so only the error code is logged.
     child.stdin.on('error', (err) => this.log(`[backend] couldn't write its stdin: ${err.code ?? 'error'}`))
     child.stdin.end(stdin)
     child.stdout.pipe(out, { end: false })
@@ -187,10 +141,6 @@ class Backend extends EventEmitter {
       })
       child.once('exit', (code, signal) => resolve({ code, signal }))
     })
-    // The log ends once the process has exited and its output has been read to the end ('close'
-    // follows 'exit' once stdout and stderr are drained), and stop() waits for that last write.
-    // A grandchild holding the pipes (in development, uv runs Python as its own child) could keep
-    // them open indefinitely, so the wait for 'close' is bounded.
     const closed = new Promise((resolve) => {
       child.once('close', resolve)
       child.once('error', resolve)
@@ -208,8 +158,6 @@ class Backend extends EventEmitter {
       }
       const expected = this.stopping
       this.log(`[backend] exited (code ${code}, signal ${signal}${expected ? '' : ', unexpected'})`)
-      // A backend that dies before it was ever healthy is reported by start()'s rejection, so
-      // the app shows one "didn't start" message, not that and a crash.
       this.emit('exit', { code, signal, expected, duringStart: !healthy, error })
     })
 
@@ -239,10 +187,6 @@ class Backend extends EventEmitter {
     )
   }
 
-  /**
-   * Stop it: SIGTERM (it finishes cleanly), then SIGKILL after stopTimeoutMs. A start under way
-   * is cancelled (it rejects with `stopped: true`), and stop() returns once no process is left.
-   */
   async stop() {
     this.stopping = true
     this.ready = null
@@ -263,8 +207,6 @@ class Backend extends EventEmitter {
     clearTimeout(timer)
   }
 
-  /** GET an API path with the token (the app's own checks, e.g. sessions in progress at quit):
-   * its JSON on a 200, else null. */
   async getJson(apiPath, timeoutMs = REQUEST_TIMEOUT_MS) {
     const answer = this.ready && (await requestWithToken('GET', this.ready, apiPath, timeoutMs))
     if (answer?.status !== 200) return null
@@ -275,8 +217,6 @@ class Backend extends EventEmitter {
     }
   }
 
-  /** POST to an API path with the token and no body (the app's own actions, e.g. stopping a
-   * recording at quit): the status code, or 0 if the backend didn't answer. */
   async post(apiPath, timeoutMs = REQUEST_TIMEOUT_MS) {
     return (this.ready && (await requestWithToken('POST', this.ready, apiPath, timeoutMs)))?.status ?? 0
   }

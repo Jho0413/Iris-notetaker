@@ -7,7 +7,6 @@ const { checkApiKey, createKeyStore } = require('../src/keystore.cjs')
 
 const KEY = 'sk-proj-' + 'a'.repeat(40)
 
-/** Reversible stand-in for safeStorage: the bytes on disk must not contain the key. */
 function fakeSafeStorage({ available = true } = {}) {
   return {
     isEncryptionAvailable: () => available,

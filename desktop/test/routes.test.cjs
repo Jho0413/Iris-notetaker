@@ -13,7 +13,7 @@ test('other paths are static files or client routes', () => {
   assert.deepEqual(routes.route('app://iris/'), { kind: 'static', pathname: '/' })
   assert.deepEqual(routes.route('app://iris/assets/index-abc.js'), { kind: 'static', pathname: '/assets/index-abc.js' })
   assert.deepEqual(routes.route('app://iris/sessions/abc123'), { kind: 'static', pathname: '/sessions/abc123' })
-  assert.deepEqual(routes.route('app://iris/apidocs'), { kind: 'static', pathname: '/apidocs' }) // not /api/
+  assert.deepEqual(routes.route('app://iris/apidocs'), { kind: 'static', pathname: '/apidocs' })
   assert.deepEqual(routes.route('app://iris/a%20b.svg'), { kind: 'static', pathname: '/a b.svg' })
 })
 
@@ -94,7 +94,7 @@ test('files resolve inside dist only', () => {
 test('isInside', () => {
   assert.ok(routes.isInside('/a/b', '/a/b'))
   assert.ok(routes.isInside('/a/b', '/a/b/c'))
-  assert.ok(routes.isInside('/a/b', '/a/b/..c')) // a file named "..c"
+  assert.ok(routes.isInside('/a/b', '/a/b/..c'))
   assert.ok(!routes.isInside('/a/b', '/a/bc'))
   assert.ok(!routes.isInside('/a/b', '/a'))
   assert.ok(!routes.isInside('/a/b', '/x'))

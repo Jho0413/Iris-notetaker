@@ -4,7 +4,6 @@ const { saveNewKey } = require('../src/keysave.cjs')
 
 const KEY = 'sk-test-0123456789abcdefghij'
 
-/** Fakes that record what happened, in order. */
 function deps({ check = { ok: true }, open = true, storeThrows = null } = {}) {
   const log = []
   return {

@@ -23,7 +23,7 @@ test('several displays: the main display first, numbered, with each display name
       { id: 1, label: 'Built-in Retina Display' },
       { id: 5, label: 'DELL U2723QE' },
     ],
-    primaryDisplayId: 5, // the external display is the main one
+    primaryDisplayId: 5,
   }
   const list = listSources([screen(1, '1'), screen(5, '5')], context)
   assert.deepEqual(list.screens, [

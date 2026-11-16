@@ -54,7 +54,6 @@ test('the packaged command: bundled python, isolated, clean environment, data in
   assert.equal(c.cmd, '/Applications/Iris.app/Contents/Resources/backend/python/bin/python3')
   assert.deepEqual(c.args, ['-I', '-u', '-B', '-m', 'iris', 'serve', '--host', '127.0.0.1', '--port', '4321', '--secrets-from-stdin'])
   assert.equal(c.cwd, '/Users/me/Library/Application Support/Iris')
-  // No key or token in the environment: any process of the user could read them there.
   assert.deepEqual(c.env, {
     HOME: '/Users/me',
     TMPDIR: '/tmp/x',
@@ -94,15 +93,13 @@ test('start waits for health with the token, stop is clean and expected', async 
   const ready = await backend.start()
   assert.deepEqual(backend.info(), ready)
   assert.ok(backend.running)
-  // Without the token the backend refuses; the app's own calls carry it.
   const status = await new Promise((r) => http.get({ host: '127.0.0.1', port: ready.port, path: '/api/sessions' }, (res) => r(res.statusCode)))
   assert.equal(status, 401)
   assert.deepEqual(await backend.getJson('/api/sessions'), [{ id: 'a', status: 'processing' }])
-  // The app's own actions: a POST with the token, answered with its status code.
   assert.equal(await backend.post('/api/live/b/stop'), 200)
   assert.equal(await backend.post('/api/live/a/stop'), 409)
-  assert.equal(await backend.getJson('/api/live/b/stop'), null) // a GET there is a 404: no JSON
-  assert.equal(await backend.getJson('/api/not-json'), null) // a 200 that isn't JSON
+  assert.equal(await backend.getJson('/api/live/b/stop'), null)
+  assert.equal(await backend.getJson('/api/not-json'), null)
   await assert.rejects(backend.start(), /already running/)
   const exit = exitEvent(backend)
   await backend.stop()
@@ -110,14 +107,13 @@ test('start waits for health with the token, stop is clean and expected', async 
   assert.equal(backend.info(), null)
   assert.equal(backend.running, false)
   assert.equal(await backend.getJson('/api/sessions'), null)
-  assert.equal(await backend.post('/api/live/b/stop'), 0) // stopped: no answer
+  assert.equal(await backend.post('/api/live/b/stop'), 0)
   const logged = fs.readFileSync(logFile, 'utf8')
   assert.match(logged, /stopped b\n/)
-  // The fake backend got the secrets on stdin and none in its environment.
   assert.match(logged, /fake backend ok stdin=\["openai_api_key","api_token"\] key=set secrets-in-env=none parent=\d+/)
   assert.doesNotMatch(logged, /sk-key/)
   assert.match(logged, /backend exited/)
-  await backend.stop() // stopping twice is fine
+  await backend.stop()
 })
 
 test('each start gets a new port and token', async () => {
@@ -144,7 +140,7 @@ test('a crash while starting rejects; a crash later is reported as unexpected', 
   process.kill(ok.child.pid, 'SIGKILL')
   const e = await exit
   assert.equal(e.expected, false)
-  assert.equal(e.duringStart, false) // a real crash
+  assert.equal(e.duringStart, false)
   assert.equal(e.signal, 'SIGKILL')
   assert.equal(ok.info(), null)
   assert.ok(ready.port)
@@ -154,13 +150,11 @@ test('a backend that exits before reading its stdin does not crash the app', asy
   const logged = []
   const { backend } = fakeBackend('crash', { log: (line) => logged.push(line) })
   const big = backend.command
-  // Far more than a pipe holds, so the write is still under way when the process exits: EPIPE.
   backend.command = (port, token) => ({ ...big(port, token), stdin: 'x'.repeat(4 * 1024 * 1024) })
   await assert.rejects(backend.start(), /exited while starting \(code 3\)/)
-  await new Promise((r) => setTimeout(r, 100)) // let a late stdin error arrive
+  await new Promise((r) => setTimeout(r, 100))
   assert.ok(logged.some((l) => /couldn't write its stdin: EPIPE/.test(l)), logged.join('\n'))
   assert.ok(!logged.some((l) => l.includes('xxxx')))
-  // And it starts normally afterwards.
   backend.command = fakeBackend('ok').backend.command
   await backend.start()
   await backend.stop()
@@ -219,14 +213,13 @@ test('stop during a slow start cancels it: start rejects as stopped, no process 
   const { backend } = fakeBackend('slow', { startTimeoutMs: 10_000 })
   const exit = exitEvent(backend)
   const starting = backend.start()
-  await new Promise((r) => setTimeout(r, 300)) // spawned, not healthy
+  await new Promise((r) => setTimeout(r, 300))
   const pid = backend.child.pid
   await backend.stop()
   await assert.rejects(starting, (err) => err.stopped === true)
   assert.equal((await exit).expected, true)
   assert.ok(!alive(pid))
   assert.equal(backend.running, false)
-  // And it can start again afterwards.
   backend.command = fakeBackend('ok').backend.command
   await backend.start()
   await backend.stop()
@@ -238,7 +231,7 @@ test('stop before the process is spawned cancels the start too', async () => {
   const realSpawn = backend.spawn
   backend.spawn = (...args) => (spawned++, realSpawn(...args))
   const starting = backend.start()
-  const stopping = backend.stop() // while start awaits a free port
+  const stopping = backend.stop()
   await assert.rejects(starting, (err) => err.stopped === true)
   await stopping
   assert.equal(spawned, 0)
@@ -255,7 +248,7 @@ test('stop is bounded even when a grandchild keeps the output pipes open', async
   })
   await backend.start()
   const t0 = Date.now()
-  await backend.stop() // SIGTERM ignored → SIGKILL after 300 ms; the grandchild still holds the pipes
+  await backend.stop()
   const took = Date.now() - t0
   assert.ok(took < 4000, `stop took ${took} ms`)
   assert.match(fs.readFileSync(logFile, 'utf8'), /backend exited \(code null, signal SIGKILL\)/)

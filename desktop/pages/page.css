@@ -1,5 +1,3 @@
-/* Shared by the desktop app's own pages (key screen, starting screen, picker). Colours from
-   frontend/DESIGN.md. */
 :root {
   --bg: #f6f6f9; --surface: #ffffff; --border: #dedee6; --field-border: #8a8a99;
   --text: #17171c; --text-2: #5b5b68; --accent: #4b44d6; --accent-hover: #3d36c2;
@@ -43,7 +41,6 @@ button.primary:hover { background: var(--accent-hover); }
 button:disabled { opacity: 0.6; cursor: default; }
 .mark { width: 40px; height: 40px; margin-bottom: 16px; }
 
-/* The first-run welcome (key.html, step 1 of 2) and the key form (step 2, or on its own). */
 .tagline { margin: 0; font-size: 15px; }
 .steps { list-style: none; margin: 22px 0 0; padding: 0; display: grid; gap: 14px; }
 .steps li { display: grid; grid-template-columns: 32px 1fr; gap: 12px; align-items: start; font-size: 14px; color: var(--text-2); }
@@ -58,15 +55,12 @@ button:disabled { opacity: 0.6; cursor: default; }
 .field-error { color: var(--error); font-size: 13px; margin: 8px 0 0; }
 .field-error:empty { display: none; }
 .hint { font-size: 13px; margin: 8px 0 0; }
-/* One line under the field: the error replaces the hint while it shows. */
 .field-error:not(:empty) + .hint { display: none; }
 .spacer { flex: 1; }
 button.quiet { border-color: transparent; background: transparent; color: var(--text-2); padding-left: 10px; padding-right: 10px; }
 button.quiet:hover { color: var(--text); }
 [hidden] { display: none !important; }
 
-/* The picker (picker.html): what to record. Fills the window, which the user can resize: the
-   header and footer stay, the list between them scrolls, the cards reflow. */
 body.picker { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; place-items: stretch; padding: 0; }
 .picker header { padding: 1.25rem 1.5rem 0.75rem; }
 .picker h1 { font-size: 1.125rem; margin: 0; }
@@ -92,7 +86,6 @@ body.picker { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; place
 .card[aria-checked="true"] { border-color: var(--accent); background: var(--accent-soft); }
 .card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .card[aria-checked="true"]:focus-visible { outline: none; }
-/* Thumbnails keep their own shape inside a 16:10 frame: windows come in every shape. */
 .thumb { display: grid; place-items: center; aspect-ratio: 16 / 10; border-radius: 0.35rem; overflow: hidden;
   background: var(--surface-2); box-shadow: 0 0 0 1px var(--border); }
 .thumb img { width: 100%; height: 100%; object-fit: contain; }
@@ -103,7 +96,6 @@ body.picker { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; place
 .label .badge { margin-left: auto; flex: none; font-size: 0.6875rem; font-weight: 600; color: var(--accent); }
 .appicon { flex: none; width: 1rem; height: 1rem; }
 
-/* Without the Screen Recording permission: how to grant it. */
 .perm { display: grid; justify-items: start; gap: 0.75rem; padding: 1.25rem; margin-top: 0.5rem; border-radius: 0.75rem;
   background: var(--warning-soft); border: 1px solid var(--warning-line); }
 .perm h3 { margin: 0; font-size: 1rem; color: var(--text); }

@@ -1,13 +1,3 @@
-"""Smoke test for the desktop app's backend bundle (run by build-backend.sh with the bundled
-Python, isolated, in an empty environment). Exits non-zero if any step fails.
-
-Checks that the native libraries load and do real work: PyAV decodes a generated video, OpenCV diffs
-frames and writes a JPEG, resvg rasterizes an SVG, Silero VAD scores audio; then that the server
-starts as the app starts it (``python -I -m iris serve --secrets-from-stdin``, the key and token on
-stdin) and enforces the API token; then that the MCP server answers over stdio as an assistant
-starts it (``python -I -B -m iris mcp``), reading the data the server made.
-"""
-
 import asyncio
 import json
 import os
@@ -32,8 +22,8 @@ def main(work: Path) -> None:
     import numpy as np
     import resvg_py
 
-    import iris.main  # noqa: F401  (the whole app, as the server imports it)
-    import iris.mcp_server  # noqa: F401  (and the MCP server, which the app never imports)
+    import iris.main  # noqa: F401
+    import iris.mcp_server  # noqa: F401
 
     step(f"PyAV {av.__version__}: encode and decode a short video")
     video = work / "clip.mp4"
@@ -85,7 +75,6 @@ def main(work: Path) -> None:
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
     )
-    # As the app does: one JSON line, then stdin closed. The key is a placeholder (never used).
     server.stdin.write(json.dumps({"openai_api_key": "sk-smoke", "api_token": token}).encode())
     server.stdin.write(b"\n")
     server.stdin.close()

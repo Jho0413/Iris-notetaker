@@ -2,7 +2,6 @@ const assert = require('node:assert/strict')
 const { test } = require('node:test')
 const { windowNumber, bringSharedAppForward } = require('../src/focus.cjs')
 
-/** An execFile that records its calls and answers with `stdout` (or `err`). */
 function fakeExecFile({ stdout = 'activated', err = null } = {}) {
   const calls = []
   const execFile = (file, args, options, callback) => {

@@ -1,12 +1,6 @@
-// The OpenAI API key, encrypted with Electron's safeStorage (the macOS Keychain holds the
-// encryption key) in a file in userData. Never written in plain text, never logged, never sent
-// to a page: main.cjs passes it to the backend on its stdin at each start, never in its
-// environment.
-
 const fs = require('node:fs')
 const path = require('node:path')
 
-/** Trim and check a pasted key. Returns the key, or an error message for the key screen. */
 function checkApiKey(input) {
   const key = typeof input === 'string' ? input.trim() : ''
   if (!key) return { ok: false, error: 'Paste your OpenAI API key.' }
@@ -17,11 +11,6 @@ function checkApiKey(input) {
   return { ok: true, key }
 }
 
-/**
- * @param {object} opts
- * @param {Pick<Electron.SafeStorage, 'isEncryptionAvailable' | 'encryptString' | 'decryptString'>} opts.safeStorage
- * @param {string} opts.file  where the encrypted key lives
- */
 function createKeyStore({ safeStorage, file }) {
   let loaded
   return {
@@ -29,8 +18,6 @@ function createKeyStore({ safeStorage, file }) {
       return fs.existsSync(file)
     },
 
-    /** Encrypt and store a key that passed checkApiKey; returns the key as stored (trimmed).
-     * Throws if encryption isn't available. */
     save(key) {
       const checked = checkApiKey(key)
       if (!checked.ok) throw new Error(checked.error)
@@ -45,7 +32,6 @@ function createKeyStore({ safeStorage, file }) {
       loaded = checked.key
     },
 
-    /** The stored key, or null if there is none or it can't be decrypted (then ask again). */
     load() {
       if (loaded !== undefined) return loaded
       loaded = null

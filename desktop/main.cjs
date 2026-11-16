@@ -1,14 +1,3 @@
-// Iris desktop app: the main process.
-//
-//   npm start      development: the UI from frontend/dist (build it first: `npm run build` in
-//                  frontend/, or `npm run start:fresh` here), the backend from the repo with uv
-//   make desktop   the packaged app (Iris.app and a .dmg in desktop/dist/)
-//
-// The window loads app://iris/. The app:// handler (src/handler.cjs) serves the built UI and
-// forwards /api to the backend with a per-launch token, so the page never sees the token or the
-// backend's port. The backend runs as a child process (src/backend.cjs) and exits by itself if
-// this process dies. The OpenAI key lives encrypted in userData (src/keystore.cjs).
-
 const {
   app,
   BrowserWindow,
@@ -54,14 +43,11 @@ const ASSETS = path.join(__dirname, 'assets')
 const DIST = PACKAGED ? path.join(process.resourcesPath, 'frontend') : path.join(REPO, 'frontend', 'dist')
 const UI_URL = `${ORIGIN}/`
 
-// Development keeps its own userData (key, logs), apart from the installed app's.
 if (!PACKAGED) app.setPath('userData', path.join(app.getPath('appData'), 'Iris Dev'))
 const USER_DATA = app.getPath('userData')
 const LOGS = path.join(USER_DATA, 'logs')
 
-registerScheme(protocol) // before ready
-
-// ---- logging ---------------------------------------------------------------------------------
+registerScheme(protocol)
 
 fs.mkdirSync(LOGS, { recursive: true })
 const mainLog = fs.createWriteStream(path.join(LOGS, 'main.log'), { flags: 'a' })
@@ -71,9 +57,6 @@ function log(line) {
   mainLog.write(stamped + '\n')
 }
 
-// The packaged app never runs with remote debugging (src/debugging.cjs): it exits before any
-// window or engine. At once, with the log line written synchronously: Chromium opens the debugging
-// port as soon as the event loop runs. CommonJS allows this top-level return.
 const debugSwitch = refusedDebugSwitch({ packaged: PACKAGED, hasSwitch: (name) => app.commandLine.hasSwitch(name) })
 if (debugSwitch) {
   const line = `${new Date().toISOString()} [app] refusing to start with --${debugSwitch}: Iris doesn't run with remote debugging`
@@ -83,11 +66,8 @@ if (debugSwitch) {
   return
 }
 
-// ---- state -----------------------------------------------------------------------------------
-
 const keystore = createKeyStore({ safeStorage, file: path.join(USER_DATA, 'openai-key.bin') })
-const appState = createAppState(path.join(USER_DATA, 'app-state.json')) // flags such as welcomeShown
-// Logged, not shown: if the flag can't be written the only cost is the welcome again next launch.
+const appState = createAppState(path.join(USER_DATA, 'app-state.json'))
 function rememberWelcomeShown() {
   const err = appState.set(WELCOME_SHOWN, true)
   if (err) log(`[app] couldn't remember the welcome was shown: ${err.message}`)
@@ -111,24 +91,18 @@ const backend = new Backend({
 
 let mainWindow = null
 let keyWindow = null
-let keyPrompt = null // {resolve} while the key screen is open
-let picker = null // {win, list, sources, resolve} while the picker is open (one at a time)
+let keyPrompt = null
+let picker = null
 let quitConfirmed = false
 let quitting = false
-let menuBar = trayRules.RELAY_START // the menu bar's relay to the Live page (src/tray.cjs)
-
-// ---- windows ---------------------------------------------------------------------------------
+let menuBar = trayRules.RELAY_START
 
 const WEB_PREFERENCES = {
   contextIsolation: true,
   sandbox: true,
   nodeIntegration: false,
   webSecurity: true,
-  // Recording happens with Iris in the background: don't throttle the page (the 1 fps frame
-  // timer itself runs in a worker, which isn't throttled anyway).
   backgroundThrottling: false,
-  // DevTools in a friend's copy would let anyone at the keyboard call the engine through the
-  // window (every app://iris/api request gets the token added). Development keeps them.
   devTools: !PACKAGED,
 }
 
@@ -141,8 +115,6 @@ function newWindow({ preload, ...options }) {
   })
 }
 
-/** Show the main window, making it if it was closed. With `show: false` it is only made if
- * needed, and left as it is: a new one stays hidden, an open one where it is. */
 function showMainWindow({ show = true } = {}) {
   if (mainWindow) {
     if (!show) return mainWindow
@@ -161,12 +133,9 @@ function showMainWindow({ show = true } = {}) {
   })
   mainWindow = win
   if (show) win.once('ready-to-show', () => win.show())
-  // While recording, closing the window would end it: hide the window instead. The menu bar
-  // shows the recording, stops it and shows the window again. Quitting closes it for real.
   win.on('close', (event) => {
     if (quitConfirmed || !trayRules.hideOnClose(menuBar.recording)) return
     event.preventDefault()
-    // Hiding a fullscreen window would leave its empty Space on screen: leave fullscreen first.
     if (!win.isFullScreen()) return win.hide()
     win.once('leave-full-screen', () => win.hide())
     win.setFullScreen(false)
@@ -174,22 +143,16 @@ function showMainWindow({ show = true } = {}) {
   win.on('closed', () => {
     if (mainWindow !== win) return
     mainWindow = null
-    menuBarEvent({ type: 'windowClosed' }) // closed before the UI loaded: a start is cancelled
+    menuBarEvent({ type: 'windowClosed' })
   })
-  // A reload or a new page (the starting screen, then the UI): what the old page reported, and
-  // its subscription, went with it. Client-side routes are same-document and keep both.
   win.webContents.on('did-start-navigation', ({ isMainFrame, isSameDocument }) => {
     if (isMainFrame && !isSameDocument && mainWindow === win) menuBarEvent({ type: 'pageGone' })
   })
-  // A page refusing to unload (beforeunload): the live page while it records, Settings with an
-  // unsaved change. Electron would cancel the close or reload silently, so ask here
-  // (src/unload.cjs picks the question by page).
   win.webContents.on('will-prevent-unload', (event) => {
     const prompt = unloadPrompt(win.webContents.getURL(), { quitting: quitConfirmed })
     if (!prompt) return event.preventDefault()
     const { leave, ...options } = prompt
     if (dialog.showMessageBoxSync(win, options) === leave) return event.preventDefault()
-    // Kept: the window stays open, which cancels a quit in progress, so the next one asks again.
     quitConfirmed = false
   })
   const crashes = []
@@ -197,12 +160,11 @@ function showMainWindow({ show = true } = {}) {
     log(`[window] renderer gone: ${details.reason}`)
     if (mainWindow === win) menuBarEvent({ type: 'pageGone' })
     if (details.reason === 'clean-exit' || mainWindow !== win) return
-    // A crashed page sends nothing as it goes (no pagehide): stop what it was recording.
     void stopRecordings('the window crashed')
     const now = Date.now()
     crashes.push(now)
     while (crashes.length && now - crashes[0] > 60_000) crashes.shift()
-    if (crashes.length <= 2) return loadUi(win) // reload at once, twice a minute at most
+    if (crashes.length <= 2) return loadUi(win)
     const { response } = await dialog.showMessageBox(win, {
       type: 'error',
       buttons: ['Reload', 'Quit'],
@@ -219,15 +181,11 @@ function showMainWindow({ show = true } = {}) {
   return win
 }
 
-/** The UI once the backend is up, else the starting page (startBackend loads the UI later). */
 function loadUi(win) {
   if (backend.info()) win.loadURL(UI_URL)
   else win.loadFile(path.join(PAGES, 'starting.html'))
 }
 
-// ---- API key ---------------------------------------------------------------------------------
-
-/** Show the key screen. Resolves true once a key is saved, false if closed without one. */
 function askForKey(mode) {
   if (keyWindow) {
     keyWindow.focus()
@@ -237,8 +195,6 @@ function askForKey(mode) {
   const promise = new Promise((r) => (resolve = r))
   keyPrompt = { resolve, promise }
   keyWindow = newWindow({
-    // Sized by its content area, with room for the longest message under the field (two lines),
-    // so the window never scrolls: about 460px of content plus the page's 64px of padding.
     width: 560,
     height: 560,
     useContentSize: true,
@@ -256,7 +212,7 @@ function askForKey(mode) {
     if (keyWindow === win) keyWindow = null
     const prompt = keyPrompt
     keyPrompt = null
-    prompt?.resolve(false) // no-op if a save resolved it already
+    prompt?.resolve(false)
   })
   win.loadFile(path.join(PAGES, 'key.html'), { query: { mode } })
   return promise
@@ -278,11 +234,8 @@ function fromMainWindow(event) {
 }
 
 handleFrom(fromKeyScreen, 'iris-key:save', async (key) => {
-  // The window and prompt that asked: the check below can take seconds, and if that window is
-  // closed meanwhile (the user cancelled) nothing is stored, nor does a newer window get answered.
   const win = keyWindow
   const prompt = keyPrompt
-  // Checked once with OpenAI before it is stored: a wrong key is caught here, not by a session.
   const result = await saveNewKey(key, {
     check: checkKeyWithOpenAI,
     stillOpen: () => keyWindow === win && !win.isDestroyed(),
@@ -301,8 +254,6 @@ handleFrom(fromKeyScreen, 'iris-key:save', async (key) => {
 
 handleFrom(fromKeyScreen, 'iris-key:cancel', () => keyWindow?.close())
 
-/** Add or replace the key (menu, Settings, the no-key banner). Resolves true once the engine
- * runs with the new key, false if the user cancelled or a session is busy. */
 async function changeKey() {
   const mode = keystore.load() ? 'change' : 'add'
   if (await refuseKeyWhileBusy(mode)) return false
@@ -311,8 +262,6 @@ async function changeKey() {
   return true
 }
 
-/** Remove the stored key after one question; the engine restarts without it. Resolves true once
- * removed, false if the user cancelled or a session is busy. */
 async function removeKey() {
   if (await refuseKeyWhileBusy('remove')) return false
   if (!(await confirm('Remove the OpenAI key?', 'Iris can’t make notes until you add a key again.', 'Remove Key'))) return false
@@ -326,7 +275,6 @@ handleFrom(fromMainWindow, 'iris-app:change-key', async () => ({ done: await cha
 
 handleFrom(fromMainWindow, 'iris-app:remove-key', async () => ({ done: await removeKey() }))
 
-// Export PDF: the page as printed (its print stylesheet), saved where the user chooses.
 handleFrom(fromMainWindow, 'iris-app:save-pdf', async (title) => {
   const win = mainWindow
   const { canceled, filePath } = await dialog.showSaveDialog(win, {
@@ -340,21 +288,13 @@ handleFrom(fromMainWindow, 'iris-app:save-pdf', async (title) => {
     log(`[pdf] saved ${data.length} bytes`)
     return { done: true }
   } catch (err) {
-    log(`[pdf] couldn't save: ${err.message}`) // the page says it in its own words
+    log(`[pdf] couldn't save: ${err.message}`)
     throw err
   }
 })
 
-// ---- picker: what to record ------------------------------------------------------------------
-
-// The Live page's getDisplayMedia call is answered by Iris's own picker (pages/picker.html), not
-// the macOS one: it puts the entire screen first and never offers Iris's own windows (a hidden
-// window stops being captured). What it lists is src/picker.cjs; this opens it and hands back
-// the choice. Thumbnails: a window card at Retina's 2x, about 1.5x for a lone screen card; larger
-// ones make each opening slower and the JPEGs sent to the page heavier.
 const THUMBNAIL_SIZE = { width: 640, height: 400 }
 
-/** The picker's list, a snapshot: sources from desktopCapturer, thumbnails as data: URLs. */
 async function pickerSnapshot() {
   const found = await desktopCapturer.getSources({ types: ['screen', 'window'], thumbnailSize: THUMBNAIL_SIZE, fetchWindowIcons: true })
   const list = pickerRules.listSources(
@@ -367,7 +307,6 @@ async function pickerSnapshot() {
   )
   const byId = new Map(found.map((s) => [s.id, s]))
   const image = (img) => (img && !img.isEmpty() ? img : null)
-  // JPEG: a PNG of each thumbnail would be several times larger to send to the page.
   const thumbnail = (id) => {
     const img = image(byId.get(id).thumbnail)
     return img && `data:image/jpeg;base64,${img.toJPEG(80).toString('base64')}`
@@ -384,7 +323,6 @@ async function pickerSnapshot() {
   }
 }
 
-/** Close the picker without a choice, also while it is still listing (no window yet). */
 function closePicker() {
   const state = picker
   if (!state) return
@@ -393,21 +331,17 @@ function closePicker() {
   else picker = null
 }
 
-/** Ask what to record. Resolves the chosen source, or null if cancelled or not allowed. */
 async function pickSource() {
   const state = { win: null, list: null, sources: null, page: null, resolve: null }
   picker = state
   const chosen = new Promise((resolve) => (state.resolve = resolve))
-  // Without the Screen Recording permission getSources rejects, and the picker says how to allow
-  // it. Asked even then: it is Iris's only request for the permission, which is what lists Iris
-  // in System Settings. A Mac that never asked reports "denied" as well (measured, macOS 26).
   try {
     Object.assign(state, await pickerSnapshot())
   } catch (err) {
     log(`[capture] couldn't list screens and windows: ${err} (screen permission: ${systemPreferences.getMediaAccessStatus('screen')})`)
     state.page = { granted: false }
   }
-  if (picker !== state) return chosen // cancelled while listing (closePicker)
+  if (picker !== state) return chosen
 
   const win = newWindow({
     width: 760,
@@ -421,8 +355,6 @@ async function pickSource() {
     preload: 'preload-picker.cjs',
   })
   state.win = win
-  // Started from the menu bar, Iris may not be the active app: bring the picker to the front, and
-  // give it the keyboard once macOS has made Iris active (that comes later), so Return records.
   const focusPicker = () => win.isDestroyed() || win.focus()
   win.once('ready-to-show', () => {
     win.show()
@@ -433,7 +365,7 @@ async function pickSource() {
   win.on('closed', () => {
     app.removeListener('did-become-active', focusPicker)
     if (picker === state) picker = null
-    state.resolve(null) // closed without a choice: cancelled (a no-op after a choice)
+    state.resolve(null)
   })
   win.loadFile(path.join(PAGES, 'picker.html'))
   return chosen
@@ -457,20 +389,13 @@ handleFrom(fromPicker, 'iris-picker:cancel', () => picker.win.close())
 
 handleFrom(fromPicker, 'iris-picker:open-settings', () => void shell.openExternal(pickerRules.SCREEN_SETTINGS_URL))
 
-// ---- menu bar --------------------------------------------------------------------------------
-
-// The menu bar icon starts and stops a recording, but recording happens in the Live page (its
-// capture code runs in the window), so the icon only relays: "Record Audio" or "Record Screen…"
-// asks the page to start (making the window, hidden, if it was closed), and only the picker
-// shows (none for audio); Share Screen… and Stop Sharing turn the page's screen on and off (only
-// the picker shows); Stop asks the page to pause, as its own Stop does.
 let tray = null
 let startAnswerTimer = null
 let trayTicker = null
 const TRAY_ICONS = {}
 
 function trayIcon(recordingNow) {
-  const name = recordingNow ? 'trayRecording.png' : 'trayTemplate.png' // "Template": macOS tints it
+  const name = recordingNow ? 'trayRecording.png' : 'trayTemplate.png'
   TRAY_ICONS[name] ??= nativeImage.createFromPath(path.join(ASSETS, name))
   return TRAY_ICONS[name]
 }
@@ -481,12 +406,7 @@ function createTray() {
   showTray()
 }
 
-/** Start recording from the menu bar, `mode` 'audio' or 'screen'. */
 function recordFromMenuBar(mode) {
-  // Only the picker shows (none for audio): bringing the window up would switch to its Space,
-  // and the picker would list that Space's windows instead of the ones the user is looking at.
-  // The window is made if it was closed (the recording runs in its Live page); the start waits
-  // for its UI.
   showMainWindow({ show: false })
   menuBarEvent({ type: 'record', mode })
 }
@@ -505,7 +425,6 @@ const TRAY_ACTIONS = {
   quit: () => app.quit(),
 }
 
-/** The icon, the time beside it and the menu for what the Live page last reported. */
 function showTray() {
   if (!tray) return
   const view = trayRules.trayView(menuBar.recording, Date.now())
@@ -514,7 +433,6 @@ function showTray() {
   tray.setContextMenu(
     Menu.buildFromTemplate(view.items.map(({ id, ...item }) => (id ? { ...item, click: TRAY_ACTIONS[id] } : item))),
   )
-  // Only the time changes each second; the menu is rebuilt when the phase does.
   if (menuBar.recording.phase === 'recording') {
     trayTicker ??= setInterval(
       () => tray.setTitle(trayRules.trayView(menuBar.recording, Date.now()).title, { fontType: 'monospacedDigit' }),
@@ -526,7 +444,6 @@ function showTray() {
   }
 }
 
-/** Apply a relay event (src/tray.cjs) and carry out what it asks for. */
 function menuBarEvent(event) {
   const before = menuBar.recording
   const { state, send, show, malformed, closePicker: pickerAbandoned } = trayRules.relay(menuBar, event)
@@ -537,7 +454,6 @@ function menuBarEvent(event) {
   if (send && mainWindow) {
     log(`[tray] ${send} recording`)
     mainWindow.webContents.send('iris-app:record', send)
-    // A page that doesn't start (held up by a question it asks) gets its window shown.
     if (send === 'start-audio' || send === 'start-screen') {
       clearTimeout(startAnswerTimer)
       startAnswerTimer = setTimeout(() => menuBarEvent({ type: 'startUnanswered' }), trayRules.START_ANSWER_MS)
@@ -554,26 +470,20 @@ ipcMain.on('iris-app:recording', (event, report) => {
   if (fromMainWindow(event)) menuBarEvent({ type: 'report', report })
 })
 
-// ---- backend ---------------------------------------------------------------------------------
+let startCount = 0
+let launchChecked = false
 
-let startCount = 0 // which startBackend() call is the latest
-let launchChecked = false // the first engine start of this launch has stopped leftover recordings
-
-/** Start the engine unless it is up (a start under way is joined, never doubled). */
 async function startBackend() {
   if (backend.info()) return showUiWhenReady()
   const mine = ++startCount
   try {
     await backend.start()
   } catch (err) {
-    // Stopped on purpose (quit, restart) or superseded by a newer start: nothing to report.
     if (quitting || err.stopped || mine !== startCount) return
     log(`[backend] failed to start: ${err.message}`)
     menuBarEvent({ type: 'engineFailed' })
     return offerRestart("Iris's engine didn't start.", err.message)
   }
-  // Only on this launch's first start, before the UI loads: a restart (Restart Engine, a key
-  // change, the crash dialog) leaves the Live page recording, its uploads retried meanwhile.
   if (!launchChecked) {
     launchChecked = true
     await stopRecordings('left by an earlier launch')
@@ -591,13 +501,12 @@ async function restartBackend() {
 }
 
 backend.on('exit', ({ expected, duringStart }) => {
-  // A start that fails is reported by startBackend() instead.
   if (!expected && !duringStart && !quitting) {
     offerRestart("Iris's engine stopped unexpectedly.", 'What you recorded so far is kept.')
   }
 })
 
-let restartDialog = null // at most one "engine stopped" dialog at a time
+let restartDialog = null
 
 function offerRestart(message, detail) {
   restartDialog ??= askToRestart(message, detail).finally(() => (restartDialog = null))
@@ -615,7 +524,7 @@ async function askToRestart(message, detail) {
       detail: `${detail}\n\nLogs: ${LOGS}`,
     })
     if (response === 0) {
-      restartDialog = null // a failure of this restart may ask again
+      restartDialog = null
       return startBackend()
     }
     if (response === 2) return app.quit()
@@ -623,23 +532,15 @@ async function askToRestart(message, detail) {
   }
 }
 
-/**
- * Stop every session still "recording" (src/busy.cjs). Called whenever no page of this app can be
- * recording: at launch, at quit before the engine stops (the page's own stop request, sent as its
- * window closes, races the engine's shutdown), and when the window's page crashes.
- */
 function stopRecordings(why) {
   return stopEach(backend, why, log)
 }
 
-/** Sessions recording or making notes right now. */
 async function busySessions() {
-  const capturing = trayRules.holdsRecording(menuBar.recording) // what the Live page reported
+  const capturing = trayRules.holdsRecording(menuBar.recording)
   return busyNow(await backend.getJson('/api/sessions'), { capturing })
 }
 
-/** If a session is recording or processing, ask before stopping the engine. `detail`, if any,
- * comes before what `describe` says about the busy sessions. */
 async function confirmBusy(message, detail, button = 'Continue', describe = busyDetail) {
   const busy = await busySessions()
   if (!busy.length) return true
@@ -658,9 +559,6 @@ async function confirm(message, detail, button) {
   return response === 0
 }
 
-/** A key change or removal restarts the engine: while a session is busy, say so (OK only) and
- * resolve true. Restart Engine and Quit still only ask (confirmBusy): they are the way out of a
- * stuck engine. */
 async function refuseKeyWhileBusy(action) {
   const busy = await busySessions()
   if (!busy.length) return false
@@ -669,9 +567,6 @@ async function refuseKeyWhileBusy(action) {
   return true
 }
 
-// ---- security --------------------------------------------------------------------------------
-
-/** "Open full size" on a figure: the file in its own window (no preload; the guards apply). */
 function openFigure(url) {
   newWindow({ width: 1200, height: 900, title: 'Iris figure', show: true }).loadURL(url)
 }
@@ -681,8 +576,6 @@ function openOutside(url) {
   if (external) shell.openExternal(external)
 }
 
-// Every window shows only Iris's own UI (or the app's own pages, loaded by this process); links
-// open in the browser.
 app.on('web-contents-created', (_event, contents) => {
   contents.setWindowOpenHandler(({ url }) => {
     if (policy.isSessionFileUrl(url)) openFigure(url)
@@ -707,18 +600,13 @@ function secureSession(ses) {
   })
   ses.setPermissionCheckHandler((_wc, permission, origin) => policy.permissionCheckAllowed(permission, origin))
 
-  // The UI's getDisplayMedia calls. A request for sound alone gets the Mac's sound with no picker:
-  // the Live page records it throughout, whether or not the screen is shared. A request for a
-  // picture (the screen turned on) gets Iris's picker (see "picker" above), and the picture alone
-  // unless sound was asked for too (then all of the Mac's sound as 'loopback'). A refusal reaches
-  // the page as a cancelled share.
   ses.setDisplayMediaRequestHandler(async (request, callback) => {
     const from = request.frame?.url ?? request.securityOrigin
     const answer = (streams) => {
       try {
         callback(streams)
       } catch (err) {
-        log(`[capture] answering the page failed: ${err.message}`) // e.g. the page went away
+        log(`[capture] answering the page failed: ${err.message}`)
       }
     }
     if (!policy.isIrisUrl(from)) {
@@ -729,14 +617,10 @@ function secureSession(ses) {
       log("[capture] recording the Mac's sound")
       return answer({ audio: 'loopback' })
     }
-    // One picker at a time. Chromium holds a second request from the same page until the first
-    // is answered (measured, Electron 45); any other request meanwhile focuses the open picker.
     if (picker) {
       picker.win?.focus()
       return answer(null)
     }
-    // The page that asked going away (its window closed, a reload, a crash) closes the picker:
-    // its request is gone, so a choice would record nothing.
     const requester = request.frame ? webContents.fromFrame(request.frame) : null
     const onNavigation = ({ isMainFrame, isSameDocument }) => isMainFrame && !isSameDocument && closePicker()
     requester?.once('destroyed', closePicker)
@@ -758,19 +642,15 @@ function secureSession(ses) {
     if (!source) {
       if (!failed) {
         log('[capture] nothing chosen to record')
-        // Before the page hears of it: a start from the menu bar then shows no window for it.
         menuBarEvent({ type: 'pickerCancelled' })
       }
       return answer(null)
     }
     log(`[capture] recording ${source.id}`)
     answer({ video: source, audio: request.audioRequested ? 'loopback' : undefined })
-    // A shared window: go straight to its app (src/focus.cjs). A screen stays where it is.
     void bringSharedAppForward(source.id, { execFile, log })
   })
 }
-
-// ---- menu ------------------------------------------------------------------------------------
 
 function buildMenu() {
   const template = [
@@ -799,8 +679,6 @@ function buildMenu() {
         { role: 'quit' },
       ],
     },
-    // On macOS, Close Window (Cmd-W) is in the File menu only; the Window menu has none. It
-    // closes as the window's close button does (a recording hides the window instead).
     { role: 'fileMenu' },
     { role: 'editMenu' },
     {
@@ -821,15 +699,12 @@ function buildMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
 }
 
-// ---- lifecycle -------------------------------------------------------------------------------
-
 function showIris() {
   if (app.isReady() && !keyWindow) showMainWindow()
   else keyWindow?.focus()
 }
 
 if (!app.requestSingleInstanceLock()) {
-  // Another Iris is running: it focuses its window (second-instance), this one leaves.
   app.quit()
 } else {
   app.on('second-instance', showIris)
@@ -841,33 +716,28 @@ if (!app.requestSingleInstanceLock()) {
     buildMenu()
     createTray()
 
-    // The packaged app welcomes a new install once (Welcome, then Connect), never again; in
-    // development the repo's backend/.env can supply the key. Without a key Iris still opens: the
-    // Library and Settings say notes can't be made, with Add key….
     if (PACKAGED) {
       const hasKey = Boolean(keystore.load())
       if (shouldWelcome({ hasKey, seen: appState.get(WELCOME_SHOWN) === true })) {
-        rememberWelcomeShown() // before asking: closing or quitting from the welcome counts too
+        rememberWelcomeShown()
         if (!(await askForKey('first'))) log('[key] set up later: opening without an API key')
       } else if (!hasKey) {
         log(keystore.has() ? '[key] the stored key could not be decrypted: opening without one' : '[key] no API key: opening without one')
       }
-      if (hasKey) rememberWelcomeShown() // an install that already has a key is never welcomed
+      if (hasKey) rememberWelcomeShown()
     }
     showMainWindow()
     await startBackend()
   })
 
-  // macOS: closing the window keeps Iris (and notes being made) running; the Dock icon reopens it.
   app.on('window-all-closed', () => {})
   app.on('activate', showIris)
 
-  let quitAsk = null // the pending "Quit Iris?" check: another Cmd-Q waits for it
+  let quitAsk = null
   app.on('before-quit', (event) => {
     if (quitConfirmed) return
     event.preventDefault()
     if (quitAsk) return
-    // The sessions alone: the engine is Iris's own business, not the user's.
     quitAsk = confirmBusy('Quit Iris?', null, 'Quit', quitDetail)
       .then((ok) => {
         if (!ok) return
@@ -877,8 +747,7 @@ if (!app.requestSingleInstanceLock()) {
       .finally(() => (quitAsk = null))
   })
 
-  // Windows are closed by now: stop the recordings, then the engine, then quit for real.
-  let quitStop = null // the stop under way: another will-quit waits for it
+  let quitStop = null
   app.on('will-quit', (event) => {
     quitting = true
     if (!backend.running) return
@@ -886,7 +755,7 @@ if (!app.requestSingleInstanceLock()) {
     quitStop ??= stopRecordings('quitting')
       .then(() => backend.stop())
       .finally(() => {
-        quitStop = null // an engine started meanwhile (Restart Engine) is stopped by the next one
+        quitStop = null
         app.quit()
       })
   })
