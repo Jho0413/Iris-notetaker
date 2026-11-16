@@ -34,8 +34,6 @@ from iris.pipeline.context import StageContext
 
 class LiveLane:
     lane: ClassVar[Lane]
-    # No retries once notes are asked for: for a lane that makes no call after that (see the
-    # contract above).
     retries_end_at_notes: ClassVar[bool] = False
 
     def __init__(self, ctx: StageContext, timeline: LiveTimeline):
@@ -44,12 +42,9 @@ class LiveLane:
         self._wake = asyncio.Event()
 
     def wake(self) -> None:
-        """New input may be available (called by the API, never blocks)."""
         self._wake.set()
 
     async def wait_for_input(self) -> None:
-        """Sleep until woken. Returns at once if woken since the last call or notes were asked for;
-        callers re-check their input (files on disk) and ``timeline.ending`` after it returns."""
         if self.timeline.ending:
             return
         await self._wake.wait()

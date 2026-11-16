@@ -1,12 +1,3 @@
-"""One live session's processor, and the registry of processors for sessions being recorded.
-
-``LiveProcessor`` runs the lanes (``iris/live/``) as asyncio tasks that share one
-``LiveTimeline``. The API wakes a lane when its input arrives; the job runner calls ``finish``
-when notes are made, before processing the session. A failing lane is logged and marked failed
-on the timeline: the recording carries on, and making notes promotes less of the live work (only the
-transcript, or nothing) and runs more of the pipeline (``live/promote.py``).
-"""
-
 import asyncio
 import logging
 from collections.abc import Callable, Sequence
@@ -46,9 +37,6 @@ class LiveProcessor:
             if lane.lane in self.lanes:
                 raise ValueError(f"two {lane.lane} lanes")
             self.lanes[lane.lane] = lane
-        # A lane this processor doesn't run publishes nothing: it is done from the start, so a
-        # lane waiting on it is never stuck (no one is waiting yet, so no notify is needed). It
-        # is not finished, so the timeline is never complete without it.
         self.timeline.absent.update(set(Lane) - self.lanes.keys())
         self._tasks: dict[Lane, asyncio.Task[None]] = {}
 
@@ -63,10 +51,9 @@ class LiveProcessor:
         }
 
     async def _run_lane(self, lane: LiveLane) -> None:
-        """Run one lane; however it ends, it ends finished or failed, never neither."""
         tl = self.timeline
 
-        def stopped() -> bool:  # no more retries: nothing can be promoted, or (draft) making notes
+        def stopped() -> bool:
             return tl.upstream_failed(lane.lane) or (lane.retries_end_at_notes and tl.ending)
 
         async def pause(delay: float) -> bool:
@@ -90,7 +77,7 @@ class LiveProcessor:
         else:
             await self.timeline.finish_lane(lane.lane)
         finally:
-            if not self.timeline.done(lane.lane):  # e.g. cancelled while failing
+            if not self.timeline.done(lane.lane):
                 self.timeline.failed[lane.lane] = "stopped"
 
     def notify_audio(self) -> None:
@@ -98,17 +85,10 @@ class LiveProcessor:
             lane.wake()
 
     def notify_screen(self) -> None:
-        """A frame arrived."""
         if lane := self.lanes.get(Lane.SCREEN):
             lane.wake()
 
     async def finish(self) -> LiveTimeline:
-        """Ask every lane to flush, wait for all of them, and return the final timeline.
-
-        Lanes still running after ``finish_timeout_s`` are cancelled and marked failed, so a stuck
-        lane delays making notes by at most that long; the pipeline then redoes that lane's work.
-        Cancelling the caller cancels the lanes too.
-        """
         await self.timeline.request_end()
         for lane in self.lanes.values():
             lane.wake()
@@ -117,8 +97,6 @@ class LiveProcessor:
             try:
                 _, pending = await asyncio.wait(tasks, timeout=self.finish_timeout_s)
             except asyncio.CancelledError:
-                # The job was cancelled (backend shutdown): the lanes go with it. asyncio.wait,
-                # unlike gather, doesn't cancel what it waits for.
                 await self.cancel()
                 raise
             if pending:
@@ -140,8 +118,6 @@ class LiveProcessor:
 
 
 class LiveRegistry:
-    """The processors of sessions being recorded, by session id. Owned by the job runner."""
-
     def __init__(
         self,
         context: Callable[[str], StageContext],
@@ -157,9 +133,6 @@ class LiveRegistry:
         return self._processors.get(session_id)
 
     def ensure(self, session_id: str) -> LiveProcessor | None:
-        """The session's running processor, starting one if needed (at ``POST /live``, or on the
-        first chunk or at make notes after a backend restart). ``None`` when live processing is
-        off."""
         if not self.enabled:
             return None
         processor = self._processors.get(session_id)
@@ -170,7 +143,6 @@ class LiveRegistry:
         return processor
 
     async def finish(self, session_id: str) -> LiveTimeline | None:
-        """Finish and forget the session's processor; ``None`` if it had none."""
         processor = self._processors.pop(session_id, None)
         if processor is None:
             return None

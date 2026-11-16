@@ -1,38 +1,3 @@
-"""Draft lane: writes the notes sections that are final while recording, ahead of making notes.
-
-Reads:  the timeline (transcript, selection, horizon)
-Writes: notes_sections/ (the write stage's cache) only. No draft is shown while recording.
-Emits:  NOTES_UPDATED ({"final": false, "completed_parts", "live": true}), for the Live page's
-        progress line: the sections written so far.
-
-How it works:
-
-  1. The evidence published before ``timeline.horizon`` is packed into parts exactly as the write
-     stage packs a whole session (``write.split_parts``): a part closes when the next record
-     would pass the budget, so its boundary depends only on earlier evidence (``plan``).
-  2. A part that closed before the horizon is final (the timeline never adds evidence before the
-     horizon: see its docstring). It is *frozen*: written once through ``write.write_section``,
-     with the payload, and so the cache key in ``notes_sections/``, that the write stage computes
-     for the same part when notes are made. Making notes then reuses it without a call, so the
-     time from asking for notes to having them depends on what was still open, not on how long
-     the session was. Nothing past the horizon is written live: the open parts are the write
-     stage's when notes are made.
-  3. A payload is tried at most ``MAX_ATTEMPTS`` times, ``RETRY_DELAY_S`` apart (each try
-     retries temporary API errors itself, in ``write.write_section``); after that, or at once on
-     a blocking error, the lane gives up on it until it changes (the write stage retries it when
-     notes are made). A part that can't be written blocks nothing, except that while the first
-     part waits for its retry the later parts wait too (their payloads carry its title). Once it
-     is given up, they are written without it, as continuations.
-  4. ``timeline.upstream_failed``: no more calls (nothing made can be promoted); wait for notes
-     to be asked for.
-  5. On ``timeline.ending``: return. A call in flight is finished, since the write stage would
-     make that very call. No call starts once notes are asked for, not even a retry of a
-     temporary error.
-
-After a backend restart a fresh lane re-plans from the timeline and its frozen parts hit the
-cache.
-"""
-
 import asyncio
 import contextlib
 import logging
@@ -49,29 +14,28 @@ from iris.pipeline.stages.write import WritingPart, WrittenSection
 
 log = logging.getLogger(__name__)
 
-MAX_ATTEMPTS = 2  # calls per payload before the lane gives up on it until it changes
-RETRY_DELAY_S = 60.0  # a failed payload is tried again no sooner than this
+MAX_ATTEMPTS = 2
+RETRY_DELAY_S = 60.0
 
 
 def plan(
     transcript: Transcript, selection: Selection, budget: int, horizon: float
 ) -> list[WritingPart]:
-    """The parts that closed before ``horizon``: final, so they can be written now."""
     frozen, _ = write.split_parts(transcript, selection, budget, horizon)
     return frozen
 
 
 class DraftLane(LiveLane):
     lane = Lane.DRAFT
-    retries_end_at_notes = True  # no call starts once notes are asked for, not even a retry
+    retries_end_at_notes = True
 
     def __init__(self, ctx: StageContext, timeline: LiveTimeline):
         super().__init__(ctx, timeline)
-        self._sections: dict[str, WrittenSection] = {}  # by payload, written (or cached) this run
-        self._failures: dict[str, int] = {}  # by payload
-        self._retry_at: dict[str, float] = {}  # by payload: no retry before this
-        self._due: float | None = None  # when to look again without a timeline change
-        self._announced = 0  # the completed_parts NOTES_UPDATED last announced
+        self._sections: dict[str, WrittenSection] = {}
+        self._failures: dict[str, int] = {}
+        self._retry_at: dict[str, float] = {}
+        self._due: float | None = None
+        self._announced = 0
 
     def _halted(self) -> bool:
         return self.timeline.upstream_failed(self.lane)
@@ -80,7 +44,6 @@ class DraftLane(LiveLane):
         return self.timeline.ending or self._halted()
 
     def _evidence(self) -> tuple:
-        """Changes whenever the plan may change."""
         tl = self.timeline
         return (tl.horizon, len(tl.segments), len(tl.contents), len(tl.visuals), tl.language)
 
@@ -100,9 +63,6 @@ class DraftLane(LiveLane):
             language = transcript.language
             self._due = None
 
-            # Freeze the closed parts, in order. A part is written again only if its payload
-            # changed (e.g. the language became known). The first part goes first: the others'
-            # payloads carry its title.
             first: WrittenSection | None = None
             blocked = False
             if closed:
@@ -126,8 +86,6 @@ class DraftLane(LiveLane):
     def _payload(
         self, part: WritingPart, index: int, language: str | None, first: WrittenSection | None
     ) -> str:
-        # A closed part always has a part after it (``later``); ``earlier`` keeps a later part a
-        # continuation even when the first part could not be written.
         return write.section_payload(
             part, language=language, first=first if index else None, later=True, earlier=index > 0
         )
@@ -139,7 +97,6 @@ class DraftLane(LiveLane):
         self._due = t if self._due is None else min(self._due, t)
 
     def _ready(self, payload: str, now: float) -> bool:
-        """The payload should be written now."""
         if payload in self._sections or self._given_up(payload):
             return False
         retry_at = self._retry_at.get(payload, -math.inf)
@@ -149,8 +106,6 @@ class DraftLane(LiveLane):
         return True
 
     async def _wait(self, seen: tuple, now: float) -> None:
-        """Until the evidence changes, notes are asked for, an upstream lane fails, or
-        ``self._due``."""
         tl = self.timeline
         waiting = tl.wait_until(lambda: tl.ending or self._halted() or self._evidence() != seen)
         due = self._due
@@ -165,7 +120,6 @@ class DraftLane(LiveLane):
         language: str | None,
         first: WrittenSection | None,
     ) -> None:
-        """One section through the write stage's cache; on failure, schedule its retry."""
         try:
             with usage.recording(self.ctx, Stage.WRITE):
                 section = await write.write_section(
@@ -179,7 +133,7 @@ class DraftLane(LiveLane):
         except Exception as exc:
             failures = self._failures.get(payload, 0) + 1
             if classify(exc) is ErrorKind.BLOCKING:
-                failures = MAX_ATTEMPTS  # never retried: give the payload up for this recording
+                failures = MAX_ATTEMPTS
             self._failures[payload] = failures
             retry_at = self._retry_at[payload] = asyncio.get_running_loop().time() + RETRY_DELAY_S
             if failures < MAX_ATTEMPTS:
@@ -195,9 +149,6 @@ class DraftLane(LiveLane):
         self._sections[payload] = section
 
     def _announce(self, frozen: list[str]) -> None:
-        """Emit the number of sections written so far, when it grew. (Payloads can change, e.g.
-        when the language becomes known, so the count can fall back while parts are rewritten;
-        the progress line keeps the most it has said.)"""
         done = sum(p in self._sections for p in frozen)
         if done <= self._announced:
             return
