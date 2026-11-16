@@ -4,8 +4,10 @@ A lane:
 
 - reads captured input and the timeline, and writes only its own files (named in
   ``store/layout.py``) and its own part of the timeline (``LiveTimeline.publish_*``);
-- sleeps in ``wait_for_input`` until the API wakes it (new chunk or frame) or notes are asked for,
-  or waits on watermarks with ``timeline.wait_until``;
+- sleeps in ``wait_for_input`` until the API calls ``wake`` (new chunk or frame; it never blocks)
+  or notes are asked for, then re-checks its input and ``timeline.ending``; or waits on
+  watermarks with ``timeline.wait_until``. A lane whose input is read elsewhere overrides
+  ``wake`` to pass it on, as the audio lane does to its decoder;
 - runs CPU-bound work (decoding, OpenCV) in ``asyncio.to_thread``, and wraps model calls in
   ``usage.recording(ctx, <stage>)`` so their cost is recorded under the matching stage;
 - returns only once ``timeline.ending`` is set, after flushing everything it holds and publishing
