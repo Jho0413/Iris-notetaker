@@ -222,6 +222,18 @@ abbreviation from what was said. Reading in batches keeps each call bounded on a
 session write most of its notes before it ends. What forward writing can't see (a slide shown
 twice, a point split across sections) is left for synthesis.
 
+### The notes format
+
+The notes are Markdown plus three commands, each on a line of its own: `:::box[Title]{color=…}`
+opens a box, `:::step[Title]{color=…}` opens a step, and `::figure{#id}` places one of the
+session's figures. The word after the colons is a command and is never shown; the title is
+optional and may hold brackets in pairs (an unpaired `]` is written `\]`). Each closing `:::`
+closes the most recent block still open. Blocks go one level deep, so at most two are open at
+once, and steps in a row form one numbered path. Lines inside fenced code are text. Inline maths
+sits between single dollars with no space just inside them and no digit right after, so
+`$5 and $10` stays text. The UI and the engine follow these same rules, so what the engine checks
+is what the UI draws and saves.
+
 ## Render: redrawing the figures
 
 ```mermaid
@@ -349,7 +361,8 @@ Prompts treat what was said and shown as data, never as instructions.
 - `backend/src/iris/speech.py`: finding the speech to send
 - `backend/src/iris/models.py`: every stage's output type
 - `backend/src/iris/notes/format.py`: the notes format, its checks and repair (the UI reads it with
-  `frontend/src/notes/format.ts`)
+  `frontend/src/notes/format.ts`); inline maths is read in `backend/src/iris/notes/markdown.py`
+  and, in the editor, `frontend/src/notes/editor/extensions.ts`
 - `backend/src/iris/svg.py`: `sanitize_svg`, for every model-written SVG
 - `backend/src/iris/notes/export.py`: the Markdown export the engine serves on request, with the figures
   embedded and the user's edits included
