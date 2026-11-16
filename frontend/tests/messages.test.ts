@@ -2,10 +2,14 @@ import assert from 'node:assert/strict'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import test from 'node:test'
-import { actionFailure, againLink, PROVENANCE_LABELS, saveRefused, UNREACHABLE } from '../src/lib/messages.ts'
+import { actionFailure, againLink, PROVENANCE_LABELS, RETRY, saveRefused, UNREACHABLE } from '../src/lib/messages.ts'
 
 test('an unreachable backend is described in Iris’s own words', () => {
   assert.equal(UNREACHABLE, "Iris isn't responding. Try again in a moment.")
+})
+
+test('a page that couldn’t load offers Retry', () => {
+  assert.equal(RETRY, 'Retry')
 })
 
 const restartFailed = "Couldn't restart this session. It may already be processing."

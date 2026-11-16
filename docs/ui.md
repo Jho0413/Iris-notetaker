@@ -130,8 +130,10 @@ line, and exporting works from the library without opening the session.
 In a browser the bridge is absent, and the pages leave out what needs it. Whether the page runs
 in the app at all is told by the bridge being there, and nothing else. Whether a key is set
 comes from the engine's settings, never from the app. They are read again whenever the window
-regains focus, since the key can change from the app's menu, and a failed read is tried again a
-few times, since the engine takes a few seconds to come back after a key change. The app's side
+regains focus, since the key can change from the app's menu. A failed read keeps what is shown
+and is tried again a few times, since the engine takes a few seconds to come back after a key
+change. If the very first read fails, the library keeps trying, while Settings shows its error at
+once, with a way to retry. The app's side
 is in [`desktop.md`](desktop.md).
 
 ## Decisions

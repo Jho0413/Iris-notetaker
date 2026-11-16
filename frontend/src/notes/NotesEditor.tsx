@@ -15,7 +15,7 @@ import { landingSpots, nearestSpot, type Measured, type Spot } from './editor/la
 import { toDoc, toMarkdown } from './editor/markdown'
 import { editorPlugins, flashKey, mathWithViews, selectedBlock, selectedBlockKey, type OpenMath } from './editor/plugins'
 import type { Colour } from './format'
-import { NOTES_EDIT, saveRefused, UNREACHABLE } from '../lib/messages'
+import { KEEP_EDITING, NOTES_EDIT, saveRefused, UNREACHABLE } from '../lib/messages'
 import type { FigureMeta } from '../lib/notes'
 import { Banner } from '../components/Banner'
 import { ConfirmDialog, LeaveWithoutSavingDialog } from '../components/ConfirmDialog'
@@ -569,7 +569,7 @@ export function NotesEditor(props: {
         title={NOTES_EDIT.discardTitle}
         body={NOTES_EDIT.discardBody}
         confirm="Discard changes"
-        cancel="Keep editing"
+        cancel={KEEP_EDITING}
         danger
         onConfirm={() => { setConfirmDiscard(false); props.onClose() }}
         onCancel={() => setConfirmDiscard(false)}

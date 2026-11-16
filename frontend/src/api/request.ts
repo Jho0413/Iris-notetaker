@@ -18,7 +18,8 @@ export async function act<T>(
   try {
     const { data, error, response } = await call
     return { ok: !error, status: response.status, data, error }
-  } catch {
+  } catch (err) {
+    console.error(err)
     return { ok: false, status: 0 }
   }
 }

@@ -10,7 +10,7 @@ import { NoKeyBanner } from '../settings/NoKeyBanner'
 import { StatusChip } from '../session/StatusChip'
 import { sessionCost } from '../session/cost'
 import { formatWhen, shownTitle, SOURCE_LABEL } from '../lib/format'
-import { actionFailure, PDF_FAILED } from '../lib/messages'
+import { actionFailure, DELETE_SESSION, PDF_FAILED } from '../lib/messages'
 import { act } from '../api/request'
 import { emptyRun, failureView, libraryState } from '../session/state'
 import { usePdfExport } from '../notes/usePdfExport'
@@ -240,9 +240,9 @@ export function LibraryPage() {
 
       <ConfirmDialog
         open={pendingDelete !== null}
-        title={`Delete "${pendingDelete?.title ?? ''}"?`}
-        body="This removes the recording, transcript, figures and notes from this computer. It can't be undone."
-        confirm="Delete session"
+        title={DELETE_SESSION.title(pendingDelete?.title ?? '')}
+        body={DELETE_SESSION.body}
+        confirm={DELETE_SESSION.confirm}
         danger
         busy={busy}
         onConfirm={() => void confirmDelete()}

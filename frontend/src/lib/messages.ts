@@ -5,6 +5,8 @@ export const UNREACHABLE = "Iris isn't responding. Try again in a moment."
 
 export const RETRY = 'Retry'
 
+export const KEEP_EDITING = 'Keep editing'
+
 export const BACK_TO_LIBRARY = 'Back to the library'
 
 export function actionFailure(status: number, words: string): string {
@@ -21,6 +23,12 @@ export function againLink(source: Session['source']): { to: string; label: strin
   return source === 'browser_live'
     ? { to: '/live', label: 'Record again' }
     : { to: '/upload', label: 'Upload another recording' }
+}
+
+export const DELETE_SESSION = {
+  title: (title: string) => `Delete "${title}"?`,
+  body: "This removes the recording, transcript, figures and notes from this computer. It can't be undone.",
+  confirm: 'Delete session',
 }
 
 export const NOTES_EDIT = {

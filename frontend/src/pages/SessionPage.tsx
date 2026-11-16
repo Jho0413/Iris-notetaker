@@ -16,7 +16,7 @@ import { TabPanel, Tabs } from '../components/Tabs'
 import { TitleField } from '../session/TitleField'
 import { TranscriptList } from '../session/TranscriptList'
 import { stepCosts, usageCost, usageRefreshKey } from '../session/cost'
-import { actionFailure, againLink, detailsLabel, NOTES_EDIT, PDF_FAILED, UNREACHABLE } from '../lib/messages'
+import { actionFailure, againLink, DELETE_SESSION, detailsLabel, NOTES_EDIT, PDF_FAILED, UNREACHABLE } from '../lib/messages'
 import { fetchNotes, fetchTranscript } from '../notes/load'
 import { usePdfExport } from '../notes/usePdfExport'
 import { act } from '../api/request'
@@ -510,9 +510,9 @@ function SessionView({ id }: { id: string }) {
       />
       <ConfirmDialog
         open={confirmDelete}
-        title={`Delete "${session.title}"?`}
-        body="This removes the recording, transcript, figures and notes from this computer. It can't be undone."
-        confirm="Delete session"
+        title={DELETE_SESSION.title(session.title)}
+        body={DELETE_SESSION.body}
+        confirm={DELETE_SESSION.confirm}
         danger
         busy={busy}
         onConfirm={() => void deleteSession()}

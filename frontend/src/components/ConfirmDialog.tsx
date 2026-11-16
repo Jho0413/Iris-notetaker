@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import type { Blocker } from 'react-router-dom'
+import { KEEP_EDITING } from '../lib/messages'
 
 export function ConfirmDialog(props: {
   open: boolean
@@ -57,7 +58,7 @@ export function LeaveWithoutSavingDialog(props: { blocker: Blocker; body: string
       title="Leave without saving?"
       body={props.body}
       confirm="Leave"
-      cancel="Keep editing"
+      cancel={KEEP_EDITING}
       onConfirm={() => props.blocker.proceed?.()}
       onCancel={() => props.blocker.reset?.()}
     />
