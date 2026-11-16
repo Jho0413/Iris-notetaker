@@ -200,9 +200,10 @@ def export_notes(session: SessionDep, paths: PathsDep) -> PlainTextResponse:
 
 def _attachment_header(title: str, fallback: str) -> str:
     stem = _clean_filename(title)
-    if _looks_blank(stem):
+    if all(c.isspace() or unicodedata.category(c) == "Cf" for c in stem):
         stem = fallback
-    ascii_stem = _ascii_filename(stem)
+    folded = unicodedata.normalize("NFKD", stem).encode("ascii", "ignore").decode()
+    ascii_stem = _clean_filename(folded).replace('"', "_")
     if not any(c.isalnum() for c in ascii_stem):
         ascii_stem = fallback
     return (
@@ -213,15 +214,6 @@ def _attachment_header(title: str, fallback: str) -> str:
 _BIDI_CONTROLS = frozenset(
     "\u061c\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069"
 )
-
-
-def _looks_blank(name: str) -> bool:
-    return all(c.isspace() or unicodedata.category(c) == "Cf" for c in name)
-
-
-def _ascii_filename(name: str) -> str:
-    folded = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode()
-    return _clean_filename(folded).replace('"', "_")
 
 
 def _clean_filename(name: str) -> str:

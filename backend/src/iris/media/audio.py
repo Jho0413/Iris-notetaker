@@ -59,10 +59,6 @@ def _power_per_frame_in_blocks(samples: np.ndarray, frame: int) -> np.ndarray:
     return power
 
 
-def _ceil_div(a: int, b: int) -> int:
-    return -(-a // b)
-
-
 @dataclass(frozen=True)
 class QuietProfile:
     quiet: np.ndarray
@@ -70,7 +66,7 @@ class QuietProfile:
     first_centre: int
 
     def quietest(self, lo: int, hi: int, target: int) -> int | None:
-        j_lo = max(0, _ceil_div(lo - self.first_centre, self.frame))
+        j_lo = max(0, -(-(lo - self.first_centre) // self.frame))
         j_hi = min(len(self.quiet) - 1, (hi - self.first_centre) // self.frame)
         if j_lo > j_hi:
             return None

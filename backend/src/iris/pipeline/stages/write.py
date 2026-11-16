@@ -113,17 +113,6 @@ def _json_array_length(sizes: list[int]) -> int:
     return 2 + sum(sizes) + 2 * max(len(sizes) - 1, 0)
 
 
-def _longest_text_fitting_as_json(record: dict, text: str, budget: int) -> int:
-    low, high = 0, len(text)
-    while low < high:
-        mid = (low + high + 1) // 2
-        if len(structured.payload_json([{**record, "text": text[:mid]}])) <= budget:
-            low = mid
-        else:
-            high = mid - 1
-    return low
-
-
 def evidence_records(transcript: Transcript, selection: Selection, budget: int) -> list[dict]:
     records: list[dict] = []
     for segment in transcript.segments:
@@ -133,14 +122,20 @@ def evidence_records(transcript: Transcript, selection: Selection, budget: int) 
             raise ValueError("invalid transcript timestamps")
         if not segment.text.strip():
             continue
-        whole_segment = {"kind": "speech", **segment.model_dump()}
+        record = {"kind": "speech", **segment.model_dump()}
         remaining = segment.text
         while remaining:
-            fits = _longest_text_fitting_as_json(whole_segment, remaining, budget)
-            if fits == 0:
+            low, high = 0, len(remaining)
+            while low < high:
+                mid = (low + high + 1) // 2
+                if len(structured.payload_json([{**record, "text": remaining[:mid]}])) <= budget:
+                    low = mid
+                else:
+                    high = mid - 1
+            if low == 0:
                 raise ValueError("speech metadata exceeds notes context budget")
-            records.append({**whole_segment, "text": remaining[:fits]})
-            remaining = remaining[fits:]
+            records.append({**record, "text": remaining[:low]})
+            remaining = remaining[low:]
     for content in selection.contents:
         for element in content.elements:
             if element.kind == "figure":
@@ -230,13 +225,6 @@ def _check_tokens(tokens: list[Token]) -> None:
             _check_tokens(token.children)
 
 
-def _marker_after_it_stays_text(parser: MarkdownIt, markdown: str) -> bool:
-    probe = "[visual:__iris_probe__]"
-    return any(
-        t.type == "inline" and t.content == probe for t in parser.parse(markdown + "\n\n" + probe)
-    )
-
-
 def validate_section(
     section: WrittenSection, part: WritingPart, first: WrittenSection | None
 ) -> None:
@@ -262,7 +250,11 @@ def validate_section(
             raise ValueError("notes must use visual_ids instead of figure commands")
         if problems := notes_format.structure_problems(layout):
             raise ValueError(f"notes block has a format problem: {problems[0].message}")
-        if block.visual_ids and not _marker_after_it_stays_text(parser, block.markdown):
+        probe = "[visual:__iris_probe__]"
+        if block.visual_ids and not any(
+            t.type == "inline" and t.content == probe
+            for t in parser.parse(block.markdown + "\n\n" + probe)
+        ):
             raise ValueError("notes block must close code fences before attaching visuals")
         used.update(block.visual_ids)
         placements += len(block.visual_ids)

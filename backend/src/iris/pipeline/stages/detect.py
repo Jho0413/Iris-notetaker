@@ -191,8 +191,7 @@ class MomentDetector:
         return float(self._mask.mean()) if self._mask is not None else 0.0
 
     def _can_represent(self, state: _State) -> bool:
-        mask_grew_since_settling = self._mask_frac() > state.mask_frac + 0.02
-        return not mask_grew_since_settling
+        return self._mask_frac() <= state.mask_frac + 0.02
 
     def _changed(self, a: np.ndarray, b: np.ndarray) -> np.ndarray:
         diff = (cv2.absdiff(a, b) > self.p.pixel_threshold).astype(np.uint8)

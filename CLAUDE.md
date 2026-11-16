@@ -79,12 +79,13 @@ the form that fits the change; don't invent states where there are none.
   live recordings. An interface earns its place with two real implementations, not one.
 - **No comments** in hand-written code and tests (`backend/`, `frontend/`, `desktop/`): no comments
   in any form (`#`, `//`, `/* */`, JSDoc, HTML and CSS comments) and no docstrings, except the ones
-  something reads (below), which new code writes too. Name things for what they mean to the user
-  or the domain, and let a clear name or a smaller function carry what a comment would; a reason
-  still needed goes into such a name, or as a decision into the feature's `docs/` page. Tool
-  directives stay, with nothing after them (shebangs, `# noqa`, `# type: ignore`,
-  `// eslint-disable`). Generated files (`schema.d.ts`) and config and example
-  files of any format (`.env.example`, `pyproject.toml`, `vite.config.ts`, `tsconfig*.json`,
+  something reads (below), which new code writes too. Name things for what they mean to the user or
+  the domain. A reason is kept only by renaming something that already has a name (a variable,
+  parameter, attribute or existing function), by a test, or, if it is a design decision, in the
+  feature's `docs/` page in plain words; anything else is dropped. Never add a function, variable,
+  alias or constant just to hold a reason. Tool directives stay, with nothing after them (shebangs,
+  `# noqa`, `# type: ignore`, `// eslint-disable`). Generated files (`schema.d.ts`) and config and
+  example files of any format (`.env.example`, `pyproject.toml`, `vite.config.ts`, `tsconfig*.json`,
   `electron-builder.yml`, `Makefile`, CI workflows) keep their comments. When you work on a file,
   remove its other comments and docstrings. The docstrings that stay:
   - MCP tool docstrings: the assistant reads them as the tools' descriptions;

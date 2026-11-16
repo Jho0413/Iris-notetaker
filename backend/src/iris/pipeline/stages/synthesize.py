@@ -143,8 +143,7 @@ def fingerprint(image: np.ndarray) -> Fingerprint:
     height, width = grey_image.shape[:2]
     small = cv2.resize(grey_image, (32, 32), interpolation=cv2.INTER_AREA).astype(np.float32)
     low = cv2.dct(small)[:8, :8].flatten()
-    median_without_dc = np.median(low[1:])
-    bits = low > median_without_dc
+    bits = low > np.median(low[1:])
     phash = int("".join("1" if b else "0" for b in bits), 2)
     thumb = cv2.resize(grey_image, (THUMB_SIZE, THUMB_SIZE), interpolation=cv2.INTER_AREA)
     thumb = cv2.GaussianBlur(thumb, (3, 3), 0).astype(np.float32)
@@ -206,11 +205,6 @@ def sweep(root: Path, moments: list[Moment], visuals: list[Visual]) -> list[Repe
     ]
     repeats += [Repeat(kind="figure", ids=ids) for ids in group_same(figures, figure=True)]
     return repeats
-
-
-def _written_in_one_part(draft: NotesDraft, sections: list[str]) -> bool:
-    older_draft_without_parts = draft.parts is None
-    return len(sections) <= 1 if older_draft_without_parts else draft.parts == 1
 
 
 def kept_moments(moments: list[Moment], selection: Selection) -> list[Moment]:
@@ -537,7 +531,7 @@ async def synthesize(ctx: StageContext) -> tuple[SynthesisReport, SynthesizedDra
     )
     sections = notes_format.split_sections(draft.markdown)
     report = SynthesisReport(status="unchanged", repeats=repeats, sections=len(sections))
-    one_part = _written_in_one_part(draft, sections)
+    one_part = draft.parts == 1 if draft.parts is not None else len(sections) <= 1
     placed = set(placements(sections))
     look_alikes = any(r.kind == "figure" and len(placed & set(r.ids)) > 1 for r in repeats)
     if one_part and not look_alikes:
