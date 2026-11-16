@@ -44,17 +44,8 @@ class LiveTimeline:
     def done(self, lane: Lane) -> bool:
         return lane in self.finished or lane in self.failed or lane in self.absent
 
-    def _through(self, lane: Lane, watermark: float, t: float) -> bool:
-        return self.done(lane) or watermark >= t
-
     def transcribed_through(self, t: float) -> bool:
-        return self._through(Lane.AUDIO, self.transcribed_to, t)
-
-    def closed_through(self, t: float) -> bool:
-        return self._through(Lane.SCREEN, self.closed_to, t)
-
-    def selected_through(self, t: float) -> bool:
-        return self._through(Lane.SELECT, self.selected_to, t)
+        return self.done(Lane.AUDIO) or self.transcribed_to >= t
 
     @property
     def horizon(self) -> float:
@@ -65,13 +56,12 @@ class LiveTimeline:
     def upstream_failed(self, lane: Lane) -> bool:
         return any(up in self.failed for up in UPSTREAM[lane])
 
+    def usable(self, lane: Lane) -> bool:
+        return lane in self.finished and lane not in self.skipped_input
+
     @property
     def complete(self) -> bool:
-        return (
-            self.finished >= PROMOTED
-            and not (PROMOTED & self.failed.keys())
-            and not (PROMOTED & self.skipped_input)
-        )
+        return all(self.usable(lane) for lane in PROMOTED)
 
     def transcript(self) -> Transcript:
         return Transcript(language=self.language, segments=list(self.segments))

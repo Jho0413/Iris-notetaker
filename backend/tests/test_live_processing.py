@@ -95,10 +95,10 @@ async def test_a_done_lane_releases_everything_waiting_on_it():
     tl = LiveTimeline()
     waiters = [
         asyncio.create_task(tl.wait_until(lambda: tl.transcribed_through(1e9))),
-        asyncio.create_task(tl.wait_until(lambda: tl.closed_through(1e9))),
+        asyncio.create_task(tl.wait_until(lambda: tl.horizon == math.inf)),
     ]
     await tl.fail_lane(Lane.AUDIO, "decoder crashed")
-    await tl.finish_lane(Lane.SCREEN)
+    await tl.finish_lane(Lane.SELECT)
     await asyncio.wait_for(asyncio.gather(*waiters), 1)
 
 
@@ -120,6 +120,18 @@ async def test_complete_needs_the_promoted_lanes_finished_with_nothing_skipped()
     await tl.fail_lane(Lane.SELECT, "x")
     assert not tl.complete
     assert not tl.done(Lane.SELECT) or Lane.SELECT not in tl.finished
+
+
+async def test_a_lane_is_usable_only_once_finished_with_nothing_skipped():
+    tl = LiveTimeline()
+    assert not tl.usable(Lane.AUDIO)
+    await tl.finish_lane(Lane.AUDIO)
+    assert tl.usable(Lane.AUDIO)
+    await tl.mark_skipped_input(Lane.AUDIO)
+    assert not tl.usable(Lane.AUDIO)
+    await tl.fail_lane(Lane.SCREEN, "x")
+    await tl.finish_lane(Lane.SCREEN)
+    assert not tl.usable(Lane.SCREEN)
 
 
 async def test_a_failed_draft_does_not_block_promotion():

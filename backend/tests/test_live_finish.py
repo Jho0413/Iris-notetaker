@@ -574,7 +574,7 @@ async def test_a_complete_timeline_promotes_everything(tmp_path: Path):
 @pytest.mark.parametrize(
     "spoil",
     [
-        lambda tl, c: tl.failed.update({Lane.SCREEN: "x"}),
+        lambda tl, c: (tl.finished.discard(Lane.SCREEN), tl.failed.update({Lane.SCREEN: "x"})),
         lambda tl, c: tl.skipped_input.add(Lane.SELECT),
         lambda tl, c: tl.finished.discard(Lane.SELECT),
         lambda tl, c: (c.paths.root / "frames/000000000.jpg").unlink(),

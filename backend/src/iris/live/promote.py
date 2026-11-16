@@ -15,14 +15,6 @@ EVERYTHING: tuple[Stage, ...] = (Stage.TRANSCRIBE, Stage.DETECT, Stage.ALIGN, St
 TRANSCRIPT_ONLY: tuple[Stage, ...] = (Stage.TRANSCRIBE,)
 
 
-def _audio_usable(tl: LiveTimeline) -> bool:
-    return (
-        Lane.AUDIO in tl.finished
-        and Lane.AUDIO not in tl.failed
-        and Lane.AUDIO not in tl.skipped_input
-    )
-
-
 def _screen_problems(ctx: StageContext, tl: LiveTimeline) -> list[str]:
     root = ctx.paths.root
     problems = []
@@ -48,7 +40,7 @@ def _screen_problems(ctx: StageContext, tl: LiveTimeline) -> list[str]:
 
 
 def promotable(ctx: StageContext, tl: LiveTimeline | None) -> tuple[Stage, ...]:
-    if tl is None or not _audio_usable(tl):
+    if tl is None or not tl.usable(Lane.AUDIO):
         return ()
     if not tl.complete:
         return TRANSCRIPT_ONLY
