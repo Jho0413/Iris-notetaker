@@ -17,15 +17,14 @@ import { stepCosts, usageCost, usageRefreshKey } from '../session/cost'
 import { againLink, detailsLabel, NOTES_EDIT, PDF_FAILED, UNREACHABLE } from '../session/messages'
 import { fetchNotes, fetchTranscript } from '../session/load'
 import { usePdfExport } from '../session/usePdfExport'
-import { act } from '../session/request'
+import { act } from '../api/request'
 import { shownTitle } from '../session/format'
 import {
   announcement, currentSteps, failureView, figureList, figureMeta, formatClock, progressView,
   runSeconds, sessionLength, sessionMetaLine, STAGE_LABELS, stepLine, transcriptSegments, uiState, type FigureState,
   type RunState,
 } from '../session/state'
-import type { SessionStream } from '../session/useSessionStream'
-import { useSessionStream } from '../session/useSessionStream'
+import { useSessionStream, type SessionStream } from '../session/useSessionStream'
 import { useSessionUsage } from '../session/useSessionUsage'
 import { renameSession } from '../session/renameSession'
 import { useTitle } from '../session/useTitle'
@@ -34,14 +33,8 @@ type TabId = 'notes' | 'transcript' | 'figures'
 type LoadError = 'not-found' | 'unreachable' | null
 
 async function fetchSession(id: string): Promise<Session | 'not-found' | 'unreachable'> {
-  try {
-    const { data, response } = await api.GET('/api/sessions/{session_id}', {
-      params: { path: { session_id: id } },
-    })
-    return data ?? (response.status === 404 ? 'not-found' : 'unreachable')
-  } catch {
-    return 'unreachable'
-  }
+  const { data, status } = await act(api.GET('/api/sessions/{session_id}', { params: { path: { session_id: id } } }))
+  return data ?? (status === 404 ? 'not-found' : 'unreachable')
 }
 
 /** Route entry: a fresh page per session id, so no state leaks between sessions. */
@@ -186,25 +179,24 @@ function SessionView({ id }: { id: string }) {
     if (!notes) return
     setBusy(true)
     setActionError(null)
-    try {
-      const { data, response } = await api.PUT('/api/sessions/{session_id}/notes/edits', {
+    const { data, status } = await act(
+      api.PUT('/api/sessions/{session_id}/notes/edits', {
         params: { path: { session_id: id } },
         body: { markdown: notes.markdown, based_on: notes.generated_hash ?? '' },
-      })
-      if (data) setNotes(data)
-      else {
-        setActionError(
-          response.status === 409
+      }),
+    )
+    setBusy(false)
+    if (data) setNotes(data)
+    else {
+      setActionError(
+        status === 0
+          ? UNREACHABLE
+          : status === 409
             ? NOTES_EDIT.saveWhileProcessing
-            : response.status === 422
+            : status === 422
               ? NOTES_EDIT.keepInvalid
               : NOTES_EDIT.keepFailed,
-        )
-      }
-    } catch {
-      setActionError(UNREACHABLE)
-    } finally {
-      setBusy(false)
+      )
     }
   }
 

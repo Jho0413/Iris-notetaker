@@ -2,7 +2,7 @@
 // commands over the bridge; the Live page records exactly as from its own buttons.
 import { useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { irisApp } from '../settings/appBridge.ts'
+import { irisApp, type Phase } from '../api/appBridge.ts'
 import type { CaptureMode } from './liveCapture.ts'
 
 /** Location state asking the Live page to start recording `mode`. `id` is fresh per request, so
@@ -31,7 +31,7 @@ export function useRecordFromMenuBar() {
  * a Live page left earlier is still uploading (`leftUploads`). Chunks not yet uploaded are only in
  * this window's memory, so quitting must still ask.
  */
-export function menuBarPhase(pagePhase: string, leftUploads: number): string {
+export function menuBarPhase(pagePhase: Phase, leftUploads: number): Phase {
   return pagePhase === 'idle' && leftUploads > 0 ? 'stopping' : pagePhase
 }
 
@@ -41,16 +41,16 @@ export function menuBarPhase(pagePhase: string, leftUploads: number): string {
  * Live page reported.
  */
 export function menuBarReporter(
-  send: (phase: string, startedAt: number, macSoundRefused: boolean, screen: boolean) => void,
+  send: (phase: Phase, startedAt: number, macSoundRefused: boolean, screen: boolean) => void,
 ) {
-  const idle = { phase: 'idle', startedAt: 0, macSoundRefused: false, screen: false }
+  const idle = { phase: 'idle' as Phase, startedAt: 0, macSoundRefused: false, screen: false }
   let page = idle
   let leftUploads = 0
   const tell = () => send(menuBarPhase(page.phase, leftUploads), page.startedAt, page.macSoundRefused, page.screen)
   return {
     /** The Live page's phase now; `macSoundRefused`: macOS refused the Mac's sound to its
      * recording; `screen`: the screen is shared now. */
-    phase(phase: string, startedAt: number, macSoundRefused = false, screen = false) {
+    phase(phase: Phase, startedAt: number, macSoundRefused = false, screen = false) {
       page = { phase, startedAt, macSoundRefused, screen }
       tell()
     },

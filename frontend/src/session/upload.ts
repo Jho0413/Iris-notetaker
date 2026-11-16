@@ -1,5 +1,5 @@
 import type { Session } from '../api/client'
-import { engineDidNotAnswer } from './request.ts'
+import { engineDidNotAnswer } from '../api/request.ts'
 
 /** Why an upload failed. Its message is ours: never the backend's detail or the status code. */
 export class UploadError extends Error {

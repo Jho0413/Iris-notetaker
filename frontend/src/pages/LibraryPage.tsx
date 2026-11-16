@@ -9,7 +9,7 @@ import { StatusChip } from '../components/StatusChip'
 import { sessionCost } from '../session/cost'
 import { formatWhen, shownTitle, SOURCE_LABEL } from '../session/format'
 import { PDF_FAILED, UNREACHABLE } from '../session/messages'
-import { act } from '../session/request'
+import { act } from '../api/request'
 import { emptyRun, failureView, libraryState } from '../session/state'
 import { usePdfExport } from '../session/usePdfExport'
 import { useTitle } from '../session/useTitle'
@@ -21,12 +21,8 @@ const REFRESH_MS = 4000
 type Load = { kind: 'loading' } | { kind: 'error' } | { kind: 'ready'; sessions: Session[] }
 
 async function fetchSessions(): Promise<Load> {
-  try {
-    const { data, error } = await api.GET('/api/sessions')
-    return error || !data ? { kind: 'error' } : { kind: 'ready', sessions: data }
-  } catch {
-    return { kind: 'error' }
-  }
+  const { data } = await act(api.GET('/api/sessions'))
+  return data ? { kind: 'ready', sessions: data } : { kind: 'error' }
 }
 
 export function LibraryPage() {

@@ -5,6 +5,7 @@ import type { EditorView } from '@tiptap/pm/view'
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useBlocker } from 'react-router-dom'
 import { api, type Notes } from '../api/client'
+import { act } from '../api/request'
 import {
   ADDABLE, addBelow, blockAt, blockOfSelection, canLand, isContainer, KIND_LABELS, kindOf, makeMaths, moveBy,
   moveTo, remove, setColour, turnInto, turnIntoChoices, usedFigures, within, type Addable, type Block, type Kind,
@@ -184,28 +185,24 @@ export function NotesEditor(props: {
     if (!editor) return
     setSaving(true)
     setError(null)
-    try {
-      const { data, error: failure, response } = await api.PUT('/api/sessions/{session_id}/notes/edits', {
+    const { data, error: failure, status } = await act(
+      api.PUT('/api/sessions/{session_id}/notes/edits', {
         params: { path: { session_id: notes.session_id } },
         body: { markdown: toMarkdown(editor.getJSON()), based_on: notes.generated_hash ?? '' },
-      })
-      if (data) {
-        props.onSaved(data)
-        return
-      }
-      const detail = (failure as { detail?: unknown } | undefined)?.detail
-      setError(
-        response.status === 409
+      }),
+    )
+    setSaving(false)
+    if (data) return props.onSaved(data)
+    const detail = (failure as { detail?: unknown } | undefined)?.detail
+    setError(
+      status === 0
+        ? UNREACHABLE
+        : status === 409
           ? NOTES_EDIT.saveWhileProcessing
-          : response.status === 422 && typeof detail === 'string'
+          : status === 422 && typeof detail === 'string'
             ? saveRefused(detail)
             : NOTES_EDIT.saveFailed,
-      )
-    } catch {
-      setError(UNREACHABLE)
-    } finally {
-      setSaving(false)
-    }
+    )
   }
 
   function close() {
@@ -391,7 +388,7 @@ export function NotesEditor(props: {
   const kind = block ? kindOf(block.node) : null
   const status = saving ? 'Saving…' : dirty ? 'Unsaved changes' : 'No changes yet'
 
-  const act = (make: () => { tr: import('@tiptap/pm/state').Transaction; pos: number } | null) => {
+  const apply = (make: () => { tr: import('@tiptap/pm/state').Transaction; pos: number } | null) => {
     const r = make()
     if (r) dispatch(r.tr, r.pos)
     setMenu(null)
@@ -456,10 +453,10 @@ export function NotesEditor(props: {
         {KIND_LABELS[kind!]}
       </button>
       <span className="sep" />
-      <button type="button" className="tb-btn" aria-label="Move up" title="Move up" onClick={() => act(() => moveBy(editor.state, block.pos, -1))}>
+      <button type="button" className="tb-btn" aria-label="Move up" title="Move up" onClick={() => apply(() => moveBy(editor.state, block.pos, -1))}>
         <Icon name="up" />
       </button>
-      <button type="button" className="tb-btn" aria-label="Move down" title="Move down" onClick={() => act(() => moveBy(editor.state, block.pos, 1))}>
+      <button type="button" className="tb-btn" aria-label="Move down" title="Move down" onClick={() => apply(() => moveBy(editor.state, block.pos, 1))}>
         <Icon name="down" />
       </button>
       <button
@@ -574,7 +571,7 @@ export function NotesEditor(props: {
                   icon={<Icon name="image" />}
                   disabled={used.has(v.id)}
                   note={used.has(v.id) ? 'Already in the notes' : undefined}
-                  onSelect={() => act(() => addBelow(editor.state, block.pos, { figure: v.id }))}
+                  onSelect={() => apply(() => addBelow(editor.state, block.pos, { figure: v.id }))}
                 >
                   {v.caption || 'Figure'}
                 </MenuItem>

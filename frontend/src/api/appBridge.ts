@@ -12,12 +12,28 @@ export interface IrisApp {
   /** Tells the app the Live page's phase, when recording started (ms since the epoch), whether
    * macOS refused the Mac's sound to the recording (the menu bar icon then shows the window,
    * whose page says how to allow it) and whether the screen is shared now. */
-  recordingChanged(phase: string, startedAt: number, macSoundRefused: boolean, screen: boolean): void
+  recordingChanged(phase: Phase, startedAt: number, macSoundRefused: boolean, screen: boolean): void
   /** Calls `listener` with what is chosen in the menu bar: a recording to start, Share Screen…
    * or Stop Sharing, Stop, or, once stopped, what to do with the recording; returns the
    * unsubscribe. */
   onRecordCommand(listener: (command: RecordCommand) => void): () => void
 }
+
+/**
+ * `stopped`: capture is paused (Stop): make notes, continue, start over or discard; `continuing`:
+ * asking for the sources again (Continue), still stopped until they are granted.
+ * `stopping`: finishing the upload, to make notes or, leaving the page, to keep the recording.
+ * `unfinished`: capture has ended, but making notes (or keeping it) failed; `finishing`: retrying.
+ */
+export type Phase =
+  | 'idle'
+  | 'requesting'
+  | 'recording'
+  | 'stopped'
+  | 'continuing'
+  | 'stopping'
+  | 'unfinished'
+  | 'finishing'
 
 /** The menu bar's commands (desktop/src/tray.cjs). The Live page handles all but the starts. */
 export type RecordCommand =

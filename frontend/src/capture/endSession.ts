@@ -3,7 +3,7 @@
 // becomes silence. Or stopping it, which keeps what arrived without making notes. See backend
 // api/routes/live.py.
 
-import { engineDidNotAnswer } from '../session/request.ts'
+import { engineDidNotAnswer } from '../api/request.ts'
 
 type Fetch = (input: string, init?: RequestInit) => Promise<Response>
 

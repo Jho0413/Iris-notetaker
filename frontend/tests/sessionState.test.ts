@@ -8,7 +8,6 @@ import {
   stepLine, stepStatus,
   transcriptSegments, uiState, type UiStateKind,
 } from '../src/session/state.ts'
-import { STAGES } from '../src/api/client.ts'
 
 let tick = 0
 function ev(type: IrisEvent['type'], data: Record<string, unknown> = {}): IrisEvent {
@@ -247,7 +246,6 @@ test('UI states cover recording, processing, polishing, stalled, finished and fa
 
 test('the synthesis pass is the last step, after the notes are assembled', () => {
   assert.equal(STAGE_ORDER[STAGE_ORDER.length - 1], 'synthesize')
-  assert.deepEqual(STAGES, [...STAGE_ORDER])
   const run = reduceEvents([
     ev('status', { status: 'processing' }),
     ev('stage_started', { stage: 'assemble' }),

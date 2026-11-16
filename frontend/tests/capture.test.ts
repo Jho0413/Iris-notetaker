@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { describeCaptureError, inDesktopApp, pickAudioMimeType } from '../src/capture/captureErrors.ts'
+import { describeCaptureError, pickAudioMimeType } from '../src/capture/captureErrors.ts'
 import { EndSessionError, endLiveSession } from '../src/capture/endSession.ts'
 import { UploadQueue, isRetryable } from '../src/capture/uploadQueue.ts'
 
@@ -124,8 +124,6 @@ test('in the desktop app, blocked capture points at System Settings for Iris, no
   const mic = describeCaptureError(denied, 'microphone', true)
   assert.match(mic, /Allow Iris in System Settings → Privacy & Security → Microphone/)
   assert.doesNotMatch(mic, /browser|site/)
-  // In a browser (and in Node, where there is no app:// page) the browser wording stays.
-  assert.equal(inDesktopApp(), false)
   assert.match(describeCaptureError(denied, 'microphone'), /for this site in the browser/)
   assert.match(describeCaptureError(denied, 'screen', false), /for your browser/)
 })

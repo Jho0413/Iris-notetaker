@@ -1,11 +1,5 @@
 import type { Middleware } from 'openapi-fetch'
 
-/** Outcome of an API action: `status` is 0 when the engine never answered. */
-export interface ActionResult {
-  ok: boolean
-  status: number
-}
-
 /**
  * Whether a response came from in front of the engine because the engine didn't answer: Vite's
  * proxy in development (502), or the desktop app's handler when the engine isn't running (503) or
@@ -32,12 +26,12 @@ export const engineAnswersOnly: Middleware = {
  * error (a network failure, or the engine not answering) into a result, so the caller always gets
  * to reset its busy state.
  */
-export async function act(
-  call: Promise<{ error?: unknown; response: Response }>,
-): Promise<ActionResult> {
+export async function act<T>(
+  call: Promise<{ data?: T; error?: unknown; response: Response }>,
+): Promise<{ ok: boolean; status: number; data?: T; error?: unknown }> {
   try {
-    const { error, response } = await call
-    return { ok: !error, status: response.status }
+    const { data, error, response } = await call
+    return { ok: !error, status: response.status, data, error }
   } catch {
     return { ok: false, status: 0 }
   }

@@ -1,6 +1,5 @@
 export const PALETTE = ['grey', 'indigo', 'blue', 'teal', 'green', 'amber', 'orange', 'red', 'pink', 'violet'] as const
 export type Colour = (typeof PALETTE)[number]
-export const COMMANDS = ['box', 'step'] as const
 const MAX_DEPTH = 2
 
 export const OPEN = /^(:{3,})([A-Za-z][\w-]*)(?:\[((?:\\.|[^[\]\\]|\[(?:\\.|[^[\]\\])*\])*)\])?(?:\{([^}]*)\})?[ \t]*$/

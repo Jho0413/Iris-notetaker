@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { type Location, useBlocker, useLocation, useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
-import { CaptureError, inDesktopApp } from '../capture/captureErrors'
+import { act } from '../api/request'
+import { CaptureError } from '../capture/captureErrors'
 import { EndSessionError } from '../capture/endSession'
 import {
   type CaptureMode,
@@ -20,23 +21,7 @@ import { UNREACHABLE } from '../session/messages'
 import { formatClock, liveProgress } from '../session/state'
 import { useSessionStream } from '../session/useSessionStream'
 import { useTitle } from '../session/useTitle'
-import { irisApp, type RecordCommand } from '../settings/appBridge'
-
-/**
- * `stopped`: capture is paused (Stop): make notes, continue, start over or discard; `continuing`:
- * asking for the sources again (Continue), still stopped until they are granted.
- * `stopping`: finishing the upload, to make notes or, leaving the page, to keep the recording.
- * `unfinished`: capture has ended, but making notes (or keeping it) failed; `finishing`: retrying.
- */
-type Phase =
-  | 'idle'
-  | 'requesting'
-  | 'recording'
-  | 'stopped'
-  | 'continuing'
-  | 'stopping'
-  | 'unfinished'
-  | 'finishing'
+import { irisApp, type Phase, type RecordCommand } from '../api/appBridge'
 
 /** A choice on the stopped page that deletes what was recorded, so it is confirmed first. */
 type Destructive = 'discard' | 'start-over'
@@ -46,15 +31,7 @@ type Destructive = 'discard' | 'start-over'
  * are; anything else (an unexpected error's text) never is.
  */
 function captureError(err: unknown): string {
-  if (err instanceof CaptureError) return err.message
-  if (!(err instanceof DOMException)) return "Recording couldn't start. Try again."
-  const name = err.name
-  if (name === 'NotAllowedError') {
-    return 'Screen sharing or the microphone was blocked or cancelled. Allow both for this site in your browser, then try again.'
-  }
-  if (name === 'NotFoundError') return 'No microphone was found. Connect one and try again.'
-  if (name === 'NotReadableError') return 'The microphone or screen is in use by another app. Close it and try again.'
-  return "Recording couldn't start. Try again."
+  return err instanceof CaptureError ? err.message : "Recording couldn't start. Try again."
 }
 
 /** What to say when finishing the recording failed: our own message, or a generic one. */
@@ -86,7 +63,7 @@ export function LivePage() {
   const [display, setDisplay] = useState<MediaStream | null>(null)
   const [sharing, setSharing] = useState(false) // Share screen: the picker is open
   const [macSound, setMacSound] = useState(false)
-  const desktopApp = inDesktopApp()
+  const desktopApp = Boolean(irisApp())
   const canShare = typeof navigator !== 'undefined' && canShareScreen(navigator.mediaDevices)
   const recording = phase === 'recording'
   const continuing = phase === 'continuing'
@@ -138,9 +115,7 @@ export function LivePage() {
     // Made only once what is recorded has been granted (LiveCapture.start): asking for
     // permissions leaves no session behind, whatever happens meanwhile.
     const createSession = async () => {
-      const { data } = await api
-        .POST('/api/live', { body: { title: title.trim() || 'Live session' } })
-        .catch(() => ({ data: undefined }))
+      const { data } = await act(api.POST('/api/live', { body: { title: title.trim() || 'Live session' } }))
       if (!data) throw new CaptureError(UNREACHABLE)
       return data.id
     }

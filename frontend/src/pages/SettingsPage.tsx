@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useBlocker } from 'react-router-dom'
 import { api, type AppSettings } from '../api/client'
+import { act } from '../api/request'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { Icon } from '../components/Icon'
 import { NoKeyBanner } from '../components/NoKeyBanner'
 import { UNREACHABLE } from '../session/messages'
 import { useTitle } from '../session/useTitle'
-import { irisApp } from '../settings/appBridge'
+import { irisApp } from '../api/appBridge'
 import {
   asksBeforeLeaving,
   BROWSER_KEY_NOTE,
@@ -27,12 +28,8 @@ const REREAD_TRIES = 5
 type Load = { kind: 'loading' } | { kind: 'error' } | { kind: 'ready'; settings: AppSettings }
 
 async function fetchSettings(): Promise<Load> {
-  try {
-    const { data, error } = await api.GET('/api/settings')
-    return error || !data ? { kind: 'error' } : { kind: 'ready', settings: data }
-  } catch {
-    return { kind: 'error' }
-  }
+  const { data } = await act(api.GET('/api/settings'))
+  return data ? { kind: 'ready', settings: data } : { kind: 'error' }
 }
 
 /** Grouped rows of settings. Changes collect in a save bar and apply once saved. */
@@ -113,17 +110,11 @@ export function SettingsPage() {
     if (pending === null) return
     setSaving(true)
     setSaveError(null)
-    let status = 0
-    try {
-      const { data, response } = await api.PUT('/api/settings', { body: { transcribe_language: pending } })
-      status = response.status
-      if (data) {
-        setLoad({ kind: 'ready', settings: data })
-        setDraft(null)
-        setSaved(true)
-      }
-    } catch {
-      status = 0
+    const { data, status } = await act(api.PUT('/api/settings', { body: { transcribe_language: pending } }))
+    if (data) {
+      setLoad({ kind: 'ready', settings: data })
+      setDraft(null)
+      setSaved(true)
     }
     setSaving(false)
     if (status !== 200) setSaveError(saveFailure(status))

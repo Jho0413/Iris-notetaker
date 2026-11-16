@@ -8,8 +8,9 @@
 // and finishing the recording (making notes, or keeping it without) waits for all of them, so a
 // dropped request doesn't lose content.
 
-import { engineDidNotAnswer } from '../session/request.ts'
-import { CaptureError, describeCaptureError, inDesktopApp, pickAudioMimeType } from './captureErrors.ts'
+import { irisApp } from '../api/appBridge.ts'
+import { engineDidNotAnswer } from '../api/request.ts'
+import { CaptureError, describeCaptureError, pickAudioMimeType } from './captureErrors.ts'
 import { EndSessionError, MissingAudioError, endLiveSession, stopLiveSession } from './endSession.ts'
 import { UploadQueue, type UploadQueueOptions } from './uploadQueue.ts'
 
@@ -97,7 +98,7 @@ export function browserEnv(): CaptureEnv {
     fetch: (input, init) => fetch(input, init),
     sendBeacon: (url, body) => sendBeaconOrKeepalive(url, body, navigator.sendBeacon.bind(navigator), fetch),
     page: window,
-    macSound: inDesktopApp(),
+    macSound: Boolean(irisApp()),
     mixAudio,
     captureFrames,
   }

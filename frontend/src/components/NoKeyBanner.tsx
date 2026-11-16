@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { irisApp } from '../settings/appBridge'
+import { irisApp } from '../api/appBridge'
 import { KEY_ACTION_FAILED, noKeyWarning } from '../settings/settings'
 import { Icon } from './Icon'
 
