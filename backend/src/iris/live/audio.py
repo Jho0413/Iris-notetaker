@@ -156,7 +156,7 @@ class LiveDecoder:
     def next_chunk(self, seq: int) -> Path | NoChunkReason:
         gap_since: float | None = None
         while True:
-            self._forget_wakeups_before_checking()
+            self._poke.clear()
             if self._cancelled:
                 return "stop"
             path = self.paths.live_audio_chunk(seq)
@@ -174,9 +174,6 @@ class LiveDecoder:
                     return "gap"
             self._report()
             self._poke.wait(timeout)
-
-    def _forget_wakeups_before_checking(self) -> None:
-        self._poke.clear()
 
     def _next_stored(self, seq: int) -> int | None:
         return next((s for s, _ in audio_chunks(self.paths) if s > seq), None)
