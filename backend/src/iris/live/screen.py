@@ -29,7 +29,7 @@ class ScreenFeed:
         self.latest_share: int | None = None
         self.shares_seen = 0
         self._share_of_latest_ref = 0
-        self.refs: list[FrameRef] = []
+        self.last_ref: FrameRef | None = None
         self._sampled_in_cell: dict[int, tuple[float, int]] = {}
 
     def would_sample(self, frame: CapturedFrame) -> bool:
@@ -50,12 +50,12 @@ class ScreenFeed:
             ref = self.normaliser.add(frame.t, frame.path)
             if ref is None:
                 continue
-            if self.refs and self._share_of_latest_ref != self.shares_seen:
-                end = share_end(self.refs[-1].t, self.fps, ref.t)
+            if self.last_ref and self._share_of_latest_ref != self.shares_seen:
+                end = share_end(self.last_ref.t, self.fps, ref.t)
                 if (moment := self.detector.end_share(end)) is not None:
                     closed.append(moment)
             self._share_of_latest_ref = self.shares_seen
-            self.refs.append(ref)
+            self.last_ref = ref
             image = cv2.imread(str(self.paths.root / ref.path), cv2.IMREAD_COLOR)
             if image is None:
                 continue
@@ -65,7 +65,7 @@ class ScreenFeed:
 
     def finish(self) -> list[Moment]:
         closed = []
-        if self.refs and (moment := self.detector.finish(share_end(self.refs[-1].t, self.fps))):
+        if self.last_ref and (moment := self.detector.finish(share_end(self.last_ref.t, self.fps))):
             closed.append(moment)
         return closed
 
