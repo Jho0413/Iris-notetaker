@@ -296,6 +296,26 @@ async def test_live_renders_hit_the_render_cache(
     assert drawer.calls == ["v000001"]
 
 
+async def test_cancelling_the_lane_cancels_a_render_in_flight_and_caches_nothing(
+    ctx: StageContext, vision: FakeVision, monkeypatch, events: list
+):
+    drawer = Drawer(monkeypatch)
+    drawer.hold["v000001"] = asyncio.Event()
+    driver = Driver(ctx).start()
+    await driver.close(0)
+    await driver.transcribe(0, to=100)
+    await eventually(lambda: drawer.calls == ["v000001"])
+    assert driver.task is not None
+    driver.task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(driver.task, 5)
+    assert drawer.cancelled == ["v000001"]
+    drawer.hold["v000001"].set()
+    await settle(20)
+    assert not list(ctx.paths.render_cache_dir.glob("*.json"))
+    assert not [kind for kind, _ in events if kind == EventType.VISUAL_RENDERED]
+
+
 async def test_an_api_error_in_a_live_render_gives_the_source_crop_uncached(
     ctx: StageContext, vision: FakeVision, monkeypatch, events: list
 ):
