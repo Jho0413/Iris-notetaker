@@ -146,9 +146,10 @@ to every change; the reviewer says which ones it checked. Principles are those i
   models that reach `schema.d.ts`, and the module or class contract of an interface
   (`sources/base.py`, `live/lane.py`), not its methods. Tool directives stay with nothing after
   them (shebangs, `# noqa`, `# type: ignore`, `// eslint-disable`). Files the change touches have
-  their other comments and docstrings removed, any reason still needed moved into a name or the
-  docs page. Generated files and config and example files of any format keep their comments. No
-  dead code left behind.
+  their other comments and docstrings removed. A reason is kept only by renaming something that
+  already has a name or by a test, and a design decision moves to the docs page; a function, alias
+  or constant added only to hold a reason is a should-fix. Generated files and config and example
+  files of any format keep their comments. No dead code left behind.
 - A change in behaviour leaves nothing describing the old one: search for comments, docstrings,
   UI wording and files that still say or do what the code used to.
 - No secrets in code or logs; no new dependency without a reason.
