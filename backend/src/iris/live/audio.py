@@ -24,7 +24,7 @@ from iris.llm.transcription import (
     supports_prompt,
     transcribe_stretch_at,
 )
-from iris.media.audio import fits_transcription_upload, quiet_profile
+from iris.media.audio import SAMPLE_BYTES, fits_transcription_upload, quiet_profile
 from iris.media.webm import ChunkStream, NoChunkReason, PlacedWav, find_cluster, stream_header
 from iris.models import EventType, Stage, Transcript, TranscriptSegment
 from iris.pipeline.context import StageContext
@@ -340,7 +340,7 @@ class AudioLane(LiveLane):
 
     def _read(self, start: int, end: int) -> np.ndarray:
         samples = np.fromfile(
-            self.ctx.paths.live_pcm, dtype="<i2", count=end - start, offset=2 * start
+            self.ctx.paths.live_pcm, dtype="<i2", count=end - start, offset=SAMPLE_BYTES * start
         )
         if len(samples) != end - start:
             raise RuntimeError(f"live/audio.pcm is shorter than the {end} samples decoded")
