@@ -99,11 +99,13 @@ flowchart LR
 ```
 
 - **Audio lane:** decodes the chunks in order as the one stream they are cut from, cuts the audio
-  into transcript windows at quiet points, and transcribes them, each with the text before it as
-  context. Only a window's speech is sent, exactly as for an upload
-  ([`making-notes.md`](making-notes.md#sending-only-speech)); a window with none isn't sent, but
-  still moves "transcribed to" on, so a silence never holds the notes back. When the last window
-  finished has no text, the next one sent gets no context, so a sentence from before a silence
+  into transcript windows at quiet points (found the same way as an upload's chunk cuts), and
+  transcribes them, each with the text before it as context where the model takes it
+  ([`making-notes.md`](making-notes.md#asking-each-model)). Only a window's speech is sent,
+  exactly as for an upload ([`making-notes.md`](making-notes.md#sending-only-speech)); a window
+  with none isn't sent, but still moves "transcribed to" on, so a silence never holds the notes
+  back. When the last window finished has no text, the next one sent gets no context, so a
+  sentence from before a silence
   can't be repeated over it. A cut depends only on the audio, never on how much had arrived, so a lane restarted
   after an engine restart makes the same cuts and reuses its cached windows. A cut is only made
   once a little audio past it is decoded, so a pause is confirmed, never guessed at the edge of
@@ -173,6 +175,12 @@ can be ingested again at any time.
    decoding starts again at the next point the stream can restart from, with the stream's header
    put in front, rather than trusting the decoder to find its way through damaged data, which
    can lose the rest of the recording. A damaged packet is skipped.
+
+   Ingest and the audio lane join the chunks and restart after a lost one with the same code.
+   They differ only in where the next chunk comes from (ingest has them all; the lane waits for
+   the browser) and in what a part that can't be read means: ingest stops with a message saying
+   what to do, while the lane skips it, marks itself as having missed input and carries on, since
+   ingest will decode the recording again anyway.
 2. The frames are picked on the same steady grid as an upload's, by their times. Each share is
    sized from its own first readable frame, and the rest of it is scaled and centred on black to
    that size, because detection compares frames pixel by pixel and a shared window can change
@@ -222,7 +230,10 @@ more can be recorded. The engine never ends a recording on its own.
 - `backend/src/iris/sources/browser_live.py`: how chunks and frames are stored and ingested
 - `backend/src/iris/media/frames.py`: picking, sizing and saving frames, shared by ingest and the
   screen lane
-- `backend/src/iris/store/layout.py`: the names of the captured chunks and frames
+- `backend/src/iris/media/webm.py`: joining the chunks into one stream and restarting after a
+  lost one, shared by ingest and the audio lane, and placing the sound by its timestamps
+- `backend/src/iris/store/layout.py`: the names of the captured chunks and frames, and of the
+  cached transcript windows
 - `backend/src/iris/live/`: the processor, each lane, the timeline and promotion
 - `backend/src/iris/live/replay.py`: plays a recording into a running engine to measure it; it
   makes real, paid calls, so use a scratch data folder ([`development.md`](development.md))
