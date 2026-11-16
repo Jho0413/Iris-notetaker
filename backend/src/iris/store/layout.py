@@ -244,5 +244,5 @@ def read_optional[M: BaseModel](path: Path, model: type[M]) -> M | None:
     except FileNotFoundError:
         return None
     except ValueError:
-        log.warning("ignoring unreadable %s", path)
+        log.warning("ignoring unreadable %s", path, exc_info=True)
         return None

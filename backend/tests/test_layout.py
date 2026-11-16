@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from iris.models import Notes, SessionType
+from iris.models import Notes, NotesEdits, SessionType
 from iris.store.layout import (
     SessionPaths,
     inside,
@@ -135,6 +135,14 @@ def test_an_optional_file_that_is_damaged_reads_as_none_with_a_warning(tmp_path,
     path.write_text("{not json")
     assert read_optional(path, Notes) is None
     assert f"ignoring unreadable {path}" in caplog.text
+
+
+def test_an_optional_file_that_fails_validation_logs_the_reason(tmp_path, caplog):
+    path = tmp_path / "notes_edits.json"
+    path.write_text('{"markdown": "m"}')
+    assert read_optional(path, NotesEdits) is None
+    assert "2 validation errors for NotesEdits" in caplog.text
+    assert "based_on" in caplog.text
 
 
 def test_an_optional_file_that_is_valid_reads_back(tmp_path):
