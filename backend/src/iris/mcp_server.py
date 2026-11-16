@@ -167,13 +167,27 @@ def create_server(settings: Settings) -> MCPServer:
     def paths_of(session: Session) -> SessionPaths:
         return session_paths(settings.sessions_dir, session.id)
 
-    def readable_notes(session: Session) -> Notes | None:
+    def notes_of(session: Session) -> Notes:
         try:
             return read_newest_notes(paths_of(session))
         except FileNotFoundError:
-            return None
-        except (OSError, ValueError):
+            raise ToolError(not_ready_message(session)) from None
+        except ValueError:
             log.exception("can't read the notes of session %s", session.id)
+            raise ToolError(
+                "This session's notes are damaged. Making them again in Iris may fix it."
+            ) from None
+        except OSError:
+            log.exception("can't open the notes of session %s", session.id)
+            raise ToolError(
+                "This session's notes couldn't be opened. Check the permissions of its folder "
+                f"in {settings.sessions_dir.resolve()}."
+            ) from None
+
+    def readable_notes(session: Session) -> Notes | None:
+        try:
+            return notes_of(session)
+        except ToolError:
             return None
 
     @server.tool(annotations=READ_ONLY)
@@ -206,21 +220,7 @@ def create_server(settings: Settings) -> MCPServer:
             session = store.get(session_id)
         if session is None:
             raise ToolError(f"There is no session {session_id!r}. list_sessions gives the ids.")
-        try:
-            return session, read_newest_notes(paths_of(session))
-        except FileNotFoundError:
-            raise ToolError(not_ready_message(session)) from None
-        except ValueError:
-            log.exception("can't read the notes of session %s", session.id)
-            raise ToolError(
-                "This session's notes are damaged. Making them again in Iris may fix it."
-            ) from None
-        except OSError:
-            log.exception("can't open the notes of session %s", session.id)
-            raise ToolError(
-                "This session's notes couldn't be opened. Check the permissions of its folder "
-                f"in {settings.sessions_dir.resolve()}."
-            ) from None
+        return session, notes_of(session)
 
     @server.tool(annotations=READ_ONLY)
     def get_notes(session_id: str) -> str:
