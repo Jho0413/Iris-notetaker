@@ -1,8 +1,8 @@
 import type { Stage } from '../api/client'
 import {
   STAGE_LABELS, STAGE_ORDER, stageDetail, stepStatus, type RunState, type StepStatus,
-} from '../session/state'
-import { Icon, type IconName } from './Icon'
+} from './state'
+import { Icon, type IconName } from '../components/Icon'
 
 const STEP_ICON: Record<StepStatus, IconName> = {
   pending: 'pending',
@@ -20,13 +20,8 @@ const STEP_WORD: Record<StepStatus, string> = {
   stopped: 'Stopped',
 }
 
-/**
- * Every pipeline step with its status and count, in order. A step done while recording (promoted
- * at stop) says "· live". One row per step whatever its state, so nothing moves as steps advance.
- */
 export function StepList(props: {
   run: RunState
-  /** Stored progress when no events are known (e.g. after a backend restart). */
   finished: boolean
   hasEvents: boolean
   currentStage?: Stage | null

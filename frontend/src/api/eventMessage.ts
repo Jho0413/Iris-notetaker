@@ -5,7 +5,6 @@ export const EVENT_TYPES: IrisEvent['type'][] = [
   'visual_selected', 'visual_rendered', 'notes_updated', 'error',
 ]
 
-/** Distinguish server messages from EventSource transport errors and invalid payloads. */
 export function decodeSessionEvent(event: Event, sessionId: string): IrisEvent | null {
   if (!(event instanceof MessageEvent) || typeof event.data !== 'string') return null
   try {

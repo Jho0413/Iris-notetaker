@@ -1,9 +1,7 @@
 import { useEffect, useRef } from 'react'
+import type { Blocker } from 'react-router-dom'
+import { KEEP_EDITING } from '../lib/messages'
 
-/**
- * A native <dialog> for confirming a destructive or disruptive action: it traps focus, closes on
- * Escape and returns focus to the opener by itself.
- */
 export function ConfirmDialog(props: {
   open: boolean
   title: string
@@ -36,7 +34,6 @@ export function ConfirmDialog(props: {
     >
       <h2 id="confirm-title">{props.title}</h2>
       <p>{props.body}</p>
-      {/* A destructive choice sits apart from the way out, so one isn't clicked for the other. */}
       <div className={props.danger ? 'dialog-actions dialog-actions-apart' : 'dialog-actions'}>
         <button type="button" className="btn" onClick={props.onCancel} disabled={props.busy} autoFocus>
           {props.cancel ?? 'Cancel'}
@@ -51,5 +48,19 @@ export function ConfirmDialog(props: {
         </button>
       </div>
     </dialog>
+  )
+}
+
+export function LeaveWithoutSavingDialog(props: { blocker: Blocker; body: string }) {
+  return (
+    <ConfirmDialog
+      open={props.blocker.state === 'blocked'}
+      title="Leave without saving?"
+      body={props.body}
+      confirm="Leave"
+      cancel={KEEP_EDITING}
+      onConfirm={() => props.blocker.proceed?.()}
+      onCancel={() => props.blocker.reset?.()}
+    />
   )
 }

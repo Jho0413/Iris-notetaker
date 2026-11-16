@@ -1,50 +1,48 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api, type Notes, type Session, type Transcript } from '../api/client'
+import { Banner } from '../components/Banner'
 import { ConfirmDialog } from '../components/ConfirmDialog'
-import { FiguresGrid } from '../components/FiguresGrid'
+import { ErrorPanel } from '../components/ErrorPanel'
+import { FiguresGrid } from '../notes/FiguresGrid'
 import { Icon } from '../components/Icon'
-import { NotesEditor } from '../components/NotesEditor'
-import { NotesView, type OutlineItem } from '../components/NotesView'
-import { ProgressRail, RunDetails, type RunDetailsProps } from '../components/ProgressRail'
-import { SessionRibbon } from '../components/SessionRibbon'
-import { StatusChip } from '../components/StatusChip'
-import { StepList } from '../components/StepList'
+import { NotesEditor } from '../notes/NotesEditor'
+import { NotesView } from '../notes/NotesView'
+import { ProgressRail, RunDetails, type RunDetailsProps } from '../session/ProgressRail'
+import { SessionRibbon } from '../session/SessionRibbon'
+import { StatusChip } from '../session/StatusChip'
+import { StepList } from '../session/StepList'
 import { TabPanel, Tabs } from '../components/Tabs'
-import { TitleField } from '../components/TitleField'
-import { TranscriptList } from '../components/TranscriptList'
+import { TitleField } from '../session/TitleField'
+import { TranscriptList } from '../session/TranscriptList'
 import { stepCosts, usageCost, usageRefreshKey } from '../session/cost'
-import { againLink, detailsLabel, NOTES_EDIT, PDF_FAILED, UNREACHABLE } from '../session/messages'
-import { fetchNotes, fetchTranscript } from '../session/load'
-import { usePdfExport } from '../session/usePdfExport'
-import { act } from '../session/request'
-import { shownTitle } from '../session/format'
+import { actionFailure, againLink, DELETE_SESSION, detailsLabel, NOTES_EDIT, PDF_FAILED, UNREACHABLE } from '../lib/messages'
+import { fetchNotes, fetchTranscript } from '../notes/load'
+import { usePdfExport } from '../notes/usePdfExport'
+import { act } from '../api/request'
+import { formatClock, sessionLength, sessionMetaLine, shownTitle } from '../lib/format'
+import { figureMeta, type FigureState, type OutlineItem } from '../lib/notes'
 import {
-  announcement, currentSteps, failureView, figureList, figureMeta, formatClock, progressView,
-  runSeconds, sessionLength, sessionMetaLine, STAGE_LABELS, stepLine, transcriptSegments, uiState, type FigureState,
-  type RunState,
+  announcement, currentSteps, failureView, figureList, progressView, runSeconds, STAGE_LABELS, stepLine,
+  transcriptSegments, uiState, type RunState,
 } from '../session/state'
-import type { SessionStream } from '../session/useSessionStream'
-import { useSessionStream } from '../session/useSessionStream'
+import { useSessionStream, type SessionStream } from '../session/useSessionStream'
 import { useSessionUsage } from '../session/useSessionUsage'
 import { renameSession } from '../session/renameSession'
-import { useTitle } from '../session/useTitle'
+import { useTitle } from '../hooks/useTitle'
 
 type TabId = 'notes' | 'transcript' | 'figures'
+
+const notesSkeleton = [90, 100, 95, 60, 100, 85].map((w, i) => (
+  <div key={i} className="skeleton sk-line" style={{ width: `${w}%` }} />
+))
 type LoadError = 'not-found' | 'unreachable' | null
 
 async function fetchSession(id: string): Promise<Session | 'not-found' | 'unreachable'> {
-  try {
-    const { data, response } = await api.GET('/api/sessions/{session_id}', {
-      params: { path: { session_id: id } },
-    })
-    return data ?? (response.status === 404 ? 'not-found' : 'unreachable')
-  } catch {
-    return 'unreachable'
-  }
+  const { data, status } = await act(api.GET('/api/sessions/{session_id}', { params: { path: { session_id: id } } }))
+  return data ?? (status === 404 ? 'not-found' : 'unreachable')
 }
 
-/** Route entry: a fresh page per session id, so no state leaks between sessions. */
 export function SessionPage() {
   const { id } = useParams<{ id: string }>()
   return id ? <SessionView key={id} id={id} /> : null
@@ -66,14 +64,12 @@ function SessionView({ id }: { id: string }) {
   const [busy, setBusy] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [renaming, setRenaming] = useState(false)
-  const [detailsOpen, setDetailsOpen] = useState(false) // below 1120px, where the rail folds away
+  const [detailsOpen, setDetailsOpen] = useState(false)
   const [editing, setEditing] = useState(false)
-  // Dropping the user's edits: "Restore generated notes", or "Use the new notes" after a re-run.
   const [confirmDrop, setConfirmDrop] = useState<'restore' | 'use-new' | null>(null)
 
   const [reload, setReload] = useState(0)
 
-  // The stored session follows status changes and errors.
   useEffect(() => {
     let live = true
     void fetchSession(id).then((result) => {
@@ -89,12 +85,9 @@ function SessionView({ id }: { id: string }) {
     }
   }, [id, run.status, run.failure, reload])
 
-  // Only the finished notes are shown, so notes and transcript are fetched once the session is
-  // done. Leaving done (a re-run) drops them: the old run's notes are never shown meanwhile.
   const done = (run.status ?? session?.status) === 'done'
   const [wasDone, setWasDone] = useState(done)
   if (done !== wasDone) {
-    // Reset while rendering (not in an effect), so stale notes never reach the screen.
     setWasDone(done)
     if (!done) {
       setNotes(null)
@@ -117,7 +110,6 @@ function SessionView({ id }: { id: string }) {
     }
   }, [id, done, reload])
 
-  // Cost: fetched when a step or the session finishes, not on every event.
   const status = run.status ?? session?.status
   const usage = useSessionUsage(id, usageRefreshKey(run, status))
   const cost = usage && status ? usageCost(usage, status) : null
@@ -144,9 +136,7 @@ function SessionView({ id }: { id: string }) {
       }),
     )
     setBusy(false)
-    if (!result.ok) {
-      setActionError(result.status === 409 ? 'This session is already processing.' : UNREACHABLE)
-    }
+    if (!result.ok) setActionError(actionFailure(result.status, "Couldn't restart this session. It may already be processing."))
     setReload((n) => n + 1)
   }
 
@@ -157,7 +147,7 @@ function SessionView({ id }: { id: string }) {
     setBusy(false)
     if (!result.ok) {
       const what = ui?.kind === 'stopped' ? "Couldn't make notes from the recording." : "Couldn't finish the recording."
-      setActionError(result.status === 0 ? UNREACHABLE : `${what} It may already be processing.`)
+      setActionError(actionFailure(result.status, `${what} It may already be processing.`))
     }
     setReload((n) => n + 1)
   }
@@ -168,7 +158,7 @@ function SessionView({ id }: { id: string }) {
     setBusy(false)
     setConfirmDelete(false)
     if (result.ok) navigate('/')
-    else setActionError(result.status === 0 ? UNREACHABLE : "Couldn't delete this session. It may be processing.")
+    else setActionError(actionFailure(result.status, "Couldn't delete this session. It may be processing."))
   }
 
   async function dropEdits() {
@@ -177,34 +167,32 @@ function SessionView({ id }: { id: string }) {
     const result = await act(api.DELETE('/api/sessions/{session_id}/notes/edits', { params: { path: { session_id: id } } }))
     setBusy(false)
     setConfirmDrop(null)
-    if (!result.ok) setActionError(result.status === 0 ? UNREACHABLE : NOTES_EDIT.restoreFailed)
+    if (!result.ok) setActionError(actionFailure(result.status, NOTES_EDIT.restoreFailed))
     setReload((n) => n + 1)
   }
 
-  /** After a re-run: keep the edited version, now based on the new notes. */
   async function keepEdits() {
     if (!notes) return
     setBusy(true)
     setActionError(null)
-    try {
-      const { data, response } = await api.PUT('/api/sessions/{session_id}/notes/edits', {
+    const { data, status } = await act(
+      api.PUT('/api/sessions/{session_id}/notes/edits', {
         params: { path: { session_id: id } },
         body: { markdown: notes.markdown, based_on: notes.generated_hash ?? '' },
-      })
-      if (data) setNotes(data)
-      else {
-        setActionError(
-          response.status === 409
+      }),
+    )
+    setBusy(false)
+    if (data) setNotes(data)
+    else {
+      setActionError(
+        status === 0
+          ? UNREACHABLE
+          : status === 409
             ? NOTES_EDIT.saveWhileProcessing
-            : response.status === 422
+            : status === 422
               ? NOTES_EDIT.keepInvalid
               : NOTES_EDIT.keepFailed,
-        )
-      }
-    } catch {
-      setActionError(UNREACHABLE)
-    } finally {
-      setBusy(false)
+      )
     }
   }
 
@@ -231,39 +219,18 @@ function SessionView({ id }: { id: string }) {
   }
 
   if (loadError === 'not-found') {
-    return (
-      <div className="page error-panel">
-        <h2>This session doesn't exist</h2>
-        <p>It may have been deleted.</p>
-        <Link className="btn" to="/">
-          Back to the library
-        </Link>
-      </div>
-    )
+    return <ErrorPanel page title="This session doesn't exist" detail="It may have been deleted." />
   }
   if (!session || !ui) {
-    if (loadError === 'unreachable') {
-      return (
-        <div className="page error-panel" role="alert">
-          <h2>{UNREACHABLE}</h2>
-          <button type="button" className="btn" onClick={() => setReload((n) => n + 1)}>
-            <Icon name="retry" /> Retry
-          </button>
-        </div>
-      )
-    }
+    if (loadError === 'unreachable') return <ErrorPanel page onRetry={() => setReload((n) => n + 1)} />
     return (
       <div className="session" aria-busy="true" aria-label="Loading session">
-        <div className="skeleton sk-line" style={{ width: 120 }} />
-        <div className="skeleton" style={{ height: 28, width: '40%', margin: '12px 0' }} />
+        <div className="skeleton sk-line" style={{ width: '7.5rem' }} />
+        <div className="skeleton" style={{ height: '1.75rem', width: '40%', margin: '0.75rem 0' }} />
         <div className="skeleton sk-line" style={{ width: '25%' }} />
         <div className="session-body">
-          <div>
-            {[90, 100, 95, 60, 100, 85].map((w, i) => (
-              <div key={i} className="skeleton sk-line" style={{ width: `${w}%` }} />
-            ))}
-          </div>
-          <div className="skeleton" style={{ height: 260 }} />
+          <div>{notesSkeleton}</div>
+          <div className="skeleton" style={{ height: '16.25rem' }} />
         </div>
       </div>
     )
@@ -275,10 +242,8 @@ function SessionView({ id }: { id: string }) {
   const fromLabel = ui.fromStage ? STAGE_LABELS[ui.fromStage] : 'the start'
   const failure = ui.kind === 'failed' ? failureView(session, run) : null
   const again = againLink(session.source)
-  // Once the notes are shown in tabs, Details sits beside them below 1120px instead of in a bar.
   const tabsShown = !progress && !(editing && notes)
   const toggleDetails = () => setDetailsOpen((open) => !open)
-  // One set of details, shown in the rail or (below 1120px, with tabs) under the tabs row.
   const runDetails: RunDetailsProps = {
     run,
     finished,
@@ -312,7 +277,6 @@ function SessionView({ id }: { id: string }) {
           ) : (
             <>
               <div className="title-line">
-                {/* The title is the control; the pencil gives keyboard users the same. */}
                 <h1 className="title-text" onClick={() => setRenaming(true)}>
                   {shownTitle(session.title)}
                 </h1>
@@ -330,8 +294,6 @@ function SessionView({ id }: { id: string }) {
                 {sessionMetaLine(session, notes?.session_type, length).map((part, i) => (
                   <span key={i} className="num">{part}</span>
                 ))}
-                {/* Below 860px the status moves here from the actions (index.css), so the buttons
-                    keep a line of their own; only one of the two is ever shown. */}
                 <span className="meta-status">
                   <StatusChip state={ui} />
                 </span>
@@ -399,65 +361,36 @@ function SessionView({ id }: { id: string }) {
 
       <div className="session-body">
         <div>
-          {actionError && (
-            <div className="banner banner-error" role="alert">
-              <Icon name="alert" />
-              <div className="banner-body">
-                <p>{actionError}</p>
-              </div>
-            </div>
-          )}
+          {actionError && <Banner tone="error">{actionError}</Banner>}
           {failure && (
-            <div className="banner banner-error" role="alert">
-              <Icon name="alert" />
-              <div className="banner-body">
-                <p>
-                  <strong>{failure.headline}.</strong> {failure.message}
-                </p>
-                {failure.kind === 'general' && <p>Try again resumes from {fromLabel}.</p>}
-              </div>
-            </div>
+            <Banner tone="error" details={failure.kind === 'general' && <p>Try again resumes from {fromLabel}.</p>}>
+              <strong>{failure.headline}.</strong> {failure.message}
+            </Banner>
           )}
           {ui.kind === 'stalled' && (
-            <div className="banner banner-warning" role="status">
-              <Icon name="alert" />
-              <div className="banner-body">
-                <p>
-                  <strong>Processing stopped unexpectedly.</strong> Iris probably restarted while this
-                  session was running. Resume picks up from {fromLabel} and reuses finished steps.
-                </p>
-              </div>
-            </div>
+            <Banner tone="warning">
+              <strong>Processing stopped unexpectedly.</strong> Iris probably restarted while this
+              session was running. Resume picks up from {fromLabel} and reuses finished steps.
+            </Banner>
           )}
           {ui.kind === 'recording-orphan' && (
-            <div className="banner banner-info" role="status">
-              <Icon name="record" />
-              <div className="banner-body">
-                <p>
-                  <strong>This live session was never stopped.</strong> If it's still recording in
-                  another tab, stop it there. Otherwise, finish it here to make notes from what was
-                  captured.
-                </p>
-              </div>
-            </div>
+            <Banner tone="info" icon="record">
+              <strong>This live session was never stopped.</strong> If it's still recording in
+              another tab, stop it there. Otherwise, finish it here to make notes from what was
+              captured.
+            </Banner>
           )}
           {ui.kind === 'stopped' && (
-            <div className="banner banner-info" role="status">
-              <Icon name="record" />
-              <div className="banner-body">
-                <p>
-                  <strong>This recording was stopped before notes were made.</strong> What was recorded is
-                  kept. Make notes from it, or delete it.
-                </p>
-              </div>
-            </div>
+            <Banner tone="info" icon="record">
+              <strong>This recording was stopped before notes were made.</strong> What was recorded is
+              kept. Make notes from it, or delete it.
+            </Banner>
           )}
 
           {notes?.edited?.stale && finished && !editing && (
-            <div className="banner banner-warning" role="status">
-              <Icon name="alert" />
-              <div className="banner-body">
-                <p>{NOTES_EDIT.stale}</p>
+            <Banner
+              tone="warning"
+              details={
                 <div className="banner-actions">
                   <button type="button" className="btn btn-sm" onClick={() => setConfirmDrop('use-new')} disabled={busy}>
                     {NOTES_EDIT.useNew}
@@ -466,8 +399,10 @@ function SessionView({ id }: { id: string }) {
                     {NOTES_EDIT.keep}
                   </button>
                 </div>
-              </div>
-            </div>
+              }
+            >
+              {NOTES_EDIT.stale}
+            </Banner>
           )}
 
           {progress ? (
@@ -502,8 +437,6 @@ function SessionView({ id }: { id: string }) {
                     aria-controls="session-details"
                     onClick={toggleDetails}
                   >
-                    {/* The same word open or closed (aria-expanded says which), so the row's width
-                        never changes on a phone. */}
                     {detailsLabel(false)}
                   </button>
                 }
@@ -513,8 +446,6 @@ function SessionView({ id }: { id: string }) {
                   { id: 'figures', label: 'Figures', count: figures.length ? String(figures.length) : undefined },
                 ]}
               />
-              {/* Opened by Details beside the tabs: just below it, so the button stays where it was
-                  pressed (index.css shows this below 1120px only; the rail shows it above). */}
               <div className="tabs-details-panel" id="session-details" hidden={!detailsOpen}>
                 <RunDetails {...runDetails} />
               </div>
@@ -536,11 +467,7 @@ function SessionView({ id }: { id: string }) {
                     <p>Reload the page to try again.</p>
                   </div>
                 ) : (
-                  <div aria-busy="true" aria-label="Loading notes">
-                    {[90, 100, 95, 60, 100, 85].map((w, i) => (
-                      <div key={i} className="skeleton sk-line" style={{ width: `${w}%` }} />
-                    ))}
-                  </div>
+                  <div aria-busy="true" aria-label="Loading notes">{notesSkeleton}</div>
                 )}
               </TabPanel>
 
@@ -583,9 +510,9 @@ function SessionView({ id }: { id: string }) {
       />
       <ConfirmDialog
         open={confirmDelete}
-        title={`Delete "${session.title}"?`}
-        body="This removes the recording, transcript, figures and notes from this computer. It can't be undone."
-        confirm="Delete session"
+        title={DELETE_SESSION.title(session.title)}
+        body={DELETE_SESSION.body}
+        confirm={DELETE_SESSION.confirm}
         danger
         busy={busy}
         onConfirm={() => void deleteSession()}
@@ -596,10 +523,6 @@ function SessionView({ id }: { id: string }) {
   )
 }
 
-/**
- * Until the notes are finished, the main column shows where processing is instead of any notes:
- * the state, the current step, every step, and how long the run has taken. The step list keeps one row per step, so nothing moves as steps advance.
- */
 function ProgressView({ view, session, run, stream }: {
   view: { heading: string; active: boolean }
   session: Session

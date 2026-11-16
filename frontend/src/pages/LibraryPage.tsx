@@ -1,32 +1,29 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api, type Session } from '../api/client'
+import { Banner } from '../components/Banner'
 import { ConfirmDialog } from '../components/ConfirmDialog'
-import { CostText } from '../components/CostText'
+import { ErrorPanel } from '../components/ErrorPanel'
+import { CostText } from '../session/CostText'
 import { Icon } from '../components/Icon'
-import { NoKeyBanner } from '../components/NoKeyBanner'
-import { StatusChip } from '../components/StatusChip'
+import { NoKeyBanner } from '../settings/NoKeyBanner'
+import { StatusChip } from '../session/StatusChip'
 import { sessionCost } from '../session/cost'
-import { formatWhen, shownTitle, SOURCE_LABEL } from '../session/format'
-import { PDF_FAILED, UNREACHABLE } from '../session/messages'
-import { act } from '../session/request'
+import { formatWhen, shownTitle, SOURCE_LABEL } from '../lib/format'
+import { actionFailure, DELETE_SESSION, PDF_FAILED } from '../lib/messages'
+import { act } from '../api/request'
 import { emptyRun, failureView, libraryState } from '../session/state'
-import { usePdfExport } from '../session/usePdfExport'
-import { useTitle } from '../session/useTitle'
-import { useApiKeySet } from '../settings/useApiKeySet'
+import { usePdfExport } from '../notes/usePdfExport'
+import { useTitle } from '../hooks/useTitle'
+import { useSettings } from '../settings/useSettings'
 
-/** While anything is processing, refresh this often so status chips stay current. */
 const REFRESH_MS = 4000
 
 type Load = { kind: 'loading' } | { kind: 'error' } | { kind: 'ready'; sessions: Session[] }
 
 async function fetchSessions(): Promise<Load> {
-  try {
-    const { data, error } = await api.GET('/api/sessions')
-    return error || !data ? { kind: 'error' } : { kind: 'ready', sessions: data }
-  } catch {
-    return { kind: 'error' }
-  }
+  const { data } = await act(api.GET('/api/sessions'))
+  return data ? { kind: 'ready', sessions: data } : { kind: 'error' }
 }
 
 export function LibraryPage() {
@@ -35,7 +32,7 @@ export function LibraryPage() {
   const [pendingDelete, setPendingDelete] = useState<Session | null>(null)
   const [busy, setBusy] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
-  const apiKey = useApiKeySet()
+  const settings = useSettings(true)
 
   const pdf = usePdfExport()
   async function exportPdf(s: Session) {
@@ -69,19 +66,14 @@ export function LibraryPage() {
         params: { path: { session_id: s.id }, query: from ? { from_stage: from } : {} },
       }),
     )
-    if (!result.ok) {
-      setActionError(result.status === 0 ? UNREACHABLE : `Couldn't restart "${s.title}". It may already be processing.`)
-    }
+    if (!result.ok) setActionError(actionFailure(result.status, `Couldn't restart "${s.title}". It may already be processing.`))
     refresh()
   }
 
-  /** A stopped recording: make its notes now (the row then shows them being made). */
   async function makeNotes(s: Session) {
     setActionError(null)
     const result = await act(api.POST('/api/live/{session_id}/end', { params: { path: { session_id: s.id } } }))
-    if (!result.ok) {
-      setActionError(result.status === 0 ? UNREACHABLE : `Couldn't make notes for "${s.title}". It may already be processing.`)
-    }
+    if (!result.ok) setActionError(actionFailure(result.status, `Couldn't make notes for "${s.title}". It may already be processing.`))
     refresh()
   }
 
@@ -92,9 +84,7 @@ export function LibraryPage() {
       api.DELETE('/api/sessions/{session_id}', { params: { path: { session_id: pendingDelete.id } } }),
     )
     setBusy(false)
-    if (!result.ok) {
-      setActionError(result.status === 0 ? UNREACHABLE : `Couldn't delete "${pendingDelete.title}". It may be processing.`)
-    }
+    if (!result.ok) setActionError(actionFailure(result.status, `Couldn't delete "${pendingDelete.title}". It may be processing.`))
     setPendingDelete(null)
     refresh()
   }
@@ -107,17 +97,18 @@ export function LibraryPage() {
           <p className="lede">Notes that see what was shown.</p>
         </div>
       </div>
-      {apiKey.set === false && <NoKeyBanner onChanged={apiKey.refresh} />}
+      {settings.load.kind === 'ready' && !settings.load.settings.api_key_set && <NoKeyBanner onChanged={settings.reread} />}
       {actionError && (
-        <div className="banner banner-error" role="alert">
-          <Icon name="alert" />
-          <div className="banner-body">
-            <p>{actionError}</p>
-          </div>
-          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setActionError(null)} aria-label="Dismiss">
-            <Icon name="x" />
-          </button>
-        </div>
+        <Banner
+          tone="error"
+          end={
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setActionError(null)} aria-label="Dismiss">
+              <Icon name="x" />
+            </button>
+          }
+        >
+          {actionError}
+        </Banner>
       )}
 
       {load.kind === 'loading' && (
@@ -125,7 +116,6 @@ export function LibraryPage() {
           {Array.from({ length: 5 }, (_, i) => (
             <div className="library-row" key={i}>
               <div className="skeleton sk-line" style={{ width: `${60 - i * 6}%` }} />
-              {/* Rem, not %: these columns are as wide as what they hold, and a bar holds nothing. */}
               <div className="skeleton sk-line" style={{ width: '6rem' }} />
               <div className="skeleton sk-line meta" style={{ width: '7rem' }} />
               <div className="skeleton sk-line meta" style={{ width: '3rem', marginLeft: 'auto' }} />
@@ -135,14 +125,7 @@ export function LibraryPage() {
         </div>
       )}
 
-      {load.kind === 'error' && (
-        <div className="error-panel" role="alert">
-          <h2>{UNREACHABLE}</h2>
-          <button type="button" className="btn" onClick={refresh}>
-            <Icon name="retry" /> Retry
-          </button>
-        </div>
-      )}
+      {load.kind === 'error' && <ErrorPanel onRetry={refresh} />}
 
       {load.kind === 'ready' && load.sessions.length === 0 && (
         <div className="empty">
@@ -190,8 +173,6 @@ export function LibraryPage() {
                   <Link to={`/sessions/${s.id}`} className="title-link">
                     {shownTitle(s.title)}
                   </Link>
-                  {/* In a narrow window the status, date and cost columns fold into this line
-                      (index.css); the copies here are hidden otherwise, so each is read once. */}
                   <div className="row-sub">
                     <span className="row-status">
                       <StatusChip state={state} />
@@ -234,7 +215,6 @@ export function LibraryPage() {
                       <Icon name="file" /> <span className="btn-label">Make notes</span>
                     </button>
                   )}
-                  {/* A problem with the recording itself isn't fixed by trying again. */}
                   {state.kind === 'failed' && failureView(s, emptyRun()).kind === 'general' && (
                     <button type="button" className="btn btn-sm" onClick={() => void retry(s)} aria-label="Try again">
                       <Icon name="retry" /> <span className="btn-label">Try again</span>
@@ -260,9 +240,9 @@ export function LibraryPage() {
 
       <ConfirmDialog
         open={pendingDelete !== null}
-        title={`Delete "${pendingDelete?.title ?? ''}"?`}
-        body="This removes the recording, transcript, figures and notes from this computer. It can't be undone."
-        confirm="Delete session"
+        title={DELETE_SESSION.title(pendingDelete?.title ?? '')}
+        body={DELETE_SESSION.body}
+        confirm={DELETE_SESSION.confirm}
         danger
         busy={busy}
         onConfirm={() => void confirmDelete()}

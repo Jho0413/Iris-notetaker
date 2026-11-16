@@ -5,12 +5,9 @@ import { connectSessionStream, type StreamStatus } from './stream'
 export type { StreamStatus } from './stream'
 
 export interface SessionStream {
-  /** Progress so far, with each event applied once as it arrives (not re-reduced per event). */
   run: RunState
-  /** How many distinct events have arrived (0 after a backend restart: no history). */
   eventCount: number
   status: StreamStatus
-  /** The latest connection attempt delivered nothing for a while: no run is active. */
   quiet: boolean
 }
 
@@ -20,7 +17,6 @@ interface State extends SessionStream {
 
 const initial: State = { run: emptyRun(), eventCount: 0, status: 'connecting', quiet: false }
 
-/** Subscribe to a session's progress events (see ./stream for replay and reconnect handling). */
 export function useSessionStream(sessionId: string | undefined): SessionStream {
   const [state, setState] = useState<State>(initial)
 

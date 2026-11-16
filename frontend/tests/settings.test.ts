@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import type { AppSettings } from '../src/api/client.ts'
 import {
+  afterSettingsRead,
   AUTO,
-  asksBeforeLeaving,
   BROWSER_KEY_NOTE,
   KEY_ACTION_FAILED,
   keyChanged,
@@ -58,16 +59,10 @@ test('the saved confirmation reads naturally for a language and for detection', 
 
 test('a change is pending only when it differs from what is saved', () => {
   assert.equal(pendingLanguage(null, 'en'), null)
-  assert.equal(pendingLanguage('en', 'en'), null) // changed back: nothing to save
+  assert.equal(pendingLanguage('en', 'en'), null)
   assert.equal(pendingLanguage('fr', 'en'), 'fr')
   assert.equal(pendingLanguage(AUTO, 'en'), AUTO)
-  assert.equal(pendingLanguage('fr', undefined), null) // settings not loaded
-})
-
-test('leaving asks only with a pending change and only for another page', () => {
-  assert.equal(asksBeforeLeaving('fr', '/settings', '/'), true)
-  assert.equal(asksBeforeLeaving('fr', '/settings', '/settings'), false) // same page (e.g. a hash)
-  assert.equal(asksBeforeLeaving(null, '/settings', '/'), false)
+  assert.equal(pendingLanguage('fr', undefined), null)
 })
 
 test('the no-key warning fits where Iris runs', () => {
@@ -76,7 +71,7 @@ test('the no-key warning fits where Iris runs', () => {
   assert.equal(app.title, 'No OpenAI API key is set.')
   assert.equal(browser.title, app.title)
   assert.match(app.detail, /can’t make notes until you add one/)
-  assert.doesNotMatch(app.detail, /\.env|make dev/) // app users never see developer files
+  assert.doesNotMatch(app.detail, /\.env|make dev/)
   assert.match(browser.detail, /OPENAI_API_KEY.*backend\/\.env.*make dev/)
 })
 
@@ -88,4 +83,32 @@ test('key changes are confirmed in words', () => {
 
 test('the browser key note says where the key comes from', () => {
   assert.match(BROWSER_KEY_NOTE, /OPENAI_API_KEY.*backend\/\.env.*make dev/)
+})
+
+const read = { api_key_set: true } as AppSettings
+const ready = { kind: 'ready', settings: read } as const
+
+test('a read settles what is shown and starts the retries over', () => {
+  assert.deepEqual(afterSettingsRead(read, { kind: 'loading' }, false, 3), { next: ready, retries: 0, retry: false })
+})
+
+test('a failed read while settings are shown keeps them and tries again', () => {
+  assert.deepEqual(afterSettingsRead(undefined, ready, false, 0), { next: null, retries: 1, retry: true })
+})
+
+test('a failed read while settings are shown stops trying after five tries', () => {
+  assert.deepEqual(afterSettingsRead(undefined, ready, false, 5), { next: null, retries: 5, retry: false })
+})
+
+test('a failed first read where it is retried keeps waiting and tries again', () => {
+  assert.deepEqual(afterSettingsRead(undefined, { kind: 'loading' }, true, 0), { next: null, retries: 1, retry: true })
+})
+
+test('a failed first read where it is retried stops trying after five tries', () => {
+  assert.deepEqual(afterSettingsRead(undefined, { kind: 'loading' }, true, 5), { next: null, retries: 5, retry: false })
+})
+
+test('a failed first read where it is not retried shows the error at once', () => {
+  assert.deepEqual(afterSettingsRead(undefined, { kind: 'loading' }, false, 0), { next: { kind: 'error' }, retries: 0, retry: false })
+  assert.deepEqual(afterSettingsRead(undefined, { kind: 'error' }, false, 0), { next: { kind: 'error' }, retries: 0, retry: false })
 })

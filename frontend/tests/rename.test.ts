@@ -18,7 +18,7 @@ test('a name never goes past the engine’s limit, and never splits a character'
   const cut = nameToSave('x'.repeat(TITLE_MAX_CHARS - 1) + '🎉🎉', 'Old') ?? ''
   assert.equal(Array.from(cut).length, TITLE_MAX_CHARS)
   assert.ok(cut.endsWith('🎉'))
-  assert.doesNotThrow(() => encodeURIComponent(cut)) // no lone half of an emoji
+  assert.doesNotThrow(() => encodeURIComponent(cut))
 })
 
 test('a failed rename is said in Iris’s own words', () => {

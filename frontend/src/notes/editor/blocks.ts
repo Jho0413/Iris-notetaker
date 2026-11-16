@@ -1,12 +1,8 @@
-// What the editor's toolbar does to blocks, as pure functions of the editor state. Each returns
-// one transaction, so one Undo puts a change back. A block is addressed by its position (the
-// position just before it): a child of the document or of a box or step, never a title.
 import type { Node as PMNode, NodeType, Schema } from '@tiptap/pm/model'
 import { NodeSelection, type EditorState, type Selection, type Transaction } from '@tiptap/pm/state'
 import type { Colour } from '../format.ts'
 import { DEFAULT_COLOUR, type Container } from './extensions.ts'
 
-/** What a block is, in the user's words (the toolbar's type button and the drag label). */
 export const KIND_LABELS = {
   text: 'Text',
   heading: 'Heading',
@@ -22,10 +18,8 @@ export const KIND_LABELS = {
   divider: 'Divider',
 } as const
 export type Kind = keyof typeof KIND_LABELS
-/** What "Turn into" offers. */
 export const TURN_INTO = ['text', 'heading', 'box', 'step'] as const
 export type TurnInto = (typeof TURN_INTO)[number]
-/** What "Add below" offers, besides the session's figures. */
 export const ADDABLE = ['text', 'heading', 'box', 'step', 'maths'] as const
 export type Addable = (typeof ADDABLE)[number]
 
@@ -53,13 +47,10 @@ const holdsBlocks = (node: PMNode) => node.type.name === 'doc' || isContainer(no
 export interface Block {
   pos: number
   node: PMNode
-  /** Boxes and steps around it: 0 at the top level. */
   depth: number
-  /** The box or step it is in, or null at the top level. */
   parent: number | null
 }
 
-/** The block at `pos`, or null when nothing a toolbar acts on starts there. */
 export function blockAt(doc: PMNode, pos: number): Block | null {
   if (pos < 0 || pos >= doc.content.size) return null
   const node = doc.nodeAt(pos)
@@ -70,7 +61,6 @@ export function blockAt(doc: PMNode, pos: number): Block | null {
   return { pos, node, depth: parents.length, parent: parents[0] ?? null }
 }
 
-/** The innermost block holding the selection: in a title, the box or step itself. */
 export function blockOfSelection(selection: Selection): number | null {
   if (selection instanceof NodeSelection && holdsBlocks(selection.$from.parent)) return selection.from
   const $from = selection.$from
@@ -81,23 +71,19 @@ export function blockOfSelection(selection: Selection): number | null {
   return null
 }
 
-/** True when `inner` is `outer` or inside it. */
 export function within(doc: PMNode, inner: number, outer: number): boolean {
   const node = doc.nodeAt(outer)
   return !!node && inner >= outer && inner < outer + node.nodeSize
 }
 
-const MAX_DEPTH = 1 // a box inside a step or box, never deeper
+const MAX_DEPTH = 1
 
-/** Turn-into choices for a block. Steps stay at the top level, and nothing goes a level deeper
- *  than blocks may. */
 export function turnIntoChoices(block: Block): TurnInto[] {
   const kind = kindOf(block.node)
   return TURN_INTO.filter((k) => {
     if (k === kind) return false
     if ((k === 'text' || k === 'heading') && !['text', 'heading', 'box', 'step'].includes(kind)) return false
     if (k === 'step' && block.depth > 0) return false
-    // Wrapping makes a box at the block's own depth.
     if ((k === 'box' || k === 'step') && !isContainer(block.node) && block.depth > MAX_DEPTH) return false
     return true
   })
@@ -117,7 +103,6 @@ const children = (node: PMNode) => {
   return out
 }
 
-/** Turn a block into text, a heading, a box or a step, keeping what it holds. */
 export function turnInto(state: EditorState, pos: number, kind: TurnInto): Transaction | null {
   const block = blockAt(state.doc, pos)
   if (!block || !turnIntoChoices(block).includes(kind)) return null
@@ -132,7 +117,6 @@ export function turnInto(state: EditorState, pos: number, kind: TurnInto): Trans
   if (kind === 'text' || kind === 'heading') {
     const [type, attrs] = textType[kind]
     if (!isContainer(node)) return tr.setNodeMarkup(pos, type, attrs)
-    // A box or step becomes its title (as text or a heading) with its blocks after it.
     const [title, ...body] = children(node)
     const head = title.content.size || kind === 'heading' ? [type.create(attrs, title.content)] : []
     return tr.replaceWith(pos, end, [...head, ...body])
@@ -140,7 +124,6 @@ export function turnInto(state: EditorState, pos: number, kind: TurnInto): Trans
   if (isContainer(node)) {
     return tr.setNodeMarkup(pos, schema.nodes[kind], { color: node.attrs.color })
   }
-  // Wrap: a heading becomes the title; text and anything else becomes the content.
   const wrapped = node.type.name === 'heading'
     ? container(schema, kind, DEFAULT_COLOUR[kind], [...node.content.content], [])
     : container(schema, kind, DEFAULT_COLOUR[kind], [], [node])
@@ -153,8 +136,6 @@ export function setColour(state: EditorState, pos: number, colour: Colour): Tran
   return state.tr.setNodeMarkup(pos, undefined, { ...block.node.attrs, color: colour })
 }
 
-/** Where a block can go: inside `parent` (null: the top level) before its child number `index`
- *  (a box or step's title is child 0, so its blocks start at 1). */
 export interface Target {
   parent: number | null
   index: number
@@ -167,8 +148,6 @@ function childPos(doc: PMNode, target: Target): number {
   return pos
 }
 
-/** True when `node` may be placed at `target`: steps only at the top level, one level deep at
- *  most, and never inside itself. */
 export function canLand(doc: PMNode, pos: number, target: Target): boolean {
   const node = doc.nodeAt(pos)
   if (!node) return false
@@ -185,30 +164,27 @@ export function canLand(doc: PMNode, pos: number, target: Target): boolean {
   return !nested
 }
 
-/** Move a block to `target` in one step. Returns the transaction and the block's new position. */
 export function moveTo(state: EditorState, pos: number, target: Target): { tr: Transaction; pos: number } | null {
   const node = state.doc.nodeAt(pos)
   if (!node || !canLand(state.doc, pos, target)) return null
   const at = childPos(state.doc, target)
-  if (at === pos || at === pos + node.nodeSize) return null // where it already is
+  if (at === pos || at === pos + node.nodeSize) return null
   const tr = state.tr.delete(pos, pos + node.nodeSize)
   const insert = tr.mapping.map(at, -1)
   tr.insert(insert, node)
   return { tr, pos: insert }
 }
 
-/** Index of the block at `pos` among its parent's children. */
 function indexIn(doc: PMNode, pos: number): number {
   return doc.resolve(pos).index()
 }
 
-/** Move a block one place up or down; at the edge of a box or step it steps out of it. */
 export function moveBy(state: EditorState, pos: number, dir: -1 | 1): { tr: Transaction; pos: number } | null {
   const block = blockAt(state.doc, pos)
   if (!block) return null
   const parentNode = block.parent === null ? state.doc : state.doc.nodeAt(block.parent)!
   const index = indexIn(state.doc, pos)
-  const first = block.parent === null ? 0 : 1 // never above a title
+  const first = block.parent === null ? 0 : 1
   const next = index + dir
   if (next < first || next >= parentNode.childCount) {
     if (block.parent === null) return null
@@ -216,12 +192,9 @@ export function moveBy(state: EditorState, pos: number, dir: -1 | 1): { tr: Tran
     const at = indexIn(state.doc, outer.pos) + (dir > 0 ? 1 : 0)
     return moveTo(state, pos, { parent: outer.parent, index: at })
   }
-  // Swap with the neighbour: land after it going down, before it going up.
   return moveTo(state, pos, { parent: block.parent, index: dir > 0 ? next + 1 : next })
 }
 
-/** Add a block below `pos`. A step added inside a box or step goes after the top-level block
- *  around it; a box goes no deeper than blocks may. */
 export function addBelow(
   state: EditorState,
   pos: number,
@@ -248,14 +221,12 @@ export function addBelow(
   return { tr: state.tr.insert(at, node), pos: at }
 }
 
-/** Remove a block; a box or step left empty keeps an empty paragraph. */
 export function remove(state: EditorState, pos: number): Transaction | null {
   const block = blockAt(state.doc, pos)
   if (!block) return null
   return state.tr.delete(pos, pos + block.node.nodeSize)
 }
 
-/** Turn the selected text into maths, its text becoming the LaTeX. */
 export function makeMaths(state: EditorState): Transaction | null {
   const { from, to, $from, $to } = state.selection
   if (from === to || !$from.sameParent($to) || !$from.parent.inlineContent) return null
@@ -264,7 +235,6 @@ export function makeMaths(state: EditorState): Transaction | null {
   return state.tr.replaceSelectionWith(state.schema.nodes.inlineMath.create({ latex }))
 }
 
-/** Every figure id the document places. */
 export function usedFigures(doc: PMNode): Set<string> {
   const ids = new Set<string>()
   doc.descendants((n) => {
@@ -273,8 +243,6 @@ export function usedFigures(doc: PMNode): Set<string> {
   return ids
 }
 
-/** Each step's number on its path, and whether it starts or ends the path (as in the reading
- *  view: steps in a row form one path, anything between two steps ends it). */
 export function stepPaths(doc: PMNode): { pos: number; n: number; first: boolean; last: boolean }[] {
   const out: { pos: number; n: number; first: boolean; last: boolean }[] = []
   const walk = (parent: PMNode, start: number) => {

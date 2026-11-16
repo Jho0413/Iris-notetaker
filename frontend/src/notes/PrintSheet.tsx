@@ -1,9 +1,7 @@
 import { createPortal } from 'react-dom'
 import type { Notes, Session, Transcript } from '../api/client'
-import {
-  emptyRun, figureList, figureMeta, sessionLength, sessionMetaLine, transcriptSegments,
-} from '../session/state'
-import { shownTitle } from '../session/format'
+import { sessionLength, sessionMetaLine, shownTitle } from '../lib/format'
+import { figureMeta, notesFigures } from '../lib/notes'
 import { NotesView } from './NotesView'
 
 export interface Printable {
@@ -12,16 +10,9 @@ export interface Printable {
   transcript: Transcript | null
 }
 
-/**
- * A session's notes as printed (Export PDF): its title, meta line and notes. Rendered only while a
- * PDF is made, at the end of <body> and invisible on screen, so exporting changes nothing the user
- * sees; while it is there, printing shows it alone (index.css, `.print-sheet`).
- */
 export function PrintSheet({ printable }: { printable: Printable }) {
   const { session, notes, transcript } = printable
-  // A finished session: everything shown comes from its notes and transcript, no live run.
-  const run = emptyRun()
-  const length = sessionLength(session, transcriptSegments(run, transcript))
+  const length = sessionLength(session, transcript?.segments ?? [])
   return createPortal(
     <div className="print-sheet" aria-hidden="true">
       <div className="session-head">
@@ -39,7 +30,7 @@ export function PrintSheet({ printable }: { printable: Printable }) {
         title={notes.title}
         markdown={notes.markdown}
         visuals={notes.visuals}
-        figures={figureMeta(figureList(run, notes))}
+        figures={figureMeta(notesFigures(notes))}
         hideTitle={notes.title.trim() === session.title.trim()}
       />
     </div>,

@@ -7,30 +7,19 @@ import remarkMath from 'remark-math'
 import { sessionFileUrl, type Notes } from '../api/client'
 import {
   FORMAT_MESSAGES, parseNotes, withPaths, type BlockNode, type NotesNode, type StepPath,
-} from '../notes/format'
-import { formatClock, type Provenance } from '../session/state'
+} from './format'
+import { formatClock } from '../lib/format'
+import type { FigureMeta, OutlineItem } from '../lib/notes'
 import { ProvenanceBadge } from './FiguresGrid'
-
-export interface FigureMeta {
-  t?: number
-  provenance?: Provenance
-}
-
-export interface OutlineItem {
-  id: string
-  text: string
-}
 
 type Visual = Notes['visuals'][number]
 
 const REMARK = [remarkGfm, remarkMath]
 const REHYPE = [rehypeKatex]
 
-// Figures come only from the session, by id: a Markdown image is never loaded.
 const COMPONENTS: Components = {
   img: () => <span className="blocked">{FORMAT_MESSAGES.outsideImage}</span>,
 }
-// A title is inline Markdown: its paragraph is unwrapped into the block's heading.
 const TITLE_COMPONENTS: Components = { ...COMPONENTS, p: ({ children }) => <>{children}</> }
 
 function Md({ text, title }: { text: string; title?: boolean }) {
@@ -123,18 +112,12 @@ function Nodes({ nodes, ...props }: DrawProps & { nodes: readonly NotesNode[] })
   ))
 }
 
-/**
- * Renders notes (iris notes format: Markdown with boxes, steps and figures by id) without raw HTML.
- * Section headings get ids and are reported for the rail's "On this page" list.
- */
 export function NotesView(props: {
   sessionId: string
   title: string
   markdown: string
   visuals: readonly Visual[]
-  /** Per figure id: when it was shown and how it was produced. */
   figures?: ReadonlyMap<string, FigureMeta>
-  /** Hide the notes' own title when the page heading already says the same. */
   hideTitle?: boolean
   onOutline?: (items: OutlineItem[]) => void
 }) {

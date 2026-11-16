@@ -5,6 +5,7 @@ import {
   costLabel, detailRows, formatCost, sessionCost, stepCosts, usageCost, usageRefreshKey,
 } from '../src/session/cost.ts'
 import { applyEvent, emptyRun, reduceEvents, type RunState } from '../src/session/state.ts'
+import { ev, session as base } from './fixtures.ts'
 
 const exact = (usd: number) => formatCost({ usd, partial: false })
 const partial = (usd: number) => formatCost({ usd, partial: true })
@@ -19,14 +20,14 @@ test('formatCost: two decimals from a cent, "< $0.01" below, thousands grouped',
   assert.equal(exact(0.995), '$1.00')
   assert.equal(exact(1234.5), '$1,234.50')
   assert.equal(exact(1_000_000), '$1,000,000.00')
-  assert.equal(exact(-1), '$0.00') // never negative
+  assert.equal(exact(-1), '$0.00')
 })
 
 test('formatCost: a partial total is a lower bound, rounded down and marked ≥', () => {
   assert.equal(partial(0.894), '≥ $0.89')
-  assert.equal(partial(0.899), '≥ $0.89') // never rounded up past the priced part
-  assert.equal(partial(0.29), '≥ $0.29') // float noise (0.29 * 100 = 28.99…) loses no cent
-  assert.equal(partial(0), '≥ $0.00') // every call unpriced
+  assert.equal(partial(0.899), '≥ $0.89')
+  assert.equal(partial(0.29), '≥ $0.29')
+  assert.equal(partial(0), '≥ $0.00')
   assert.equal(partial(0.004), '≥ $0.00')
   assert.equal(partial(1234.567), '≥ $1,234.56')
 })
@@ -38,24 +39,18 @@ test('costLabel: screen readers hear words, not symbols', () => {
   assert.equal(costLabel({ usd: 0, partial: false }), '$0.00')
 })
 
-const session = (patch: Partial<Session>): Session => ({
-  id: 's1', title: 'Algebra', source: 'upload', status: 'processing', current_stage: null,
-  failure_message: null, failure_kind: null, duration_s: null, created_at: '2026-11-03T12:00:00Z',
-  updated_at: '2026-11-03T12:00:00Z', cost_usd: null, cost_partial: false, ...patch,
-})
+const session = (patch: Partial<Session>): Session => ({ ...base, cost_usd: null, cost_partial: false, ...patch })
 
 test('library row: cost per state', () => {
   const shown = (patch: Partial<Session>) => {
     const cost = sessionCost(session(patch))
     return cost && formatCost(cost)
   }
-  // No model calls: nothing until finished, then $0.00.
   assert.equal(shown({ status: 'created' }), null)
   assert.equal(shown({ status: 'recording' }), null)
   assert.equal(shown({ status: 'processing' }), null)
   assert.equal(shown({ status: 'failed' }), null)
   assert.equal(shown({ status: 'done' }), '$0.00')
-  // With calls: the running total while processing, the total once finished or failed.
   assert.equal(shown({ status: 'processing', cost_usd: 0.3 }), '$0.30')
   assert.equal(shown({ status: 'recording', cost_usd: 0.004 }), '< $0.01')
   assert.equal(shown({ status: 'done', cost_usd: 0.894 }), '$0.89')
@@ -80,7 +75,6 @@ const usage = (by_stage: SessionUsage['by_stage']): SessionUsage => {
       all.reduce((sum, t) => sum + t.unpriced_calls, 0),
     ),
     by_stage,
-    // Model and purpose detail is never shown in the UI.
     by_model: { 'gpt-5.5': totals(9) },
     by_purpose: { figure_check: totals(9) },
   }
@@ -107,13 +101,6 @@ test('step costs: plain labels in pipeline order, no model names, "Other" last',
   assert.ok(!JSON.stringify(steps).includes('gpt'))
 })
 
-let tick = 0
-function ev(type: IrisEvent['type'], data: Record<string, unknown> = {}, seconds?: number): IrisEvent {
-  tick += 1
-  const at = new Date(Date.UTC(2026, 10, 3, 12, 0, seconds ?? tick)).toISOString()
-  return { type, session_id: 's1', data, at }
-}
-
 test('details rows: a step with a time, a cost or both; times from this run only', () => {
   const run = reduceEvents([
     ev('status', { status: 'processing' }, 0),
@@ -128,7 +115,7 @@ test('details rows: a step with a time, a cost or both; times from this run only
     rows.map((r) => [r.label, r.cost && formatCost(r.cost), r.time]),
     [
       ['Transcribing', undefined, '4.0 s'],
-      ['Reading the screen', '$0.20', undefined], // an earlier run's cost; no time this run
+      ['Reading the screen', '$0.20', undefined],
       ['Redrawing figures', '$0.74', '3 min 41 s'],
     ],
   )
@@ -145,9 +132,8 @@ test('usage is refetched when a step or the session finishes, not on every event
   assert.equal(step(ev('stage_started', { stage: 'transcribe' })), false)
   assert.equal(step(ev('transcript_chunk', { chunk: 0, segments: [] })), false)
   assert.equal(step(ev('stage_finished', { stage: 'transcribe' })), true)
-  assert.equal(step(ev('transcript_chunk', { chunk: 0, segments: [] })), false) // replayed
+  assert.equal(step(ev('transcript_chunk', { chunk: 0, segments: [] })), false)
   assert.equal(step(ev('visual_selected', { id: 'v1', caption: 'A' })), false)
   assert.equal(step(ev('status', { status: 'done' })), true)
-  // Without events (after a backend restart) the stored status still triggers a refresh.
   assert.notEqual(usageRefreshKey(emptyRun(), 'processing'), usageRefreshKey(emptyRun(), 'done'))
 })

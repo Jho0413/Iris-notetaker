@@ -1,27 +1,13 @@
-// Session view state: progress events reduced into what the session page shows.
-//
-// Pure functions only, so the logic is testable under plain Node (tests/sessionState.test.ts).
-// Imports from the API layer are type-only for the same reason.
-//
-// The event stream replays a session's history on every (re)connect, so applying an event twice
-// must change nothing: everything is keyed (stage name, transcript chunk index, figure id).
-// A `status: processing` event marks the start of a run and clears the previous run's progress.
-// Events older than the current run's start belong to an earlier run and are ignored, so replaying
-// history (all runs, in order) always lands on the latest run.
 import type { IrisEvent, Notes, Session, SessionStatus, Stage, Transcript } from '../api/client'
-import { formatWhen, SOURCE_LABEL } from './format.ts'
+import { formatClock } from '../lib/format.ts'
+import { notesFigures, type FigureState } from '../lib/notes.ts'
 
 export type FailureMessage = NonNullable<Session['failure_message']>
 export type FailureKind = NonNullable<Session['failure_kind']>
 
-/** Shown for every failure that isn't a known input problem, and for anything not on the list. */
 export const GENERIC_FAILURE: FailureMessage =
   "Iris couldn't finish making the notes. Try again; finished steps are kept."
 
-/**
- * The only failure messages shown: the backend's fixed list. Typed from the API schema, so the build fails if the lists drift apart. Any other text is replaced
- * by `GENERIC_FAILURE`, so nothing the backend failed on can reach the page.
- */
 const FAILURE_MESSAGES: Record<FailureMessage, true> = {
   "Iris couldn't finish making the notes. Try again; finished steps are kept.": true,
   "Iris couldn't read this file. Upload an audio or video recording.": true,
@@ -32,14 +18,12 @@ const FAILURE_MESSAGES: Record<FailureMessage, true> = {
   'Iris was closed before these notes were finished. Try again; finished steps are kept.': true,
 }
 
-/** `message` if it is one of ours, else the generic message. */
 export function knownFailureMessage(message: unknown): FailureMessage {
   return typeof message === 'string' && Object.hasOwn(FAILURE_MESSAGES, message)
     ? (message as FailureMessage)
     : GENERIC_FAILURE
 }
 
-/** A known input problem only when the backend says so and its message is one of ours. */
 function knownFailureKind(kind: unknown, message: FailureMessage): FailureKind {
   return kind === 'input' && message !== GENERIC_FAILURE ? 'input' : 'general'
 }
@@ -47,7 +31,6 @@ function knownFailureKind(kind: unknown, message: FailureMessage): FailureKind {
 export interface Failure {
   message: FailureMessage
   kind: FailureKind
-  /** The step it stopped at, if known. */
   stage?: Stage
 }
 
@@ -58,7 +41,6 @@ export const STAGE_ORDER: readonly Stage[] = [
   'ingest', 'transcribe', 'detect', 'align', 'select', 'write', 'render', 'assemble', 'synthesize',
 ]
 
-/** Plain-language step names, used everywhere in the UI, Details included. */
 export const STAGE_LABELS: Record<Stage, string> = {
   ingest: 'Preparing the recording',
   transcribe: 'Transcribing',
@@ -75,50 +57,23 @@ export interface StageRun {
   status: StepStatus
   startedAt?: string
   finishedAt?: string
-  /** Reported as promoted: its live work is being kept at stop instead of running the stage. */
   promoted?: boolean
-  /**
-   * Transcript segments, from a promoted transcribe step's `stage_finished`. Its parts were
-   * transcribed while recording, before this run's counts were reset, so they can't be counted
-   * from `transcript_chunk` events.
-   */
   segments?: number
 }
 
-/** Done while recording: promoted at stop, and the promotion finished. */
 export function doneLive(step: StageRun): boolean {
   return step.promoted === true && step.status === 'done'
 }
 
-export interface FigureState {
-  id: string
-  caption: string
-  /** Seconds into the session where the figure was shown. */
-  t?: number
-  path?: string
-  renderAs?: string
-  verified?: boolean
-  rendered: boolean
-}
-
 export interface RunState {
-  /** Latest `status` event, if any arrived (none after a backend restart). */
   status?: SessionStatus
   stages: Record<Stage, StageRun>
   chunks: Record<number, Segment[]>
   moments: Record<string, { start: number; end: number }>
   figures: Record<string, FigureState>
-  /** Figure ids in the order they were selected. */
   figureOrder: string[]
-  /**
-   * Notes progress from `notes_updated`: sections written (by the write stage, or ahead of stop
-   * by the live draft lane while recording) and whether the notes are assembled (`final`). Only
-   * counts: no notes are shown before the session is done.
-   */
   notes: { final: boolean; completed: number; total: number } | null
-  /** This run's failure, from its `error` event: only our own message and its kind. */
   failure?: Failure
-  /** When the current run started (its `status: processing` event), in ms since the epoch. */
   runStart?: number
 }
 
@@ -158,7 +113,6 @@ function segments(value: unknown): Segment[] {
 function upsertFigure(state: RunState, id: string, patch: Partial<FigureState>): RunState {
   const prev = state.figures[id]
   const next: FigureState = { ...(prev ?? { id, caption: '', rendered: false }), ...patch }
-  // A rendered figure never goes back to "redrawing" when its selection event is replayed.
   if (prev?.rendered) {
     next.rendered = true
     next.path = patch.rendered ? patch.path ?? prev.path : prev.path
@@ -172,7 +126,6 @@ function upsertFigure(state: RunState, id: string, patch: Partial<FigureState>):
 
 export function applyEvent(state: RunState, event: IrisEvent): RunState {
   const data = (event.data ?? {}) as Record<string, unknown>
-  // Parsed, not compared as strings: the backend omits zero microseconds from timestamps.
   const at = Date.parse(event.at)
   const timed = Number.isFinite(at)
   if (timed && state.runStart !== undefined && at < state.runStart) return state
@@ -180,11 +133,9 @@ export function applyEvent(state: RunState, event: IrisEvent): RunState {
     case 'status': {
       const status = str(data.status)
       if (!status || !STATUSES.includes(status)) return state
-      // A new run starts with `processing`. It can follow a run that never finished (the backend
-      // restarted mid-run), so compare timestamps rather than the previous status.
       const newRun = timed
         ? state.runStart === undefined || at > state.runStart
-        : state.status !== 'processing' // unparseable time: fall back to the status change
+        : state.status !== 'processing'
       if (status === 'processing' && newRun) {
         return { ...emptyRun(), status: 'processing', runStart: timed ? at : state.runStart }
       }
@@ -273,7 +224,6 @@ export function applyEvent(state: RunState, event: IrisEvent): RunState {
   }
 }
 
-/** Identity of an event, used to drop the history the backend replays on every reconnect. */
 export function eventKey(event: IrisEvent): string {
   return `${event.type}|${event.at}|${JSON.stringify(event.data ?? {})}`
 }
@@ -282,9 +232,6 @@ export function reduceEvents(events: readonly IrisEvent[]): RunState {
   return events.reduce(applyEvent, emptyRun())
 }
 
-// --- Derived views ------------------------------------------------------------------------------
-
-/** Transcript to show: the full transcript once it exists, otherwise the chunks received so far. */
 export function transcriptSegments(run: RunState, transcript: Transcript | null): Segment[] {
   if (transcript) return transcript.segments
   return Object.keys(run.chunks)
@@ -293,22 +240,8 @@ export function transcriptSegments(run: RunState, transcript: Transcript | null)
     .flatMap((i) => run.chunks[i])
 }
 
-/** Figures in selection order, merging the finished notes (REST) with this run's events. */
 export function figureList(run: RunState, notes: Notes | null): FigureState[] {
-  const out = new Map<string, FigureState>()
-  for (const v of notes?.visuals ?? []) {
-    out.set(v.id, {
-      id: v.id,
-      caption: v.caption,
-      t: v.frame.t,
-      path: v.path,
-      renderAs: v.render_as,
-      // The notes say how each figure was made. Notes from before they did: a redraw only
-      // reaches them after passing its check, and a screenshot may be requested or a fallback.
-      verified: v.verified ?? (v.render_as === 'screenshot' ? undefined : true),
-      rendered: true,
-    })
-  }
+  const out = new Map(notesFigures(notes).map((f) => [f.id, f] as const))
   for (const id of run.figureOrder) {
     const live = run.figures[id]
     const known = out.get(id)
@@ -317,41 +250,6 @@ export function figureList(run: RunState, notes: Notes | null): FigureState[] {
       : live)
   }
   return [...out.values()]
-}
-
-export type Provenance = 'verified' | 'screenshot' | 'unverified'
-
-/**
- * How a figure was produced, when it is known. `unverified` is the
- * original image, shown because no redraw could be used (labelled neutrally, with no reason). In
- * notes from before figures recorded this, a screenshot may be either, so neither is claimed.
- */
-export function provenance(figure: FigureState): Provenance | undefined {
-  if (!figure.rendered || figure.verified === undefined) return undefined
-  if (!figure.verified) return 'unverified'
-  return figure.renderAs === 'screenshot' ? 'screenshot' : 'verified'
-}
-
-/** Per figure id: when it was shown and how it was made (the figure's caption line). */
-export function figureMeta(figures: readonly FigureState[]): Map<string, { t?: number; provenance?: Provenance }> {
-  return new Map(figures.map((f) => [f.id, { t: f.t, provenance: provenance(f) }]))
-}
-
-/** The session's meta line, on its page and in its PDF: type, source, length and when it was made. */
-export function sessionMetaLine(session: Session, sessionType?: string, length?: number): string[] {
-  return [
-    sessionType ? sessionType.charAt(0).toUpperCase() + sessionType.slice(1) : '',
-    SOURCE_LABEL[session.source] ?? session.source,
-    length !== undefined ? formatClock(length) : '',
-    formatWhen(session.created_at),
-  ].filter((part) => part !== '')
-}
-
-/** Session length in seconds, from the transcript (the backend doesn't set `duration_s` yet). */
-export function sessionLength(session: Session, segs: readonly Segment[]): number | undefined {
-  if (session.duration_s) return session.duration_s
-  const end = segs.reduce((max, s) => Math.max(max, s.end), 0)
-  return end > 0 ? end : undefined
 }
 
 export type UiStateKind =
@@ -367,15 +265,11 @@ export type UiStateKind =
 
 export interface UiState {
   kind: UiStateKind
-  /** Short label for the status chip. */
   label: string
-  /** The step a retry or resume starts from. */
   fromStage?: Stage
-  /** While processing: the running step the label names. */
   stage?: Stage
 }
 
-/** Combine the stored status with what the page knows. */
 export function uiState(
   session: Session,
   run: RunState,
@@ -387,7 +281,6 @@ export function uiState(
       return page.capturing
         ? { kind: 'recording', label: 'Recording' }
         : { kind: 'recording-orphan', label: 'Recording not stopped' }
-    // Recording ended without notes (its page went away, or the app quit): make them or delete it.
     case 'stopped':
       return { kind: 'stopped', label: 'Stopped' }
     case 'created':
@@ -410,7 +303,6 @@ export function uiState(
           fromStage: session.current_stage ?? undefined,
         }
       }
-      // Notes are assembled (shown only once done), or the synthesis pass is polishing them.
       const steps = currentSteps(session, run)
       if (run.notes?.final || steps.includes('synthesize')) {
         return { kind: 'polishing', label: STAGE_LABELS.synthesize, stage: 'synthesize' }
@@ -423,35 +315,21 @@ export function uiState(
   }
 }
 
-/**
- * What a screen reader is told when the state changes: the state and the step, never the
- * counts, so advancing counts aren't announced one by one.
- */
 export function announcement(ui: UiState): string {
   if (ui.kind === 'processing') return ui.stage ? `Processing · ${STAGE_LABELS[ui.stage]}` : 'Processing'
   return ui.label
 }
 
-/**
- * The steps running now, in pipeline order (write and render run side by side). Without events
- * for one (after a backend restart, or between two steps) the stored current step stands in.
- */
 export function currentSteps(session: Session, run: RunState): Stage[] {
   const running = STAGE_ORDER.filter((s) => run.stages[s].status === 'running')
   if (running.length) return running
   return session.current_stage ? [session.current_stage] : []
 }
 
-/** A step with its count, e.g. "Redrawing figures · 2 of 3". */
 export function stepLine(stage: Stage, run: RunState): string {
   return [STAGE_LABELS[stage], stageDetail(stage, run)].filter(Boolean).join(' · ')
 }
 
-/**
- * A step's status in the progress list. Without any events (the backend restarted, so its
- * history is gone) it is inferred from the stored session: all done once finished, otherwise
- * the steps before the stored current one.
- */
 export function stepStatus(
   stage: Stage,
   run: RunState,
@@ -466,18 +344,9 @@ export function stepStatus(
 
 export interface ProgressView {
   heading: string
-  /**
-   * The notes are being made: show the current step, how long processing has run and that it's
-   * fine to leave the page. Otherwise (failed, stalled, never finished recording) the page's
-   * banner says what happened and what to do.
-   */
   active: boolean
 }
 
-/**
- * What the session page shows in place of the notes until they're finished. Null once finished:
- * then the notes are shown.
- */
 export function progressView(kind: UiStateKind): ProgressView | null {
   switch (kind) {
     case 'finished':
@@ -498,18 +367,12 @@ export function progressView(kind: UiStateKind): ProgressView | null {
   }
 }
 
-/** Seconds since the current run started, when its start is known. */
 export function runSeconds(run: RunState, now: number): number | undefined {
   return run.runStart === undefined ? undefined : Math.max(0, (now - run.runStart) / 1000)
 }
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
 
-/**
- * The Live page's progress line, e.g. "Transcribed to 4:30 · 3 screens · 2 figures read ·
- * 1 section written", from the recording's events. Only the parts that are non-zero; an empty
- * string until something is processed.
- */
 export function liveProgress(run: RunState): string {
   const to = transcriptSegments(run, null).reduce((max, s) => Math.max(max, s.end), 0)
   const screens = Object.keys(run.moments).length
@@ -525,15 +388,10 @@ export function liveProgress(run: RunState): string {
     .join(' · ')
 }
 
-/** Label for a library row, where only the stored session is known. */
 export function libraryState(session: Session): UiState {
   return uiState(session, emptyRun())
 }
 
-/**
- * Count shown beside a running or finished step, e.g. "3 of 5". A step done while recording
- * (promoted at stop) says so: "4 moments · live".
- */
 export function stageDetail(stage: Stage, run: RunState): string | undefined {
   const count = stageCount(stage, run)
   if (!doneLive(run.stages[stage])) return count
@@ -543,7 +401,6 @@ export function stageDetail(stage: Stage, run: RunState): string | undefined {
 function stageCount(stage: Stage, run: RunState): string | undefined {
   switch (stage) {
     case 'transcribe': {
-      // Promoted at stop: the backend reports the transcript's size (see `StageRun.segments`).
       const segments = run.stages.transcribe.segments
       if (segments !== undefined) {
         return segments ? `${segments} ${segments === 1 ? 'segment' : 'segments'}` : undefined
@@ -571,31 +428,12 @@ function stageCount(stage: Stage, run: RunState): string | undefined {
   }
 }
 
-/** Seconds a step took, when both of its events are known (not for a step done while recording). */
 export function stageSeconds(step: StageRun): number | undefined {
   if (doneLive(step) || !step.startedAt || !step.finishedAt) return undefined
   const ms = Date.parse(step.finishedAt) - Date.parse(step.startedAt)
   return Number.isFinite(ms) && ms >= 0 ? ms / 1000 : undefined
 }
 
-/** "4:05" or "1:02:09". */
-export function formatClock(seconds: number): string {
-  const s = Math.max(0, Math.floor(seconds))
-  const h = Math.floor(s / 3600)
-  const m = Math.floor((s % 3600) / 60)
-  const ss = String(s % 60).padStart(2, '0')
-  return h ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`
-}
-
-/** "0.8 s", "42 s", "3 min 05 s". */
-export function formatDuration(seconds: number): string {
-  if (seconds < 10) return `${seconds.toFixed(1)} s`
-  if (seconds < 60) return `${Math.round(seconds)} s`
-  const m = Math.floor(seconds / 60)
-  return `${m} min ${String(Math.round(seconds % 60)).padStart(2, '0')} s`
-}
-
-/** The step a failed session stopped at: this run's, else the stored one. */
 function failedStage(session: Session, run: RunState): Stage | undefined {
   return (
     run.failure?.stage ??
@@ -605,11 +443,6 @@ function failedStage(session: Session, run: RunState): Stage | undefined {
   )
 }
 
-/**
- * What a failed session shows: only our own message, from the fixed
- * list, and what to do about it. `general`: try again. `input`: the recording itself is the
- * problem, so upload or record another one. The step name is fine to show; nothing else is.
- */
 export function failureView(session: Session, run: RunState): Failure & { headline: string } {
   const message = knownFailureMessage(run.failure?.message ?? session.failure_message)
   const kind = run.failure ? run.failure.kind : knownFailureKind(session.failure_kind, message)

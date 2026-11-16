@@ -3,23 +3,26 @@ import type { Node as PMNode } from '@tiptap/pm/model'
 import { NodeSelection, TextSelection } from '@tiptap/pm/state'
 import type { EditorView } from '@tiptap/pm/view'
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { useBlocker } from 'react-router-dom'
 import { api, type Notes } from '../api/client'
+import { act } from '../api/request'
 import {
   ADDABLE, addBelow, blockAt, blockOfSelection, canLand, isContainer, KIND_LABELS, kindOf, makeMaths, moveBy,
   moveTo, remove, setColour, turnInto, turnIntoChoices, usedFigures, within, type Addable, type Block, type Kind,
   type Target,
-} from '../notes/editor/blocks'
-import { Figure, notesExtensions } from '../notes/editor/extensions'
-import { landingSpots, nearestSpot, type Measured, type Spot } from '../notes/editor/landing'
-import { toDoc, toMarkdown } from '../notes/editor/markdown'
-import { editorPlugins, flashKey, mathWithViews, selectedBlock, selectedBlockKey, type OpenMath } from '../notes/editor/plugins'
-import type { Colour } from '../notes/format'
-import { NOTES_EDIT, saveRefused, UNREACHABLE } from '../session/messages'
-import { ConfirmDialog } from './ConfirmDialog'
+} from './editor/blocks'
+import { Figure, notesExtensions } from './editor/extensions'
+import { landingSpots, nearestSpot, type Measured, type Spot } from './editor/landing'
+import { toDoc, toMarkdown } from './editor/markdown'
+import { editorPlugins, flashKey, mathWithViews, selectedBlock, selectedBlockKey, type OpenMath } from './editor/plugins'
+import type { Colour } from './format'
+import { KEEP_EDITING, NOTES_EDIT, saveRefused, UNREACHABLE } from '../lib/messages'
+import type { FigureMeta } from '../lib/notes'
+import { Banner } from '../components/Banner'
+import { ConfirmDialog, LeaveWithoutSavingDialog } from '../components/ConfirmDialog'
 import { MathEditor, MenuItem, Popover, Swatches } from './EditorMenu'
-import { Icon, type IconName } from './Icon'
-import { FigureView, type FigureMeta } from './NotesView'
+import { Icon, type IconName } from '../components/Icon'
+import { useAskBeforeLeaving } from '../hooks/useAskBeforeLeaving'
+import { FigureView } from './NotesView'
 
 type Visual = Notes['visuals'][number]
 
@@ -30,7 +33,6 @@ interface FigureSource {
 }
 const FigureContext = createContext<FigureSource | null>(null)
 
-// A figure in the editor is drawn exactly as in the reading view.
 function FigureNode({ node }: ReactNodeViewProps) {
   const source = useContext(FigureContext)
   return (
@@ -44,8 +46,6 @@ const KIND_ICONS: Partial<Record<Kind | Addable, IconName>> = {
   text: 'text', heading: 'heading', box: 'box', step: 'stepIcon', maths: 'sigma',
 }
 
-/** The innermost block under a page element: the deepest block whose DOM holds it. A title
- *  belongs to its box or step, so clicking it (or a block's border or padding) picks that block. */
 function blockFromDom(view: EditorView, target: EventTarget | null): number | null {
   if (!(target instanceof Node) || !view.dom.contains(target)) return null
   let parent: PMNode = view.state.doc
@@ -79,11 +79,6 @@ function label(block: Block): string {
 
 type Menu = { kind: 'colour' | 'turn' | 'add'; anchor: HTMLElement } | { kind: 'math'; anchor: HTMLElement; pos: number }
 
-/**
- * The notes, editable in place: same look as the reading view, with a toolbar on the selected
- * block, a formatting bubble on selected text, a formula editor and pointer dragging. Saving
- * writes the user's version beside the generated notes (PUT /notes/edits).
- */
 export function NotesEditor(props: {
   notes: Notes
   figures?: ReadonlyMap<string, FigureMeta>
@@ -97,9 +92,8 @@ export function NotesEditor(props: {
     [notes.session_id, visuals, props.figures],
   )
   const [menu, setMenu] = useState<Menu | null>(null)
-  // setMenu never changes, so the editor (made once) can keep this.
   const openMath: OpenMath = (pos, anchor) => setMenu({ kind: 'math', anchor, pos })
-  const [version, setVersion] = useState(0) // bumped on every transaction: toolbar and status follow
+  const [version, setVersion] = useState(0)
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -120,7 +114,6 @@ export function NotesEditor(props: {
       attributes: { class: 'notes notes-editable', 'aria-label': 'Notes', spellcheck: 'true' },
       handleKeyDown(view, event) {
         const sel = view.state.selection
-        // Enter on a selected formula opens it; Escape moves to the block's toolbar.
         if (event.key === 'Enter' && sel instanceof NodeSelection && /math/i.test(sel.node.type.name)) {
           const dom = view.nodeDOM(sel.from)
           if (dom instanceof HTMLElement) openMath(sel.from, dom)
@@ -143,10 +136,7 @@ export function NotesEditor(props: {
       },
     },
     onTransaction({ editor, transaction }) {
-      // The document as it was opened: what "Unsaved changes" compares with.
       initial.current ??= transaction.before
-      // The selection moving out of the selected block selects the block it moved to (after this
-      // transaction, never inside it).
       if (transaction.selectionSet) {
         queueMicrotask(() => {
           const state = editor.state
@@ -171,41 +161,31 @@ export function NotesEditor(props: {
     [editor],
   )
 
-  // ---- Leaving with unsaved changes asks first (as in Settings), here and in the desktop app.
-  const blocker = useBlocker(({ currentLocation, nextLocation }) => dirty && currentLocation.pathname !== nextLocation.pathname)
-  useEffect(() => {
-    if (!dirty) return
-    const warn = (e: BeforeUnloadEvent) => e.preventDefault()
-    window.addEventListener('beforeunload', warn)
-    return () => window.removeEventListener('beforeunload', warn)
-  }, [dirty])
+  const blocker = useAskBeforeLeaving(dirty)
 
   async function save() {
     if (!editor) return
+    const markdown = toMarkdown(editor.getJSON())
     setSaving(true)
     setError(null)
-    try {
-      const { data, error: failure, response } = await api.PUT('/api/sessions/{session_id}/notes/edits', {
+    const { data, error: failure, status } = await act(
+      api.PUT('/api/sessions/{session_id}/notes/edits', {
         params: { path: { session_id: notes.session_id } },
-        body: { markdown: toMarkdown(editor.getJSON()), based_on: notes.generated_hash ?? '' },
-      })
-      if (data) {
-        props.onSaved(data)
-        return
-      }
-      const detail = (failure as { detail?: unknown } | undefined)?.detail
-      setError(
-        response.status === 409
+        body: { markdown, based_on: notes.generated_hash ?? '' },
+      }),
+    )
+    setSaving(false)
+    if (data) return props.onSaved(data)
+    const detail = (failure as { detail?: unknown } | undefined)?.detail
+    setError(
+      status === 0
+        ? UNREACHABLE
+        : status === 409
           ? NOTES_EDIT.saveWhileProcessing
-          : response.status === 422 && typeof detail === 'string'
+          : status === 422 && typeof detail === 'string'
             ? saveRefused(detail)
             : NOTES_EDIT.saveFailed,
-      )
-    } catch {
-      setError(UNREACHABLE)
-    } finally {
-      setSaving(false)
-    }
+    )
   }
 
   function close() {
@@ -213,7 +193,6 @@ export function NotesEditor(props: {
     else props.onClose()
   }
 
-  // ---- The selected block and where its toolbar sits (measured after each change).
   const state = editor?.state
   const selected = state ? selectedBlock(state) : null
   const block = state && selected !== null ? blockAt(state.doc, selected) : null
@@ -232,7 +211,6 @@ export function NotesEditor(props: {
     return () => window.removeEventListener('resize', measure)
   }, [editor, selected, version])
 
-  // ---- The formatting bubble on selected text.
   const [bubble, setBubble] = useState<{ top: number; left: number } | null>(null)
   useEffect(() => {
     const sel = editor?.state.selection
@@ -246,7 +224,6 @@ export function NotesEditor(props: {
     setBubble({ top: start.top - w.top - 42, left: Math.max(0, start.left - w.left) })
   }, [editor, version])
 
-  // ---- Dragging a block by its handle, with pointer events (works with touch too).
   const drag = useRef<{
     pos: number
     x: number
@@ -263,7 +240,6 @@ export function NotesEditor(props: {
   const suppressClick = useRef(false)
 
   const measure = useCallback((view: EditorView, from: number): Spot[] => {
-    // Only elements can be measured (a node can be drawn as bare text).
     const rect = (pos: number) => {
       const dom = view.nodeDOM(pos)
       return dom instanceof Element ? dom.getBoundingClientRect() : undefined
@@ -311,7 +287,6 @@ export function NotesEditor(props: {
       d.raf = 0
       d.chip!.style.left = `${d.px}px`
       d.chip!.style.top = `${d.py}px`
-      // Near the window's top or bottom, the page scrolls.
       const dy = d.py < 120 ? -14 : d.py > window.innerHeight - 60 ? 14 : 0
       if (dy) {
         window.scrollBy(0, dy)
@@ -339,7 +314,7 @@ export function NotesEditor(props: {
         d.chip = Object.assign(document.createElement('div'), { className: 'drag-chip', textContent: label(b) })
         d.line = Object.assign(document.createElement('div'), { className: 'drop-line' })
         document.body.append(d.chip, d.line)
-        document.body.classList.add('is-dragging') // dims the dragged block: it is the selected one
+        document.body.classList.add('is-dragging')
         d.started = true
       }
       e.preventDefault()
@@ -352,7 +327,7 @@ export function NotesEditor(props: {
       if (!d) return
       const { started, target, pos } = d
       endDrag()
-      if (!started) return // a click on the handle
+      if (!started) return
       suppressClick.current = true
       setTimeout(() => (suppressClick.current = false), 0)
       if (!target) return
@@ -391,7 +366,7 @@ export function NotesEditor(props: {
   const kind = block ? kindOf(block.node) : null
   const status = saving ? 'Saving…' : dirty ? 'Unsaved changes' : 'No changes yet'
 
-  const act = (make: () => { tr: import('@tiptap/pm/state').Transaction; pos: number } | null) => {
+  const apply = (make: () => { tr: import('@tiptap/pm/state').Transaction; pos: number } | null) => {
     const r = make()
     if (r) dispatch(r.tr, r.pos)
     setMenu(null)
@@ -456,10 +431,10 @@ export function NotesEditor(props: {
         {KIND_LABELS[kind!]}
       </button>
       <span className="sep" />
-      <button type="button" className="tb-btn" aria-label="Move up" title="Move up" onClick={() => act(() => moveBy(editor.state, block.pos, -1))}>
+      <button type="button" className="tb-btn" aria-label="Move up" title="Move up" onClick={() => apply(() => moveBy(editor.state, block.pos, -1))}>
         <Icon name="up" />
       </button>
-      <button type="button" className="tb-btn" aria-label="Move down" title="Move down" onClick={() => act(() => moveBy(editor.state, block.pos, 1))}>
+      <button type="button" className="tb-btn" aria-label="Move down" title="Move down" onClick={() => apply(() => moveBy(editor.state, block.pos, 1))}>
         <Icon name="down" />
       </button>
       <button
@@ -501,14 +476,7 @@ export function NotesEditor(props: {
           Save
         </button>
       </div>
-      {error && (
-        <div className="banner banner-error edit-error" role="alert">
-          <Icon name="alert" />
-          <div className="banner-body">
-            <p>{error}</p>
-          </div>
-        </div>
-      )}
+      {error && <Banner tone="error" className="edit-error">{error}</Banner>}
 
       <div className="notes-editor" ref={wrapRef} onClickCapture={(e) => suppressClick.current && e.stopPropagation()}>
         <EditorContent editor={editor} />
@@ -556,7 +524,6 @@ export function NotesEditor(props: {
                 const dom = editor.view.nodeDOM(added.pos)
                 if (k === 'maths' && dom instanceof HTMLElement) setMenu({ kind: 'math', anchor: dom, pos: added.pos })
                 else {
-                  // Put the cursor in the new block (its title, for a box or step).
                   editor.chain().focus().setTextSelection(added.pos + (k === 'box' || k === 'step' ? 2 : 1)).run()
                 }
               }}
@@ -574,7 +541,7 @@ export function NotesEditor(props: {
                   icon={<Icon name="image" />}
                   disabled={used.has(v.id)}
                   note={used.has(v.id) ? 'Already in the notes' : undefined}
-                  onSelect={() => act(() => addBelow(editor.state, block.pos, { figure: v.id }))}
+                  onSelect={() => apply(() => addBelow(editor.state, block.pos, { figure: v.id }))}
                 >
                   {v.caption || 'Figure'}
                 </MenuItem>
@@ -602,20 +569,12 @@ export function NotesEditor(props: {
         title={NOTES_EDIT.discardTitle}
         body={NOTES_EDIT.discardBody}
         confirm="Discard changes"
-        cancel="Keep editing"
+        cancel={KEEP_EDITING}
         danger
         onConfirm={() => { setConfirmDiscard(false); props.onClose() }}
         onCancel={() => setConfirmDiscard(false)}
       />
-      <ConfirmDialog
-        open={blocker.state === 'blocked'}
-        title="Leave without saving?"
-        body={NOTES_EDIT.leaveBody}
-        confirm="Leave"
-        cancel="Keep editing"
-        onConfirm={() => blocker.proceed?.()}
-        onCancel={() => blocker.reset?.()}
-      />
+      <LeaveWithoutSavingDialog blocker={blocker} body={NOTES_EDIT.leaveBody} />
     </FigureContext.Provider>
   )
 }

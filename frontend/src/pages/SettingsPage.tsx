@@ -1,102 +1,41 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useBlocker } from 'react-router-dom'
+import { useCallback, useMemo, useState } from 'react'
 import { api, type AppSettings } from '../api/client'
-import { ConfirmDialog } from '../components/ConfirmDialog'
+import { act } from '../api/request'
+import { Banner } from '../components/Banner'
+import { LeaveWithoutSavingDialog } from '../components/ConfirmDialog'
+import { ErrorPanel } from '../components/ErrorPanel'
 import { Icon } from '../components/Icon'
-import { NoKeyBanner } from '../components/NoKeyBanner'
-import { UNREACHABLE } from '../session/messages'
-import { useTitle } from '../session/useTitle'
-import { irisApp } from '../settings/appBridge'
+import { NoKeyBanner } from '../settings/NoKeyBanner'
+import { useAskBeforeLeaving } from '../hooks/useAskBeforeLeaving'
+import { useTitle } from '../hooks/useTitle'
+import { irisApp } from '../api/appBridge'
 import {
-  asksBeforeLeaving,
   BROWSER_KEY_NOTE,
-  KEY_ACTION_FAILED,
-  keyChanged,
+  ADD_KEY,
   languageName,
   languageOptions,
   pendingLanguage,
   saveFailure,
   savedLanguage,
 } from '../settings/settings'
+import { useKeyChange } from '../settings/useKeyChange'
+import { useSettings } from '../settings/useSettings'
 
-/** A re-read that fails while settings are shown is tried again this often, this many times:
- * the engine takes a few seconds to come back after a key change. */
-const REREAD_DELAY_MS = 2000
-const REREAD_TRIES = 5
-
-type Load = { kind: 'loading' } | { kind: 'error' } | { kind: 'ready'; settings: AppSettings }
-
-async function fetchSettings(): Promise<Load> {
-  try {
-    const { data, error } = await api.GET('/api/settings')
-    return error || !data ? { kind: 'error' } : { kind: 'ready', settings: data }
-  } catch {
-    return { kind: 'error' }
-  }
-}
-
-/** Grouped rows of settings. Changes collect in a save bar and apply once saved. */
 export function SettingsPage() {
   useTitle('Settings')
-  const [load, setLoad] = useState<Load>({ kind: 'loading' })
-  const [tick, setTick] = useState(0)
-  // The language chosen but not saved yet; null when nothing has changed.
+  const { load, setLoad, reread } = useSettings(false)
   const [draft, setDraft] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
-  // After the app changed the key: what to confirm, or that it couldn't.
   const [keyResult, setKeyResult] = useState<{ ok: boolean; text: string } | null>(null)
-
-  const retries = useRef(0)
-  const shown = useRef(load)
-  useEffect(() => {
-    shown.current = load
-  }, [load])
-  useEffect(() => {
-    let live = true
-    let timer: number | undefined
-    void fetchSettings().then((next) => {
-      if (!live) return
-      // A failed re-read (e.g. while the engine restarts after a key change) keeps what is shown,
-      // and any unsaved change, and tries again shortly.
-      if (next.kind === 'error' && shown.current.kind === 'ready') {
-        if (retries.current < REREAD_TRIES) {
-          retries.current += 1
-          timer = window.setTimeout(() => setTick((n) => n + 1), REREAD_DELAY_MS)
-        }
-        return
-      }
-      if (next.kind === 'ready') retries.current = 0
-      setLoad(next)
-    })
-    return () => {
-      live = false
-      window.clearTimeout(timer)
-    }
-  }, [tick])
-  // Read again when the window regains focus: the key may have changed from the app's menu.
-  useEffect(() => {
-    const again = () => setTick((n) => n + 1)
-    window.addEventListener('focus', again)
-    return () => window.removeEventListener('focus', again)
-  }, [])
 
   const settings = load.kind === 'ready' ? load.settings : null
   const language = settings?.transcribe_language
   const pending = pendingLanguage(draft, language?.value)
   const dirty = pending !== null
 
-  // Leaving with an unsaved change asks first, inside Iris and when closing or reloading the tab.
-  const blocker = useBlocker(({ currentLocation, nextLocation }) =>
-    asksBeforeLeaving(pending, currentLocation.pathname, nextLocation.pathname),
-  )
-  useEffect(() => {
-    if (!dirty) return
-    const warn = (e: BeforeUnloadEvent) => e.preventDefault()
-    window.addEventListener('beforeunload', warn)
-    return () => window.removeEventListener('beforeunload', warn)
-  }, [dirty])
+  const blocker = useAskBeforeLeaving(dirty)
 
   const choose = useCallback((value: string) => {
     setDraft(value)
@@ -113,17 +52,11 @@ export function SettingsPage() {
     if (pending === null) return
     setSaving(true)
     setSaveError(null)
-    let status = 0
-    try {
-      const { data, response } = await api.PUT('/api/settings', { body: { transcribe_language: pending } })
-      status = response.status
-      if (data) {
-        setLoad({ kind: 'ready', settings: data })
-        setDraft(null)
-        setSaved(true)
-      }
-    } catch {
-      status = 0
+    const { data, status } = await act(api.PUT('/api/settings', { body: { transcribe_language: pending } }))
+    if (data) {
+      setLoad({ kind: 'ready', settings: data })
+      setDraft(null)
+      setSaved(true)
     }
     setSaving(false)
     if (status !== 200) setSaveError(saveFailure(status))
@@ -141,13 +74,7 @@ export function SettingsPage() {
       {load.kind === 'loading' && <SettingsSkeleton />}
 
       {load.kind === 'error' && (
-        <div className="error-panel" role="alert">
-          <h2>{UNREACHABLE}</h2>
-          <p>Your settings are safe; they'll show here once Iris answers.</p>
-          <button type="button" className="btn" onClick={() => setTick((n) => n + 1)}>
-            <Icon name="retry" /> Try again
-          </button>
-        </div>
+        <ErrorPanel detail="Your settings are safe; they'll show here once Iris answers." onRetry={reread} />
       )}
 
       {settings && !settings.api_key_set && <NoKeyBanner withAction={false} />}
@@ -168,7 +95,7 @@ export function SettingsPage() {
                 keySet={settings.api_key_set}
                 onResult={(result) => {
                   setKeyResult(result)
-                  if (result.ok) setTick((n) => n + 1) // the engine restarted: read the settings again
+                  if (result.ok) reread()
                 }}
               />
             </div>
@@ -204,14 +131,7 @@ export function SettingsPage() {
             </div>
           </section>
 
-          {saveError && (
-            <div className="banner banner-error settings-banner" role="alert">
-              <Icon name="alert" />
-              <div className="banner-body">
-                <p>{saveError}</p>
-              </div>
-            </div>
-          )}
+          {saveError && <Banner tone="error" className="settings-banner">{saveError}</Banner>}
 
           {pending !== null && (
             <div className="save-bar" role="region" aria-label="Unsaved changes">
@@ -237,37 +157,14 @@ export function SettingsPage() {
         </>
       )}
 
-      <ConfirmDialog
-        open={blocker.state === 'blocked'}
-        title="Leave without saving?"
-        body="Your change to the spoken language hasn't been saved."
-        confirm="Leave"
-        cancel="Keep editing"
-        onConfirm={() => blocker.proceed?.()}
-        onCancel={() => blocker.reset?.()}
-      />
+      <LeaveWithoutSavingDialog blocker={blocker} body="Your change to the spoken language hasn't been saved." />
     </div>
   )
 }
 
-/** The OpenAI key: managed by the desktop app (through its bridge), or read by the engine at start-up in
- * the browser. The page only learns whether a key is set, never the key. */
 function ApiKeyRow(props: { keySet: boolean; onResult: (result: { ok: boolean; text: string }) => void }) {
   const app = irisApp()
-  const [busy, setBusy] = useState(false)
-
-  async function run(action: 'saved' | 'removed') {
-    if (!app) return
-    setBusy(true)
-    try {
-      const { done } = action === 'saved' ? await app.changeKey() : await app.removeKey()
-      if (done) props.onResult({ ok: true, text: keyChanged(action) })
-    } catch {
-      props.onResult({ ok: false, text: KEY_ACTION_FAILED })
-    } finally {
-      setBusy(false)
-    }
-  }
+  const { busy, change: run } = useKeyChange(props.onResult)
 
   let control
   let description
@@ -308,7 +205,7 @@ function ApiKeyRow(props: { keySet: boolean; onResult: (result: { ok: boolean; t
           <Icon name="alert" /> No key
         </span>
         <button type="button" className="btn btn-sm btn-primary" onClick={() => void run('saved')} disabled={busy}>
-          Add key…
+          {ADD_KEY}
         </button>
       </>
     )
@@ -392,7 +289,7 @@ function SettingsSkeleton() {
     <div aria-busy="true" aria-label="Loading settings">
       {[0, 1].map((group) => (
         <div className="settings-group" key={group}>
-          <div className="skeleton sk-line" style={{ width: 96 }} />
+          <div className="skeleton sk-line" style={{ width: '6rem' }} />
           <div className="settings-rows">
             {[0, 1].map((row) => (
               <div className="settings-row" key={row}>
@@ -401,7 +298,7 @@ function SettingsSkeleton() {
                   <div className="skeleton sk-line" style={{ width: '70%' }} />
                 </div>
                 <div className="settings-row-control">
-                  <div className="skeleton" style={{ width: 200, height: 32 }} />
+                  <div className="skeleton" style={{ width: '12.5rem', height: '2rem' }} />
                 </div>
               </div>
             ))}

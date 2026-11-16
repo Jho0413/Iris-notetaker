@@ -2,10 +2,32 @@ import assert from 'node:assert/strict'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import test from 'node:test'
-import { againLink, PROVENANCE_LABELS, saveRefused, UNREACHABLE } from '../src/session/messages.ts'
+import { actionFailure, againLink, PROVENANCE_LABELS, RETRY, saveRefused, UNREACHABLE } from '../src/lib/messages.ts'
 
 test('an unreachable backend is described in Iris’s own words', () => {
   assert.equal(UNREACHABLE, "Iris isn't responding. Try again in a moment.")
+})
+
+test('a page that couldn’t load offers Retry', () => {
+  assert.equal(RETRY, 'Retry')
+})
+
+const restartFailed = "Couldn't restart this session. It may already be processing."
+
+test('a failed action the engine never answered says Iris isn’t responding', () => {
+  assert.equal(actionFailure(0, restartFailed), UNREACHABLE)
+})
+
+test('a failed action the engine refused as busy says what couldn’t be done', () => {
+  assert.equal(actionFailure(409, restartFailed), restartFailed)
+})
+
+test('a failed action the engine failed says what couldn’t be done', () => {
+  assert.equal(actionFailure(500, restartFailed), restartFailed)
+})
+
+test('a failed action with any other answer says what couldn’t be done', () => {
+  assert.equal(actionFailure(404, restartFailed), restartFailed)
 })
 
 test('a figure that fell back is labelled neutrally', () => {
@@ -28,14 +50,12 @@ function sources(dir: string): string[] {
 
 test('no developer instructions or raw error details in the UI code', () => {
   const banned = [
-    /make dev/, // how to start the backend
-    /OPENAI_API_KEY|backend\/\.env/, // setup
+    /make dev/,
+    /OPENAI_API_KEY|backend\/\.env/,
     /Is (it|the backend) running/,
-    /HTTP \$\{/, // status codes in messages
-    /\.error\b.*\}<|\{(session|run)\.error/, // the old raw `error` field rendered
+    /HTTP \$\{/,
+    /\.error\b.*\}<|\{(session|run)\.error/,
   ]
-  // src/settings/settings.ts is the one exception: the browser-only API key wording, shown only
-  // when Iris runs in a browser (developers), never in the desktop app (issue #21).
   const allowed = new URL('../src/settings/settings.ts', import.meta.url).pathname
   const files = sources(new URL('../src', import.meta.url).pathname).filter((path) => path !== allowed)
   const offenders = files.flatMap((path) => {

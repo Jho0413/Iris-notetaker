@@ -3,7 +3,6 @@ import { test } from 'node:test'
 import { titleMarkdown } from '../src/notes/editor/extensions.ts'
 import { toDoc, toMarkdown, notesSchema } from '../src/notes/editor/markdown.ts'
 
-/** Markdown → editor document (checked against the schema) → Markdown. */
 function roundTrip(markdown: string): string {
   const doc = toDoc(markdown)
   notesSchema.nodeFromJSON(doc).check()
@@ -148,10 +147,9 @@ test('titles keep balanced brackets, inside maths too', () => {
     ':::step[Interval $[a,b]$]{color=indigo}\nx\n:::',
   ]) {
     const once = roundTrip(md)
-    assert.deepEqual(title(once), title(md), once) // the same title, read back
+    assert.deepEqual(title(once), title(md), once)
     assert.equal(roundTrip(once), once)
   }
-  // Maths in a title keeps its LaTeX exactly.
   assert.equal(roundTrip(':::step[Interval $[a,b]$]{color=indigo}\nx\n:::'), ':::step[Interval $[a,b]$]{color=indigo}\nx\n:::')
 })
 

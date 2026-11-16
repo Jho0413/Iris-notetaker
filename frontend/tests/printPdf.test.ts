@@ -1,11 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { browserPrint, runExport, type ExportSteps } from '../src/session/printPdf.ts'
-import { shownTitle } from '../src/session/format.ts'
+import { browserPrint, runExport, type ExportSteps } from '../src/notes/printPdf.ts'
+import { shownTitle } from '../src/lib/format.ts'
 
 const SHEET = { isConnected: true } as HTMLElement
 
-/** Steps that record what ran, with any of them replaced. */
 function steps(over: Partial<ExportSteps<string>> = {}) {
   const ran: string[] = []
   const all: ExportSteps<string> = {
@@ -19,7 +18,6 @@ function steps(over: Partial<ExportSteps<string>> = {}) {
   return { ran, all }
 }
 
-// Failures are logged on purpose; keep the test output clean.
 test.beforeEach(() => { console.error = () => {} })
 
 test('an export loads, draws, waits, prints, then removes the sheet', async () => {
@@ -67,13 +65,12 @@ test('the sheet stays until the print is done with it', async () => {
   const { ran, all } = steps({ print: () => new Promise<void>((r) => { release = r }) })
   const done = runExport(all)
   await new Promise((r) => setTimeout(r, 0))
-  assert.ok(!ran.includes('hide')) // still printing: the sheet must be there
+  assert.ok(!ran.includes('hide'))
   release()
   assert.equal(await done, true)
   assert.equal(ran.at(-1), 'hide')
 })
 
-/** A window whose print() returns at once and fires afterprint later, as some browsers do. */
 function fakeWindow() {
   const listeners = new Set<() => void>()
   return {
@@ -93,12 +90,12 @@ test('the browser print resolves on afterprint, not when print() returns', async
   const fallbackMs = 1000
   const printing = browserPrint(win as unknown as Window, fallbackMs).then(() => { resolved = true })
   assert.equal(win.printed, 1)
-  t.mock.timers.tick(fallbackMs - 1) // just short of the fallback
-  await new Promise((r) => setImmediate(r)) // setImmediate isn't faked
+  t.mock.timers.tick(fallbackMs - 1)
+  await new Promise((r) => setImmediate(r))
   assert.equal(resolved, false)
   win.afterprint()
   await printing
-  assert.equal(win.listeners.size, 0) // its listener is removed
+  assert.equal(win.listeners.size, 0)
 })
 
 test('a browser that never fires afterprint still finishes, after the fallback', async () => {

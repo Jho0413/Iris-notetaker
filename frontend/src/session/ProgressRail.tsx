@@ -1,50 +1,34 @@
 import type { Stage } from '../api/client'
-import { detailRows, type Cost, type StepCost } from '../session/cost'
-import { detailsLabel } from '../session/messages'
-import type { StreamStatus } from '../session/useSessionStream'
-import { STAGE_ORDER, stepLine, stepStatus, type RunState } from '../session/state'
+import { detailRows, type Cost, type StepCost } from './cost'
+import { detailsLabel } from '../lib/messages'
+import type { StreamStatus } from './useSessionStream'
+import { STAGE_ORDER, stepLine, stepStatus, type RunState } from './state'
 import { CostText } from './CostText'
-import type { OutlineItem } from './NotesView'
+import type { OutlineItem } from '../lib/notes'
 import { StepList } from './StepList'
 
-/** What the session's details show: in the rail, or below the tabs under 1120px. */
 export interface RunDetailsProps {
   run: RunState
-  /** Stored progress when no events are known (e.g. after a backend restart). */
   finished: boolean
   hasEvents: boolean
   currentStage?: Stage | null
   outline: OutlineItem[]
   stream: StreamStatus
   showProgress: boolean
-  /** The session's model cost so far; null shows nothing (no calls yet, or not loaded). */
   cost: Cost | null
-  /** Cost per step that made model calls, in pipeline order. */
   stepCosts: StepCost[]
 }
 
-/**
- * The session rail: plain-language progress (once the notes are finished; until then the progress
- * view shows it), the notes outline, the cost slot and on-demand details. Below 1120px it
- * collapses into a one-line summary that expands, or, once the notes show in tabs, hides: the
- * Details button beside the tabs opens the same details under them.
- */
 export function ProgressRail(
   props: RunDetailsProps & {
-    /** Whether the details are open below 1120px; the page holds it, so the Details button
-     * beside the tabs opens and closes the same state. */
     expanded: boolean
     onToggle: () => void
-    /** The tabs show the details themselves below 1120px (RunDetails under the tabs row), so
-     * the rail is hidden there. */
     detailsInTabs: boolean
   },
 ) {
   const { run, expanded } = props
   const stored = { finished: props.finished, hasEvents: props.hasEvents, currentStage: props.currentStage }
 
-  // Without the progress list (it is in the main column until the notes are finished), the
-  // rail holds only the outline and details.
   const running = STAGE_ORDER.filter((s) => stepStatus(s, run, stored) === 'running')
   const summary = !props.showProgress
     ? 'Run details'
@@ -77,8 +61,6 @@ export function ProgressRail(
   )
 }
 
-/** The progress (once the notes are finished), the notes outline, the cost and on-demand
- * details. */
 export function RunDetails(props: RunDetailsProps) {
   const { run } = props
   const stored = { finished: props.finished, hasEvents: props.hasEvents, currentStage: props.currentStage }
@@ -105,7 +87,6 @@ export function RunDetails(props: RunDetailsProps) {
         </>
       )}
 
-      {/* Always laid out, so the rail doesn't move when the first cost arrives. */}
       <p className="cost-slot" style={props.cost ? undefined : { visibility: 'hidden' }} aria-hidden={!props.cost}>
         <span>Cost</span> {props.cost && <CostText cost={props.cost} />}
       </p>

@@ -7,27 +7,21 @@ export interface TabDef<T extends string> {
   count?: string
 }
 
-/** ARIA tabs: arrow keys, Home and End move between tabs; Tab moves on to `end`, if any, then
- * into the panel. */
 export function Tabs<T extends string>(props: {
   tabs: TabDef<T>[]
   active: T
   onChange: (id: T) => void
   label: string
   idPrefix: string
-  /** Shown at the end of the row, outside the tablist (which may hold only tabs). */
   end?: ReactNode
 }) {
   const refs = useRef<Record<string, HTMLButtonElement | null>>({})
   const list = useRef<HTMLDivElement>(null)
 
-  // On a phone the tabs can scroll sideways in their row (index.css): keep the chosen one in
-  // view, however it was chosen. Only the row scrolls, never the page.
   useEffect(() => {
     const row = list.current
     const tab = refs.current[props.active]
     if (!row || !tab || row.scrollWidth <= row.clientWidth) return
-    // Inside the row's padding, which is the room for the focus ring at either end.
     const box = row.getBoundingClientRect()
     const pad = getComputedStyle(row)
     const view = { left: box.left + parseFloat(pad.paddingLeft), right: box.right - parseFloat(pad.paddingRight) }
@@ -79,7 +73,6 @@ export function Tabs<T extends string>(props: {
   )
 }
 
-/** A tab panel that stays mounted (keeps scroll and loaded images) while hidden. */
 export function TabPanel(props: { id: string; idPrefix: string; active: boolean; children: ReactNode }) {
   return (
     <div

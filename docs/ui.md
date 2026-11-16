@@ -13,8 +13,8 @@ the app can do. Visual design (tokens, components, layout rules) is in
   transcript.
 - **Typed client:** API types generated from the engine's schema, so a call to a route or field
   that no longer exists fails the typecheck.
-- **Action wrapper:** wraps a user action's request so the page always gets an answer it can show
-  and never stays stuck busy.
+- **Action wrapper:** wraps a request so the page always gets an answer it can show and never
+  stays stuck busy.
 - **Run state:** what the session page shows, built up from the
   [progress stream](engine.md#key-words) by pure functions.
 - **Notes editor:** editing the notes in place, saved as the session's
@@ -44,10 +44,12 @@ There are five: the library, upload, live recording, a session, and settings. Th
 each address to one page, and the top bar links them.
 
 - The **library** lists sessions and offers what fits each one: open, delete, export a PDF,
-  re-run a failed session, or make notes from a recording that was stopped. While any session is
-  processing it refreshes itself, so their status stays current.
+  re-run a failed session (unless the recording itself was the problem, which a re-run can't
+  fix), or make notes from a recording that was stopped. While any session is processing it
+  refreshes itself, so their status stays current.
 - **Upload** sends the file and shows how much has gone; once the engine has it, the page opens
-  the new session ([`making-notes.md`](making-notes.md)).
+  the new session ([`making-notes.md`](making-notes.md)). Cancel is offered only until the last
+  byte is sent: the engine then makes the session anyway, so cancelling would only hide it.
 - **Live** records and sends as it goes ([`recording-live.md`](recording-live.md)).
 - The **session page** follows the run, then shows the notes, figures and transcript; the session
   can be renamed, re-run, deleted or exported from there.
@@ -60,9 +62,8 @@ Pages that hold unsaved work (the editor, Settings, a recording) ask before they
 1. Every request goes to `/api/*` on the page's own address. In development Vite passes it on to
    the engine; in the app, the app handler forwards it with its token
    ([`desktop.md`](desktop.md)). So the page holds no engine address and no secret.
-2. Most requests go through the typed client. Delete, re-run, make notes and removing edits also
-   go through the action wrapper; saving and renaming catch the same failure themselves. Either
-   way "the engine never answered" becomes an answer like any other, so the button always comes
+2. Most requests go through the typed client, and each of those through the action wrapper, so
+   "the engine never answered" becomes an answer like any other and the button always comes
    back.
 3. While only the engine is down, Vite or the app handler still answers, with a gateway error of
    its own. The engine never sends those, so the typed client treats them as no answer at all, and
@@ -126,20 +127,30 @@ line, and exporting works from the library without opening the session.
 
 ### The bridge
 
-In a browser the bridge is absent, and the pages leave out what needs it. Whether a key is set
-comes from the engine's settings, never from the app. The app's side is in
-[`desktop.md`](desktop.md).
+In a browser the bridge is absent, and the pages leave out what needs it. Whether the page runs
+in the app at all is told by the bridge being there, and nothing else. Whether a key is set
+comes from the engine's settings, never from the app. They are read again whenever the window
+regains focus, since the key can change from the app's menu. A failed read keeps what is shown
+and is tried again a few times, since the engine takes a few seconds to come back after a key
+change. If the very first read fails, the library keeps trying, while Settings shows its error at
+once, with a way to retry. The app's side
+is in [`desktop.md`](desktop.md).
 
 ## Decisions
 
 - **Logic in pure functions, pages thin.** The run state, the stream's connection, the notes
   format, the editor's block actions and drop spots, and the PDF steps are plain TypeScript,
   tested in plain Node with no browser.
-- **Wording in one place.** What the pages say lives in `session/messages.ts` and each page's own
+- **Wording in one place.** What the pages say lives in `lib/messages.ts` and each page's own
   module; a failed run's message is one of a fixed list the engine owns, typed from the schema;
   raw error text is never shown.
 - **Only the session's own figures are drawn.** An image the notes point at from anywhere else is
   blocked, since the notes are model output.
+- **Cost in one format.** Costs are shown in one fixed format, not the browser's locale, so the
+  rail and the library always agree. A total with unpriced calls is a lower bound: it says so and
+  is rounded down, never up. Model and provider names never reach the page.
+- **The theme before the first paint.** The page's HTML picks the theme before React starts, so
+  a dark page never flashes white. Printing always uses the light colours.
 
 ## Limits
 
@@ -151,11 +162,20 @@ comes from the engine's settings, never from the app. The app's side is in
 ## Where to look
 
 - `frontend/src/App.tsx`: the routes and the top bar.
-- `frontend/src/api/`: the typed client and the generated `schema.d.ts`.
+- `frontend/src/api/`: the typed client, the generated `schema.d.ts`, the action wrapper `act()`
+  (`request.ts`) and the bridge (`appBridge.ts`).
 - `frontend/src/pages/`: one file per page.
-- `frontend/src/session/`: run state (`state.ts`), the progress stream (`stream.ts`), the action
-  wrapper `act()` (`request.ts`), upload, rename, PDF export and the wording (`messages.ts`).
-- `frontend/src/notes/`: the notes format (`format.ts`) and the editor's logic (`editor/`).
-- `frontend/src/components/`: `NotesView.tsx`, `NotesEditor.tsx`, `PrintSheet.tsx` and the rest.
-- `frontend/src/settings/`: the Settings page's logic and the bridge (`appBridge.ts`).
+- `frontend/src/session/`: run state (`state.ts`), the progress stream (`stream.ts`), upload, rename
+  and the session page's parts (`ProgressRail.tsx` and the rest).
+- `frontend/src/notes/`: the notes format (`format.ts`), the editor's logic (`editor/`), the
+  reading view and the editor (`NotesView.tsx`, `NotesEditor.tsx`), and the PDF export
+  (`PrintSheet.tsx`, `usePdfExport.tsx`, `printPdf.ts`).
+- `frontend/src/components/`: the shared building blocks (`Icon.tsx`, `ConfirmDialog.tsx` and the
+  rest).
+- `frontend/src/lib/`: the wording (`messages.ts`), the formatters (`format.ts`) and what the notes
+  views and the session page both know about figures and the outline (`notes.ts`).
+- `frontend/src/hooks/`: the shared hooks (`useTitle.ts`, `useAskBeforeLeaving.ts`).
+- `frontend/src/settings/`: the Settings page's logic, reading the settings (`useSettings.ts`),
+  changing the key through the bridge (`useKeyChange.ts`) and the no-key warning
+  (`NoKeyBanner.tsx`).
 - `frontend/tests/`: the plain-Node tests.

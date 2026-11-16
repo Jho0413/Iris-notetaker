@@ -5,7 +5,6 @@ import {
   BATCH_MS, connectSessionStream, QUIET_AFTER_MS, RETRY_MS, type StreamStatus,
 } from '../src/session/stream.ts'
 
-/** An EventSource the test drives: dispatches real MessageEvents like the browser does. */
 class FakeSource extends EventTarget {
   readyState = 0
   closed = false
@@ -24,7 +23,6 @@ class FakeSource extends EventTarget {
     const message = { type, session_id: 's1', data, at }
     const event = new MessageEvent(type, { data: JSON.stringify(message) })
     this.dispatchEvent(event)
-    // Like EventSource, a server "error" event also reaches onerror.
     if (type === 'error') this.onerror?.(event)
   }
   transportError(closed: boolean) {
@@ -33,7 +31,6 @@ class FakeSource extends EventTarget {
   }
 }
 
-/** Manual clock: timers run only when the test advances time. */
 function harness() {
   let now = 0
   let nextId = 1
@@ -87,7 +84,6 @@ test('events are batched, and replays after a reconnect are dropped', () => {
   h.advance(BATCH_MS)
   assert.deepEqual(h.batches.map((b) => b.map((e) => e.type)), [['status', 'stage_started']])
 
-  // The browser reconnects by itself and the backend replays its history.
   h.latest().transportError(false)
   assert.equal(h.statuses.at(-1), 'reconnecting')
   h.latest().send('status', { status: 'processing' }, '2026-11-03T12:00:00Z')
@@ -124,7 +120,6 @@ test('after the browser gives up, reconnects back off: 1, 2, 5, then 10 seconds'
   }
   assert.deepEqual(delays, [...RETRY_MS, RETRY_MS.at(-1)])
 
-  // An event resets the backoff.
   h.latest().send('status', { status: 'done' }, '2026-11-03T12:00:00Z')
   const before = h.sources.length
   h.latest().transportError(true)

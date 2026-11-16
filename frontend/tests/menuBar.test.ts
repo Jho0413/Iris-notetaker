@@ -5,11 +5,10 @@ import { menuBarPhase, menuBarReporter } from '../src/capture/menuBar.ts'
 test('menuBarPhase: a left page still uploading keeps an idle page "stopping"', () => {
   assert.equal(menuBarPhase('idle', 0), 'idle')
   assert.equal(menuBarPhase('idle', 1), 'stopping')
-  assert.equal(menuBarPhase('recording', 1), 'recording') // a new recording is told as it is
+  assert.equal(menuBarPhase('recording', 1), 'recording')
   assert.equal(menuBarPhase('requesting', 2), 'requesting')
 })
 
-/** A reporter whose sends are recorded, and a stop that settles when the test says. */
 function setup() {
   const sent: string[] = []
   const reporter = menuBarReporter((phase) => sent.push(phase))
@@ -23,7 +22,7 @@ test('a page left after a failed stop: "stopping" until its upload settles, then
   t.reporter.phase('unfinished', 0)
   t.reporter.left(t.stop)
   assert.equal(t.sent.at(-1), 'stopping')
-  await t.settle() // failing again changes nothing: it is settled either way
+  await t.settle()
   assert.equal(t.sent.at(-1), 'idle')
 })
 
@@ -31,7 +30,7 @@ test('the left page settling late never overwrites a newer recording', async () 
   const t = setup()
   t.reporter.phase('unfinished', 0)
   t.reporter.left(t.stop)
-  t.reporter.phase('idle', 0) // a new Live page opens: still stopping, the old upload runs
+  t.reporter.phase('idle', 0)
   assert.equal(t.sent.at(-1), 'stopping')
   t.reporter.phase('requesting', 0)
   t.reporter.phase('recording', 1_800_000_000_000)

@@ -63,7 +63,7 @@ the form that fits the change; don't invent states where there are none.
   exception to this rule: removing, from a file you work on, the comments and docstrings that
   *No comments* doesn't keep.
 - **One source of truth.** Settings, file names, wording and constants live in one place
-  (`Settings`, `store/layout.py`, `session/messages.ts`) and are imported, never copied.
+  (`Settings`, `store/layout.py`, `lib/messages.ts`) and are imported, never copied.
 - **Pure logic, thin edges.** Keep decisions in small pure functions (no I/O) that plain
   `pytest` / `node --test` can cover; keep routes, components and the Electron main process thin.
 - **Check at the boundary, trust inside.** Validate what comes in (API requests, files on disk,

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { describeCaptureError, inDesktopApp, pickAudioMimeType } from '../src/capture/captureErrors.ts'
+import { describeCaptureError, pickAudioMimeType } from '../src/capture/captureErrors.ts'
 import { EndSessionError, endLiveSession } from '../src/capture/endSession.ts'
 import { UploadQueue, isRetryable } from '../src/capture/uploadQueue.ts'
 
@@ -32,18 +32,18 @@ test('failed uploads are retried until they land; rejected ones are reported, no
 
 test('a closed queue sends nothing more: neither what waits, nor retries, nor new items', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] })
-  const settle = () => new Promise((r) => setImmediate(r)) // setImmediate isn't faked
+  const settle = () => new Promise((r) => setImmediate(r))
   const sent: string[] = []
   const queue = new UploadQueue(async (path) => {
     sent.push(path)
-    return 503 // the first attempt fails, so it would be retried
+    return 503
   }, { ...fast, concurrency: 1 })
   queue.add('audio', 'audio?seq=0', blob)
-  queue.add('audio', 'audio?seq=1', blob) // waits behind the first, which is in flight
+  queue.add('audio', 'audio?seq=1', blob)
   queue.close()
   queue.add('audio', 'audio?seq=2', blob)
-  await settle() // the first attempt fails, so its retry is scheduled
-  t.mock.timers.tick(fast.maxDelayMs) // past the retry delay
+  await settle()
+  t.mock.timers.tick(fast.maxDelayMs)
   await settle()
   assert.deepEqual(sent, ['audio?seq=0'])
   assert.equal(queue.pending, 0, 'the retry came due and was dropped')
@@ -108,7 +108,6 @@ test('capture errors become actionable messages', () => {
   assert.match(describeCaptureError(denied, 'microphone'), /Microphone access was blocked/)
   assert.match(describeCaptureError(new DOMException('', 'NotFoundError'), 'microphone'), /No microphone/)
   assert.match(describeCaptureError(new DOMException('', 'NotReadableError'), 'microphone'), /another app/i)
-  // Anything else: our own words, never the browser's message.
   assert.equal(describeCaptureError('weird', 'screen'), "The screen couldn't be started. Try again.")
   assert.equal(
     describeCaptureError(new Error('SECRET internal detail'), 'microphone'),
@@ -124,8 +123,6 @@ test('in the desktop app, blocked capture points at System Settings for Iris, no
   const mic = describeCaptureError(denied, 'microphone', true)
   assert.match(mic, /Allow Iris in System Settings → Privacy & Security → Microphone/)
   assert.doesNotMatch(mic, /browser|site/)
-  // In a browser (and in Node, where there is no app:// page) the browser wording stays.
-  assert.equal(inDesktopApp(), false)
   assert.match(describeCaptureError(denied, 'microphone'), /for this site in the browser/)
   assert.match(describeCaptureError(denied, 'screen', false), /for your browser/)
 })
@@ -136,7 +133,6 @@ test("in the desktop app, a cancelled picker says so: Electron refuses it as Abo
     describeCaptureError(refused, 'screen', true),
     describeCaptureError(new DOMException('', 'NotAllowedError'), 'screen', true),
   )
-  // Elsewhere an AbortError is still an interruption.
   assert.match(describeCaptureError(refused, 'screen', false), /interrupted/)
   assert.match(describeCaptureError(refused, 'microphone', true), /interrupted/)
 })
@@ -168,7 +164,7 @@ test('ending with missing audio fails so it can be retried', async () => {
     (err: unknown) =>
       err instanceof EndSessionError &&
       err.message === "Iris hasn't received all the audio yet. Try again in a moment." &&
-      !err.message.includes('chunks are missing'), // the backend's text is never shown
+      !err.message.includes('chunks are missing'),
   )
 })
 
@@ -213,6 +209,6 @@ test('ending while the backend is down fails with a clear message', async () => 
     (err: unknown) =>
       err instanceof EndSessionError &&
       err.message === "Iris isn't responding, so the session couldn't be finished. Try again in a moment." &&
-      !/make dev|backend/.test(err.message), // no developer instructions
+      !/make dev|backend/.test(err.message),
   )
 })

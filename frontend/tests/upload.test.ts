@@ -2,7 +2,6 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { UploadError, uploadWithProgress } from '../src/session/upload.ts'
 
-/** A stand-in XMLHttpRequest the test drives by hand. */
 class FakeXhr {
   status = 0
   response: unknown = null

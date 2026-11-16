@@ -1,4 +1,3 @@
-// One small icon set, drawn in one stroke weight (24px grid, 1.75 stroke, round joins).
 const PATHS = {
   check: 'M5 12.5l4.5 4.5L19 7.5',
   pending: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z',
@@ -21,7 +20,6 @@ const PATHS = {
   stopped: 'M8 12h8',
   pencil: 'M4 20h4L18.5 9.5a2.1 2.1 0 0 0-3-3L5 17v3zM13.5 7.5l3 3',
   gear: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z',
-  // Editing the notes (the block toolbar and its menus).
   grip: 'M9 5a1 1 0 1 0 0 2 1 1 0 0 0 0-2zM15 5a1 1 0 1 0 0 2 1 1 0 0 0 0-2zM9 11a1 1 0 1 0 0 2 1 1 0 0 0 0-2zM15 11a1 1 0 1 0 0 2 1 1 0 0 0 0-2zM9 17a1 1 0 1 0 0 2 1 1 0 0 0 0-2zM15 17a1 1 0 1 0 0 2 1 1 0 0 0 0-2z',
   plus: 'M12 5v14M5 12h14',
   up: 'M12 19V5M6 11l6-6 6 6',
@@ -56,7 +54,6 @@ export function Icon({ name, label }: { name: IconName; label?: string }) {
   )
 }
 
-/** The Iris mark: an eye's iris, the accent ring around a solid pupil. */
 export function Mark() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">

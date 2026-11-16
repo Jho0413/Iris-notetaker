@@ -15,7 +15,6 @@ const apply = (s: EditorState, tr: Transaction | null) => {
   next.doc.check()
   return next
 }
-/** Position of the n-th top-level block, or of the n-th block inside a container. */
 const top = (s: EditorState, i: number) => {
   let pos = 0
   for (let k = 0; k < i; k++) pos += s.doc.child(k).nodeSize
@@ -48,7 +47,7 @@ test('blocks know their depth and the box or step around them', () => {
   const key = inside(s, step, 2)
   assert.deepEqual([blockAt(s.doc, step)?.depth, blockAt(s.doc, step)?.parent], [0, null])
   assert.deepEqual([blockAt(s.doc, key)?.depth, blockAt(s.doc, key)?.parent], [1, step])
-  assert.equal(blockAt(s.doc, step + 1), null) // a title is never a block of its own
+  assert.equal(blockAt(s.doc, step + 1), null)
 })
 
 test('the selection picks the innermost block; a title picks its box or step', () => {
@@ -56,8 +55,8 @@ test('the selection picks the innermost block; a title picks its box or step', (
   const step = top(s, 1)
   const key = inside(s, step, 2)
   const at = (pos: number) => blockOfSelection(TextSelection.create(s.doc, pos))
-  assert.equal(at(step + 3), step) // in the title "One"
-  assert.equal(at(inside(s, key, 1) + 2), inside(s, key, 1)) // in "Inside."
+  assert.equal(at(step + 3), step)
+  assert.equal(at(inside(s, key, 1) + 2), inside(s, key, 1))
   assert.equal(at(1), 0)
 })
 
@@ -107,7 +106,6 @@ test('move up and down swap neighbours and step out at the edge of a box or step
   let s = state(NOTES)
   const step = top(s, 1)
   const key = inside(s, step, 2)
-  // The key idea is last in step one: down steps out, right after the step.
   let moved = moveBy(s, key, 1)!
   s = apply(s, moved.tr)
   assert.equal(md(s), [
@@ -115,12 +113,10 @@ test('move up and down swap neighbours and step out at the edge of a box or step
     '', ':::step[Two]{color=indigo}', 'Second.', ':::', '', '## Heading',
   ].join('\n'))
   assert.equal(s.doc.nodeAt(moved.pos)?.type.name, 'box')
-  // Up again: swaps with step one (it doesn't go back inside).
   moved = moveBy(s, moved.pos, -1)!
   s = apply(s, moved.tr)
   assert.ok(md(s).startsWith('Intro.\n\n:::box[Key idea]'))
-  assert.equal(moveBy(s, 0, -1), null) // nothing above the first block
-  // "First." is first in its step: up steps out, before the step.
+  assert.equal(moveBy(s, 0, -1), null)
   const stepPos = top(s, 2)
   moved = moveBy(s, inside(s, stepPos, 1), -1)!
   s = apply(s, moved.tr)
@@ -130,7 +126,7 @@ test('move up and down swap neighbours and step out at the edge of a box or step
 test('a move is one transaction, so one undo restores it', () => {
   const s = state(NOTES)
   const moved = moveTo(s, top(s, 0), { parent: top(s, 2), index: 2 })!
-  assert.equal(moved.tr.steps.length, 2) // one transaction of a delete and an insert
+  assert.equal(moved.tr.steps.length, 2)
   const after = apply(s, moved.tr)
   assert.ok(md(after).includes(':::step[Two]{color=indigo}\nSecond.\n\nIntro.\n:::'))
 })
@@ -140,13 +136,13 @@ test('landing rules: no step inside a block, no third level, never inside itself
   const one = top(s, 1)
   const two = top(s, 2)
   const key = inside(s, one, 2)
-  assert.equal(canLand(s.doc, two, { parent: one, index: 1 }), false) // a step in a step
-  assert.equal(canLand(s.doc, key, { parent: two, index: 2 }), true) // a box into a step
+  assert.equal(canLand(s.doc, two, { parent: one, index: 1 }), false)
+  assert.equal(canLand(s.doc, key, { parent: two, index: 2 }), true)
   assert.equal(canLand(s.doc, one, { parent: null, index: 4 }), true)
   const nested = state(':::box[A]\n:::box[B]\nx\n:::\n:::\n\n:::box[C]\ny\n:::')
-  assert.equal(canLand(nested.doc, 0, { parent: top(nested, 1), index: 1 }), false) // B would be a third level
+  assert.equal(canLand(nested.doc, 0, { parent: top(nested, 1), index: 1 }), false)
   assert.equal(canLand(nested.doc, top(nested, 1), { parent: inside(nested, 0, 1), index: 1 }), false)
-  assert.equal(moveTo(s, top(s, 0), { parent: null, index: 0 }), null) // where it already is
+  assert.equal(moveTo(s, top(s, 0), { parent: null, index: 0 }), null)
 })
 
 test('moving the last block out of a box leaves an empty paragraph to type in', () => {
@@ -194,7 +190,7 @@ test('make maths turns the selected text into an inline formula', () => {
   const to = from + 'pi r^2'.length
   const sel = s.apply(s.tr.setSelection(TextSelection.create(s.doc, from, to)))
   assert.equal(md(apply(sel, makeMaths(sel))), 'Area is $pi r^2$ here.')
-  assert.equal(makeMaths(s), null) // nothing selected
+  assert.equal(makeMaths(s), null)
 })
 
 test('steps in a row are numbered as one path; anything between restarts it', () => {
