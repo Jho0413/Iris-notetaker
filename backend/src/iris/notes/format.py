@@ -1,28 +1,5 @@
-"""The notes format: Markdown with boxes, steps and figures written as directive commands.
-
-    :::box[Title]{color=green}     a box; no [ ] means no title, no colour means grey
-    ...
-    :::
-    :::step[Title]{color=indigo}   a step on a numbered path (steps in a row form one path)
-    ...
-    :::
-    ::figure{#v000001}             a figure from this session, by id
-
-The word after the colons is a command and is never shown; everything a reader sees is the
-writer's own text. Each closing ``:::`` closes the most recent block still open, so a box opened
-inside a step is closed before the step. Blocks go one level deep (a box inside a step or box).
-Lines inside fenced code are text.
-
-Pure functions only: ``scan`` reads the structure, ``validate`` lists what is wrong in words for
-the user, ``repair`` fixes what can be fixed without guessing (for model output), and
-``upgrade_legacy`` reads notes written before this format. It is the only place that matches words
-in the notes, and only to read old notes (``Notes.format_version`` 1).
-
-The UI reads the same format with its own parser (``frontend/src/notes/format.ts``); the two
-follow the rules above.
-"""
-
 import re
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 
 from markdown_it import MarkdownIt
@@ -31,22 +8,23 @@ from markdown_it.token import Token
 from iris.models import Notes, NotesVisual
 from iris.notes.markdown import mask_math
 
-FORMAT_VERSION = 2  # notes.json written with boxes, steps and figures by id
+FORMAT_VERSION = 2
 
 PALETTE = ("grey", "indigo", "blue", "teal", "green", "amber", "orange", "red", "pink", "violet")
 COMMANDS = ("box", "step")
-MAX_DEPTH = 2  # blocks open at once: a box inside a step or box, never deeper
+MAX_DEPTH = 2
 
-# A title may hold brackets in pairs, one level deep ("[Interval [a, b]]", "[$x[i]$]"); an
-# unpaired ] is written \].
 OPEN = re.compile(
     r"^(?P<colons>:{3,})(?P<command>[A-Za-z][\w-]*)"
     r"(?:\[(?P<title>(?:\\.|[^\[\]\\]|\[(?:\\.|[^\[\]\\])*\])*)\])?"
     r"(?:\{(?P<attrs>[^}]*)\})?[ \t]*$"
 )
 CLOSE = re.compile(r"^:{3,}[ \t]*$")
-FIGURE = re.compile(r"^::figure\{#(?P<id>[A-Za-z0-9_-]+)\}[ \t]*$")
-DIRECTIVE = re.compile(r"^::+[A-Za-z]")  # anything else that looks like a command
+VISUAL_ID = r"[A-Za-z0-9_-]+"
+FIGURE = re.compile(rf"^::figure\{{#(?P<id>{VISUAL_ID})\}}[ \t]*$")
+MARKER = re.compile(rf"\[visual:({VISUAL_ID})\]")
+LINE_START_OR_INLINE_MARKER = re.compile(rf"^[ \t]*{MARKER.pattern}|{MARKER.pattern}", re.MULTILINE)
+DIRECTIVE = re.compile(r"^::+[A-Za-z]")
 FENCE = re.compile(r"^ {0,3}(?P<fence>`{3,}|~{3,})")
 COLOR = re.compile(r"(?:^|\s)color=(\"?)(?P<color>[^\s\"}]*)\1(?=\s|$)")
 _PARSER = MarkdownIt()
@@ -55,16 +33,16 @@ _PARSER = MarkdownIt()
 @dataclass(frozen=True)
 class Block:
     command: str
-    title: str | None  # as written between [ ] (inline Markdown), None without [ ]
-    color: str | None  # as written; None when no colour was given
-    line: int  # 0-based line of the opening fence
-    depth: int  # 0 at the top level
-    end: int | None = None  # line of the closing ``:::``; None if never closed
+    title: str | None
+    color: str | None
+    line: int
+    depth: int
+    end: int | None = None
 
 
 @dataclass(frozen=True)
 class Problem:
-    line: int  # 1-based, for people
+    line: int
     message: str
 
 
@@ -72,10 +50,10 @@ class Problem:
 class Scan:
     lines: list[str]
     blocks: list[Block] = field(default_factory=list)
-    figures: list[tuple[int, str]] = field(default_factory=list)  # (line, visual id)
+    figures: list[tuple[int, str]] = field(default_factory=list)
     stray_closes: list[int] = field(default_factory=list)
-    unreadable: list[int] = field(default_factory=list)  # lines that look like a command
-    open_at: list[int] = field(default_factory=list)  # per line: blocks open on that line
+    unreadable: list[int] = field(default_factory=list)
+    open_at: list[int] = field(default_factory=list)
 
 
 def color_of(attrs: str | None) -> str | None:
@@ -84,9 +62,8 @@ def color_of(attrs: str | None) -> str | None:
 
 
 def scan(markdown: str) -> Scan:
-    """The block structure of the notes, line by line, following the stack rule."""
     out = Scan(lines=markdown.split("\n"))
-    stack: list[int] = []  # indexes into out.blocks
+    stack: list[int] = []
     fence: str | None = None
     for i, line in enumerate(out.lines):
         out.open_at.append(len(stack))
@@ -122,25 +99,14 @@ def scan(markdown: str) -> Scan:
     return out
 
 
-def _check_tokens(tokens: list[Token], problems: list[Problem]) -> None:
+def forbidden_tokens(tokens: list[Token]) -> Iterator[Token]:
     for token in tokens:
-        line = token.map[0] + 1 if token.map else 0
-        if token.type in {"html_inline", "html_block"}:
-            problems.append(Problem(line, "HTML isn't supported in notes. Remove it."))
-        elif token.type == "image":
-            problems.append(
-                Problem(
-                    line,
-                    "Images from outside the session aren't supported. Use a figure from this "
-                    "session instead.",
-                )
-            )
-        if token.children:
-            _check_tokens(token.children, problems)
+        if token.type in {"image", "html_inline", "html_block"}:
+            yield token
+        yield from forbidden_tokens(token.children or [])
 
 
 def _inline_lines(tokens: list[Token]) -> None:
-    """Give inline children their block's line, so problems found in them can name it."""
     for token in tokens:
         if token.children and token.map:
             for child in token.children:
@@ -148,7 +114,6 @@ def _inline_lines(tokens: list[Token]) -> None:
 
 
 def structure_problems(s: Scan) -> list[Problem]:
-    """Everything wrong with the block structure itself, in words for the person writing."""
     problems: list[Problem] = []
     for b in s.blocks:
         n = b.line + 1
@@ -187,7 +152,6 @@ def structure_problems(s: Scan) -> list[Problem]:
 
 
 def validate(markdown: str, visual_ids: set[str]) -> list[Problem]:
-    """Every problem in notes from outside (model output, a save), in the order they appear."""
     s = scan(markdown)
     problems = structure_problems(s)
     problems += [
@@ -197,17 +161,20 @@ def validate(markdown: str, visual_ids: set[str]) -> list[Problem]:
     ]
     tokens = MarkdownIt().parse(mask_math(markdown))
     _inline_lines(tokens)
-    _check_tokens(tokens, problems)
+    for token in forbidden_tokens(tokens):
+        line = token.map[0] + 1 if token.map else 0
+        if token.type == "image":
+            message = (
+                "Images from outside the session aren't supported. Use a figure from this "
+                "session instead."
+            )
+        else:
+            message = "HTML isn't supported in notes. Remove it."
+        problems.append(Problem(line, message))
     return sorted(problems, key=lambda p: p.line)
 
 
 def split_sections(markdown: str) -> list[str]:
-    """Split notes at their top-level (# and ##) headings; text before the first is its own.
-
-    A heading inside a box or step is part of it, so it never splits the block. Line breaks
-    are made uniform first (CRLF and a lone CR become LF, as the parser treats them), then lines
-    are cut only at LF, as ``scan`` cuts them: the parser's line numbers, ``scan``'s and the
-    slices must agree, or a stray CR or U+2028 in edited notes would shift them."""
     markdown = re.sub(r"\r\n?", "\n", markdown)
     lines = markdown.split("\n")
     open_at = scan(markdown).open_at
@@ -228,7 +195,6 @@ def split_sections(markdown: str) -> list[str]:
 
 
 def heading(section: str) -> str:
-    """The text of the heading a section starts with, or "" if it starts without one."""
     first = section.lstrip().split("\n", 1)[0]
     return first.lstrip("#").strip() if first.startswith("#") else ""
 
@@ -238,8 +204,6 @@ def open_line(command: str, title: str | None, color: str) -> str:
 
 
 def repair(markdown: str) -> str:
-    """Fix what needs no guessing: unknown or missing colours become grey, a block left open is
-    closed at the end, and a ``:::`` that closes nothing is dropped. Other problems stay."""
     s = scan(markdown)
     lines = list(s.lines)
     for b in s.blocks:
@@ -253,18 +217,14 @@ def repair(markdown: str) -> str:
 
 
 def ends_inside_block(markdown: str) -> int | None:
-    """The line closing a top-level block when the notes end with that close, else None."""
     s = scan(markdown.rstrip())
     last = len(s.lines) - 1
     return next((b.end for b in s.blocks if b.depth == 0 and b.end == last), None)
 
 
 def signatures(markdown: str) -> set[tuple[str, str | None, str | None]]:
-    """The boxes and steps by command, title and colour (what a rewrite must not lose)."""
     return {(b.command, b.title, b.color) for b in scan(markdown).blocks}
 
-
-# --- Notes written before this format (format_version 1) ------------------------------------------
 
 LEGACY_CARDS = (
     ("problem", re.compile(r"^problem\b", re.I), "box", "indigo"),
@@ -281,7 +241,6 @@ LEGACY_FIGURE = re.compile(r"^!\[(?:\\.|[^\]\\])*\]\((?P<src>[^)\s]+)\)\s*(?:\n\
 
 
 def _lead(inline: Token | None, source: str) -> str:
-    """The paragraph's leading bold as written, or '' when it doesn't start with one."""
     children = [
         c
         for c in (inline.children if inline else None) or []
@@ -294,15 +253,12 @@ def _lead(inline: Token | None, source: str) -> str:
 
 
 def escape_title(text: str) -> str:
-    """Text for between ``[ ]``: brackets in pairs stay (maths keeps its LaTeX); an unpaired
-    bracket is escaped, so the title can't end early."""
     out: list[str] = []
-    opened: list[int] = []  # where each unclosed [ is in out
+    opened: list[int] = []
     i = 0
     while i < len(text):
         c = text[i]
         if c == "\\":
-            # A lone backslash at the end would escape the closing ]: it is written \\.
             out.append(text[i : i + 2] if i + 1 < len(text) else "\\\\")
             i += 2
             continue
@@ -321,7 +277,6 @@ def escape_title(text: str) -> str:
 
 
 def _label(lead: str) -> str:
-    """A title for ``[ ]``: the label without its colon."""
     return escape_title(lead.strip().rstrip(":").strip())
 
 
@@ -334,13 +289,6 @@ def _unquote(text: str) -> str:
 
 
 def upgrade_legacy(markdown: str, visuals: list[NotesVisual]) -> str:
-    """Old notes in this format, grouped exactly as the old reading view drew them.
-
-    A ``**Problem:**``, ``**Step n: …**`` or ``**Answer:**`` (``Result:``, ``Summary:``) paragraph
-    starts a card holding what follows until the next card, heading or divider; a quote right
-    after an answer ends it. ``> **Key idea:**`` quotes become blue boxes and ``> **Watch out:**``
-    ones amber; ``![caption](visuals/<id>.<ext>)`` with its caption becomes ``::figure{#<id>}``.
-    """
     by_path = {v.path: v.id for v in visuals}
     lines = markdown.split("\n")
     tokens = MarkdownIt().enable("table").parse(mask_math(markdown))
@@ -348,7 +296,6 @@ def upgrade_legacy(markdown: str, visuals: list[NotesVisual]) -> str:
     card: str | None = None
 
     def add(text: str, *, tight: bool = False) -> None:
-        """Blocks are separated by blank lines; a fence hugs the text inside it."""
         if tight and out:
             out[-1] += "\n" + text
         else:
@@ -367,19 +314,16 @@ def upgrade_legacy(markdown: str, visuals: list[NotesVisual]) -> str:
             i += 1
             continue
         start, end = token.map
-        # Lines no block holds, such as link reference definitions, are kept as they are.
         if gap := "\n".join(lines[cursor:start]).strip("\n"):
             add(gap, tight=bool(card) and bool(OPEN.match(out[-1].split("\n")[-1])))
         cursor = end
         source = "\n".join(lines[start:end]).strip("\n")
-        # Skip to the token after this block.
         depth, j = token.nesting, i + 1
         while depth > 0 and j < len(tokens):
             depth += tokens[j].nesting
             j += 1
         lead = _lead(tokens[i + 1], source) if token.type == "paragraph_open" else ""
         kind = next(((k, cmd, col) for k, rx, cmd, col in LEGACY_CARDS if rx.search(lead)), None)
-        # The first block inside a card hugs its opening fence.
         opened = bool(card) and bool(out) and bool(OPEN.match(out[-1].split("\n")[-1]))
         if token.type in {"heading_open", "hr"}:
             close()
@@ -420,7 +364,6 @@ def upgrade_legacy(markdown: str, visuals: list[NotesVisual]) -> str:
 
 
 def upgraded(notes: Notes) -> Notes:
-    """Notes in the current format; old notes are upgraded in memory, never on disk."""
     if notes.format_version >= FORMAT_VERSION:
         return notes
     return notes.model_copy(

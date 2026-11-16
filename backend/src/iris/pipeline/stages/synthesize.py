@@ -9,7 +9,6 @@ from pathlib import Path
 import cv2
 import numpy as np
 from markdown_it import MarkdownIt
-from markdown_it.token import Token
 from pydantic import BaseModel
 
 from iris.llm import structured, usage
@@ -32,8 +31,6 @@ from iris.pipeline.context import StageContext
 from iris.store.layout import inside, read_model, write_model
 
 log = logging.getLogger(__name__)
-
-MARKER = re.compile(r"\[visual:([A-Za-z0-9_\-]+)\]")
 
 PHASH_MAX_DIFFERING_BITS = 8
 THUMB_SIZE = 96
@@ -220,7 +217,7 @@ def join_sections(sections: list[str]) -> str:
 
 
 def markers(markdown: str) -> list[str]:
-    return MARKER.findall(markdown)
+    return notes_format.MARKER.findall(markdown)
 
 
 def placements(sections: list[str]) -> dict[str, int]:
@@ -240,24 +237,17 @@ def _protected_wording_count(markdown: str) -> int:
 
 
 def _text_length(markdown: str) -> int:
-    return len(MARKER.sub("", markdown).strip())
-
-
-def _check_tokens(tokens: list[Token]) -> None:
-    for token in tokens:
-        if token.type in {"image", "html_inline", "html_block"}:
-            raise ValueError("rewritten notes must not contain images or HTML")
-        if token.children:
-            _check_tokens(token.children)
+    return len(notes_format.MARKER.sub("", markdown).strip())
 
 
 def _standalone_markers(markdown: str) -> list[str]:
     tokens = MarkdownIt().parse(markdown)
-    _check_tokens(tokens)
+    if any(notes_format.forbidden_tokens(tokens)):
+        raise ValueError("rewritten notes must not contain images or HTML")
     return [
         m.group(1)
         for t in tokens
-        if t.type == "inline" and (m := MARKER.fullmatch(t.content.strip()))
+        if t.type == "inline" and (m := notes_format.MARKER.fullmatch(t.content.strip()))
     ]
 
 
