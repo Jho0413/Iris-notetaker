@@ -2,6 +2,7 @@ import asyncio
 import logging
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 from pathlib import Path
 from typing import NamedTuple
 
@@ -138,9 +139,10 @@ def finalize_audio(chunks: Sequence[tuple[int, Path]], dest: Path, rate: int) ->
     try:
         with open_mono_wav(str(tmp), rate) as out:
             wav = PlacedWav(out.writeframes, rate)
-            only_run = len(runs) == 1
             first_seq, first_path = runs[0][0]
-            _decode_run(ChunkStream(feed, b"", first_seq, first_path, 0), wav, required=only_run)
+            _decode_run(
+                ChunkStream(feed, b"", first_seq, first_path, 0), wav, required=len(runs) == 1
+            )
             header = stream_header(_files(runs[0])) if len(runs) > 1 else None
             for run in runs[1:]:
                 found = find_cluster(_files(run))
@@ -210,19 +212,11 @@ def _normalise_share(
     for i, frame in enumerate(share):
         if (first := normaliser.add(frame.t, frame.path)) is not None:
             assert normaliser.size is not None
-            rest = _normalise_in_size(normaliser.frames_dir, normaliser.size, share[i + 1 :], pool)
-            return [first, *rest]
+            write = partial(normalise_frame, normaliser.frames_dir, size=normaliser.size)
+            rest = share[i + 1 :]
+            sized = pool.map(write, [f.t for f in rest], [f.path for f in rest])
+            return [first, *(ref for ref in sized if ref is not None)]
     return []
-
-
-def _normalise_in_size(
-    frames_dir: Path,
-    size: tuple[int, int],
-    frames: Sequence[CapturedFrame],
-    pool: ThreadPoolExecutor,
-) -> list[FrameRef]:
-    sized = pool.map(lambda frame: normalise_frame(frames_dir, frame.t, frame.path, size), frames)
-    return [ref for ref in sized if ref is not None]
 
 
 def _sample_on_grid(frames: list[CapturedFrame], fps: float) -> list[CapturedFrame]:

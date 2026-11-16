@@ -79,15 +79,15 @@ the form that fits the change; don't invent states where there are none.
   live recordings. An interface earns its place with two real implementations, not one.
 - **No comments** in hand-written code and tests (`backend/`, `frontend/`, `desktop/`): no comments
   in any form (`#`, `//`, `/* */`, JSDoc, HTML and CSS comments) and no docstrings, except the ones
-  something reads (below), which new code writes too. Name things for what they mean to the user
-  or the domain. A reason is kept only by renaming something that already has a name (a variable,
-  parameter, attribute or existing function) or by a test; a design decision goes into the
-  feature's `docs/` page in plain words; anything else is dropped. Never add a function, alias or
-  constant just to hold a reason. Tool directives stay, with nothing after them (shebangs,
+  something reads (below), which new code writes too. Name things for what they mean to the user or
+  the domain. A reason is kept only by renaming something that already has a name (a variable,
+  parameter, attribute or existing function), by a test, or, if it is a design decision, in the
+  feature's `docs/` page in plain words; anything else is dropped. Never add a function, variable,
+  alias or constant just to hold a reason. Tool directives stay, with nothing after them (shebangs,
   `# noqa`, `# type: ignore`, `// eslint-disable`). Generated files (`schema.d.ts`) and config and
-  example files of any format (`.env.example`, `pyproject.toml`, `vite.config.ts`,
-  `tsconfig*.json`, `electron-builder.yml`, `Makefile`, CI workflows) keep their comments. When you
-  work on a file, remove its other comments and docstrings. The docstrings that stay:
+  example files of any format (`.env.example`, `pyproject.toml`, `vite.config.ts`, `tsconfig*.json`,
+  `electron-builder.yml`, `Makefile`, CI workflows) keep their comments. When you work on a file,
+  remove its other comments and docstrings. The docstrings that stay:
   - MCP tool docstrings: the assistant reads them as the tools' descriptions;
   - docstrings of FastAPI routes and of the models the API sends or accepts (the ones that reach
     `schema.d.ts`): they become the OpenAPI schema;
