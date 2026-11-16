@@ -237,6 +237,14 @@ class AudioLane(LiveLane):
         self._segment_counts: list[int] = []
         self._kept: set[str] = set()
         self._client = None
+        self._decoder: LiveDecoder | None = None
+
+    def wake(self) -> None:
+        if self._decoder and self.timeline.ending:
+            self._decoder.end()
+            self._changed.set()
+        elif self._decoder:
+            self._decoder.poke()
 
     async def run(self) -> None:
         longest = self.max_len + max(self.confirm, self.min_tail)
@@ -251,25 +259,17 @@ class AudioLane(LiveLane):
                 loop.call_soon_threadsafe(self._changed.set)
 
         decoder = LiveDecoder(paths, self.rate, self.ctx.settings.live_audio_gap_wait_s, notify)
+        self._decoder = decoder
+        self.wake()
         decoding = asyncio.create_task(asyncio.to_thread(decoder.run))
         decoding.add_done_callback(lambda _: self._changed.set())
-        forwarding = asyncio.create_task(self._forward_input(decoder))
         windows: dict[int, asyncio.Task[CachedWindow]] = {}
         try:
             await self._process(decoder, decoding, windows)
         finally:
             decoder.cancel()
-            await cancel_and_wait([forwarding, *windows.values()])
+            await cancel_and_wait(windows.values())
             await asyncio.gather(decoding, return_exceptions=True)
-
-    async def _forward_input(self, decoder: LiveDecoder) -> None:
-        while True:
-            await self.wait_for_input()
-            if self.timeline.ending:
-                decoder.end()
-                self._changed.set()
-                return
-            decoder.poke()
 
     async def _process(
         self,

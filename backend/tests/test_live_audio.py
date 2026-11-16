@@ -36,7 +36,7 @@ from tests.api_errors import connection_error, status_error
 from tests.builders import stage_ctx
 from tests.fakes import fake_openai, install_client
 from tests.media import SPEECH_RATE, WEBM_RATE, split, tone, wav_seconds
-from tests.waiting import decoder_waiting_for
+from tests.waiting import decoder_waiting_for, settle
 
 SECONDS = 12
 WORDS = [
@@ -279,6 +279,17 @@ async def test_unreadable_audio_is_skipped_not_fatal(
     run.store([b"\x1a\x45\xdf\xa3 but not really webm"], [0])
     await run.stop()
     assert Lane.AUDIO in run.timeline.skipped_input
+
+
+async def test_notes_asked_for_after_the_decoder_gave_up_still_end_the_lane(
+    tmp_path: Path, paths: SessionPaths, monkeypatch
+):
+    gave_up = threading.Event()
+    monkeypatch.setattr(audio_lane.LiveDecoder, "run", lambda _: gave_up.set())
+    run = Run(paths, settings(tmp_path), FakeTranscriber(), monkeypatch)
+    await reached(gave_up)
+    await settle(20)
+    await run.stop(timeout=5)
 
 
 def in_silence(t: float, pad: float = 0.08) -> bool:
