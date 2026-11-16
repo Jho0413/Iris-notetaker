@@ -6,7 +6,7 @@ from iris.live.lane import LiveLane
 from iris.live.timeline import Lane, LiveTimeline
 from iris.llm import usage
 from iris.llm.errors import ErrorKind, classify
-from iris.models import EventType, Selection, Stage, Transcript
+from iris.models import EventType, Stage
 from iris.pipeline.context import StageContext
 from iris.pipeline.stages import write
 from iris.pipeline.stages.write import WritingPart, WrittenSection
@@ -17,11 +17,8 @@ MAX_ATTEMPTS = 2
 RETRY_DELAY_S = 60.0
 
 
-def plan(
-    transcript: Transcript, selection: Selection, budget: int, horizon: float
-) -> list[WritingPart]:
-    frozen, _ = write.split_parts(transcript, selection, budget, horizon)
-    return frozen
+def _section_args(index: int, language: str | None, first: WrittenSection | None) -> dict:
+    return dict(language=language, first=first if index else None, later=True, earlier=index > 0)
 
 
 class DraftLane(LiveLane):
@@ -55,7 +52,9 @@ class DraftLane(LiveLane):
             seen = self._evidence()
             transcript, selection = tl.transcript(), tl.selection()
             budget, horizon = self.ctx.settings.notes_context_chars, seen[0]
-            closed = await asyncio.to_thread(plan, transcript, selection, budget, horizon)
+            closed, _ = await asyncio.to_thread(
+                write.split_parts, transcript, selection, budget, horizon
+            )
             language = transcript.language
             self._due = None
 
@@ -82,9 +81,7 @@ class DraftLane(LiveLane):
     def _payload(
         self, part: WritingPart, index: int, language: str | None, first: WrittenSection | None
     ) -> str:
-        return write.section_payload(
-            part, language=language, first=first if index else None, later=True, earlier=index > 0
-        )
+        return write.section_payload(part, **_section_args(index, language, first))
 
     def _given_up(self, payload: str) -> bool:
         return self._failures.get(payload, 0) >= MAX_ATTEMPTS
@@ -120,12 +117,7 @@ class DraftLane(LiveLane):
         try:
             with usage.recording(self.ctx, Stage.WRITE):
                 section = await write.write_section(
-                    self.ctx,
-                    part,
-                    language=language,
-                    first=first if index else None,
-                    later=True,
-                    earlier=index > 0,
+                    self.ctx, part, **_section_args(index, language, first)
                 )
         except Exception as exc:
             failures = self._failures.get(payload, 0) + 1
