@@ -179,9 +179,10 @@ the others knowing; a lane whose input lane failed stops making paid calls.
    after a set time is cancelled and counts as failed, so a stuck lane delays the notes by at most
    that long; if the run itself is cancelled (the engine shutting down), the lanes stop with it.
 2. Promotion keeps the lanes' work as far as it holds together, in pipeline order. If the audio,
-   screen and select lanes all finished cleanly, the transcript, moments, alignment and selection
-   become the stages' outputs and the run goes on from write, where the sections written live and
-   the figures redrawn live are cache hits. If only the audio lane did, the run goes on from
+   screen and select lanes all finished cleanly, the transcript, moments and selection become the
+   stages' outputs; align, which makes no model call, runs on them as it would after an upload, and
+   the run goes on to write, where the sections written live and the figures redrawn live are
+   cache hits. If only the audio lane did, the run goes on from
    detect, so the speech isn't transcribed twice. Otherwise (the audio lane failed or missed a
    chunk) the full pipeline runs, as for an upload.
 

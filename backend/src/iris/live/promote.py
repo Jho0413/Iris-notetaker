@@ -2,16 +2,15 @@ import asyncio
 import logging
 
 from iris.live.timeline import Lane, LiveTimeline
-from iris.models import Alignment, EventType, Moments, Stage
+from iris.models import EventType, Moments, Stage
 from iris.pipeline import PLAN
 from iris.pipeline.context import StageContext
-from iris.pipeline.stages import align
 from iris.pipeline.stages.detect import moment_event
 from iris.store.layout import write_model
 
 log = logging.getLogger(__name__)
 
-EVERYTHING: tuple[Stage, ...] = (Stage.TRANSCRIBE, Stage.DETECT, Stage.ALIGN, Stage.SELECT)
+EVERYTHING: tuple[Stage, ...] = (Stage.TRANSCRIBE, Stage.DETECT, Stage.SELECT)
 TRANSCRIPT_ONLY: tuple[Stage, ...] = (Stage.TRANSCRIBE,)
 
 
@@ -73,9 +72,6 @@ async def promote(ctx: StageContext, tl: LiveTimeline, stage: Stage) -> dict:
         await asyncio.to_thread(write_model, paths.moments, moments)
         for m in moments.moments:
             ctx.emit(EventType.MOMENT_FOUND, moment_event(m))
-    elif stage == Stage.ALIGN:
-        items = await asyncio.to_thread(align.align, list(tl.moments), list(tl.segments))
-        await asyncio.to_thread(write_model, paths.alignment, Alignment(items=items))
     elif stage == Stage.SELECT:
         selection = tl.selection()
         await asyncio.to_thread(write_model, paths.selection, selection)

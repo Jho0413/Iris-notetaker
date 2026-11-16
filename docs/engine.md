@@ -92,7 +92,7 @@ Promotion is a live recording's results kept as the stages' own
 | `transcript_chunks/` | each transcribed chunk (a cache) | transcribe |
 | `transcript.json` | what was said, with its times | transcribe, or promotion |
 | `moments.json` | the moments found on screen | detect, or promotion |
-| `alignment.json` | each moment with the speech around it | align, or promotion |
+| `alignment.json` | each moment with the speech around it | align |
 | `selection_batches/` | each batch of moments read (a cache) | select, or the select lane |
 | `selection.json` | what was read on screen, and the figures kept | select, or promotion |
 | `visuals/` | each figure's source crop and its redraw | select (crops) and render (redraws), or the select lane |

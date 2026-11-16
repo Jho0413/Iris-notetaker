@@ -32,6 +32,7 @@ from iris.models import (
 )
 from iris.pipeline import PLAN, STAGES
 from iris.pipeline.context import StageContext
+from iris.pipeline.stages import align
 from iris.store.layout import SessionPaths, read_model, session_paths
 from tests.builders import stage_ctx
 from tests.fakes import PipelineOpenAI, install_client
@@ -217,9 +218,10 @@ def test_a_live_session_is_finished_at_stop_with_only_the_open_work_left(
     stages = stage_events(client, sid, len(live))
     promoted = [s for kind, s, p in stages if p and kind == "stage_finished"]
     ran = [s for kind, s, p in stages if not p and kind == "stage_finished"]
-    assert promoted == ["transcribe", "detect", "align", "select"]
-    assert ran == ["ingest", "write", "render", "assemble", "synthesize"] or ran == [
+    assert promoted == ["transcribe", "detect", "select"]
+    assert ran == ["ingest", "align", "write", "render", "assemble", "synthesize"] or ran == [
         "ingest",
+        "align",
         "render",
         "write",
         "assemble",
@@ -297,7 +299,7 @@ def test_an_audio_only_session_writes_its_notes_while_recording(app_client: Test
     assert timeline.complete and timeline.moments == []
     stages = stage_events(client, sid, len(live))
     promoted = [s for kind, s, p in stages if p and kind == "stage_finished"]
-    assert promoted == ["transcribe", "detect", "align", "select"]
+    assert promoted == ["transcribe", "detect", "select"]
     notes = client.get(f"/api/sessions/{sid}/notes").json()
     assert notes["visuals"] == [] and "::figure" not in notes["markdown"]
     parts = read_model(root / "notes_draft.json", NotesDraft).parts
@@ -425,7 +427,7 @@ def test_notes_made_after_a_restart_keep_the_live_work(tmp_path: Path, fake: Fak
 
         stages = stage_events(client, sid, 0)
         promoted = [s for kind, s, p in stages if p and kind == "stage_finished"]
-        assert promoted == ["transcribe", "detect", "align", "select"]
+        assert promoted == ["transcribe", "detect", "select"]
         assert not SessionPaths(root).transcript_chunks_dir.exists()
         transcript = read_model(root / "transcript.json", Transcript)
         assert transcript.segments[: len(before_restart.segments)] == before_restart.segments
@@ -568,7 +570,7 @@ async def test_a_complete_timeline_promotes_everything(tmp_path: Path):
     c = stage_ctx(tmp_path, live=True)
     tl = await timeline_with_work(c)
     assert promote.promotable(c, tl) == promote.EVERYTHING
-    assert promote.remaining_plan(promote.EVERYTHING) == PLAN[4:]
+    assert promote.remaining_plan(promote.EVERYTHING) == [[Stage.ALIGN], *PLAN[4:]]
 
 
 @pytest.mark.parametrize(
@@ -625,12 +627,13 @@ async def test_promotion_writes_the_timeline_as_it_is(tmp_path: Path):
     c.emit = lambda t, d: emitted.append((t, d))
     tl = await timeline_with_work(c)
     extras = [await promote.promote(c, tl, stage) for stage in promote.EVERYTHING]
-    assert extras == [{"segments": len(tl.segments)}, {}, {}, {}]
+    assert extras == [{"segments": len(tl.segments)}, {}, {}]
     transcript = read_model(c.paths.transcript, Transcript)
     assert [s.text for s in transcript.segments] == ["b", "a"]
     assert transcript.language == "english"
     assert read_model(c.paths.moments, Moments).moments == tl.moments
     assert read_model(c.paths.selection, Selection) == tl.selection()
+    await align.run(c)
     (item,) = read_model(c.paths.alignment, Alignment).items
     assert [s.text for s in item.transcript] == ["b", "a"]
     assert [t for t, _ in emitted] == ["moment_found", "visual_selected"]
