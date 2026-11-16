@@ -110,15 +110,6 @@ def billed_seconds(seconds: float) -> float:
     return float(math.ceil(round(seconds, 3)))
 
 
-def _duration_billed_seconds(usage: Any, request: Mapping[str, Any], response: Any) -> float | None:
-    seconds = _attr_or_key(usage, "seconds")
-    if not isinstance(seconds, int | float):
-        seconds = _attr_or_key(response, "duration")
-    if not isinstance(seconds, int | float):
-        seconds = _wav_seconds(request)
-    return seconds
-
-
 def measure(operation: str, request: Mapping[str, Any], response: Any) -> dict[str, float]:
     usage = _attr_or_key(response, "usage")
     m: dict[str, float] = {}
@@ -164,7 +155,11 @@ def measure(operation: str, request: Mapping[str, Any], response: Any) -> dict[s
             )
             m["output_tokens"] = _int(_attr_or_key(usage, "output_tokens"))
         else:
-            seconds = _duration_billed_seconds(usage, request, response)
+            seconds = _attr_or_key(usage, "seconds")
+            if not isinstance(seconds, int | float):
+                seconds = _attr_or_key(response, "duration")
+            if not isinstance(seconds, int | float):
+                seconds = _wav_seconds(request)
             if seconds is not None and seconds > 0:
                 m["audio_seconds"] = billed_seconds(float(seconds))
     return m
@@ -267,24 +262,15 @@ def timed(operation: str, request: Mapping[str, Any]) -> Iterator[dict[str, Any]
     record_call(operation, request, out.get("response"), time.perf_counter() - start)
 
 
-def _last_line_cut_off(f: io.BufferedRandom) -> bool:
-    size = f.seek(0, io.SEEK_END)
-    if not size:
-        return False
-    f.seek(size - 1)
-    return f.read(1) != b"\n"
-
-
 def append_record(log_path: Path, record: UsageRecord) -> None:
     line = (record.model_dump_json() + "\n").encode()
     with _lock, log_path.open("a+b") as f:
-        if _last_line_cut_off(f):
-            line = b"\n" + line
+        size = f.seek(0, io.SEEK_END)
+        if size:
+            f.seek(size - 1)
+            if f.read(1) != b"\n":
+                line = b"\n" + line
         f.write(line)
-
-
-def _split_at_newlines_only(text: str) -> list[str]:
-    return text.split("\n")
 
 
 def read_records(log_path: Path) -> list[UsageRecord]:
@@ -292,7 +278,7 @@ def read_records(log_path: Path) -> list[UsageRecord]:
         return []
     records = []
     with _lock:
-        lines = _split_at_newlines_only(log_path.read_text(encoding="utf-8", errors="replace"))
+        lines = log_path.read_text(encoding="utf-8", errors="replace").split("\n")
     for n, line in enumerate(lines, 1):
         if not line.strip():
             continue

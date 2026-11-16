@@ -141,14 +141,15 @@ to every change; the reviewer says which ones it checked. Principles are those i
   named constants or `Settings` fields, and new fields are listed in `backend/.env.example`.
 - Shared building blocks live in a shared module, not in a stage, lane or route that others
   import from or copy; an interface or `Protocol` has two real implementations.
-- Names say what things mean. In hand-written code and tests (`backend/`, `frontend/`,
-  `desktop/`), no comments in any form and no docstrings, except MCP tools, FastAPI routes and the
-  models that reach `schema.d.ts`, and the module or class contract of an interface
-  (`sources/base.py`, `live/lane.py`), not its methods. Tool directives stay with nothing after
-  them (shebangs, `# noqa`, `# type: ignore`, `// eslint-disable`). Files the change touches have
-  their other comments and docstrings removed, any reason still needed moved into a name or the
-  docs page. Generated files and config and example files of any format keep their comments. No
-  dead code left behind.
+- Names say what things mean. In hand-written code and tests (`backend/`, `frontend/`, `desktop/`),
+  no comments in any form and no docstrings, except MCP tools, FastAPI routes and the models that
+  reach `schema.d.ts`, and the module or class contract of an interface (`sources/base.py`,
+  `live/lane.py`), not its methods. Tool directives stay with nothing after them (shebangs,
+  `# noqa`, `# type: ignore`, `// eslint-disable`). Files the change touches have their other
+  comments and docstrings removed. A reason is kept only by renaming something that already has a
+  name, by a test, or, if it is a design decision, in the docs page in plain words; a function,
+  variable, alias or constant added only to hold a reason is a should-fix. Generated files and
+  config and example files of any format keep their comments. No dead code left behind.
 - A change in behaviour leaves nothing describing the old one: search for comments, docstrings,
   UI wording and files that still say or do what the code used to.
 - No secrets in code or logs; no new dependency without a reason.

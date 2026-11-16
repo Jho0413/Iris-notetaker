@@ -123,12 +123,8 @@ def normalise_frame(
 def _write_in_size(
     frames_dir: Path, t: float, src: Path, image: np.ndarray, size: tuple[int, int]
 ) -> FrameRef:
-    if (image.shape[1], image.shape[0]) == size:
-        return _copy_without_reencoding(frames_dir, t, src)
-    return write_frame(frames_dir, t, fit(image, size))
-
-
-def _copy_without_reencoding(frames_dir: Path, t: float, src: Path) -> FrameRef:
+    if (image.shape[1], image.shape[0]) != size:
+        return write_frame(frames_dir, t, fit(image, size))
     shutil.copyfile(src, frames_dir / frame_name(t))
     return FrameRef(t=t, path=frame_path(t))
 

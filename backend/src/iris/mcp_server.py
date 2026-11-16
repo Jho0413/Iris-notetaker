@@ -30,14 +30,11 @@ from iris.svg import rasterize_svg
 
 log = logging.getLogger(__name__)
 
-UNTYPED_RESVG_ERROR = Exception
-
 MAX_SEARCH_RESULTS = 10
 IMAGE_FORMATS = {".png": "png", ".jpg": "jpeg", ".jpeg": "jpeg"}
 MAX_IMAGE_EDGE_PX = 1568
 MAX_IMAGE_PIXELS = 1_150_000
-MAX_BASE64_IMAGE_BYTES = 5_000_000
-MAX_IMAGE_BYTES = MAX_BASE64_IMAGE_BYTES * 3 // 4
+MAX_IMAGE_BYTES = 3_750_000
 
 INSTRUCTIONS = (
     "Iris makes notes from recorded lectures, meetings and demos: what was said, and what was "
@@ -86,10 +83,9 @@ def not_ready_message(session: Session) -> str:
 
 
 def notes_document(session: Session, notes: Notes) -> str:
-    added_in_local_time = session.created_at.astimezone()
     about = (
         f'Session "{session.title}" ({session.id}) · {notes.session_type} · '
-        f"added to Iris {added_in_local_time:%Y-%m-%d}"
+        f"added to Iris {session.created_at.astimezone():%Y-%m-%d}"
     )
     header = [f"# {notes.title}", "", about]
     if notes.edited:
@@ -139,7 +135,7 @@ def figure_image(session_root: Path, relative_path: str) -> Image:
         return Image(data=fit_image(raw, IMAGE_FORMATS[suffix]), format=IMAGE_FORMATS[suffix])
     try:
         png = rasterize_svg(raw, width=MAX_IMAGE_EDGE_PX)
-    except UNTYPED_RESVG_ERROR:
+    except Exception:
         log.exception("can't draw figure image %s", path)
         raise ToolError("This figure's image couldn't be drawn.") from None
     return Image(data=fit_image(png, "png"), format="png")
