@@ -8,7 +8,6 @@ import time
 from collections import deque
 from collections.abc import Callable
 from pathlib import Path
-from typing import Literal
 
 import av
 import numpy as np
@@ -22,15 +21,10 @@ from iris.llm.client import get_openai
 from iris.llm.errors import describe
 from iris.llm.transcription import ChunkTranscript, supports_prompt, transcribe_stretch_at
 from iris.media.audio import fits_transcription_upload, quiet_profile
+from iris.media.webm import ChunkStream, NoChunkReason, PlacedWav, find_cluster, stream_header
 from iris.models import EventType, Stage, Transcript, TranscriptSegment
 from iris.pipeline.context import StageContext
-from iris.sources.browser_live import (
-    PlacedWav,
-    RawPcm,
-    audio_chunks,
-    find_cluster,
-    stream_header,
-)
+from iris.sources.browser_live import audio_chunks
 from iris.store.layout import SessionPaths, read_model, write_model
 
 log = logging.getLogger(__name__)
@@ -39,9 +33,6 @@ CONFIRM_S = 1.0
 PROMPT_CHARS = 500
 MIN_TAIL_S = 1.0
 PROGRESS_S = 5.0
-
-
-NoChunkReason = Literal["gap", "end", "stop"]
 
 
 class LiveDecoder:
@@ -75,14 +66,14 @@ class LiveDecoder:
         self.paths.live_pcm.parent.mkdir(parents=True, exist_ok=True)
         with self.paths.live_pcm.open("wb") as f:
             self._file = f
-            self._wav = PlacedWav(RawPcm(f), self.rate)
+            self._wav = PlacedWav(f.write, self.rate)
             self._decode_all()
             if not self._cancelled:
                 self._wav.flush()
             self._report()
 
     def _decode_all(self) -> None:
-        first = self.wait_chunk(0)
+        first = self.next_chunk(0)
         if not isinstance(first, Path):
             if first == "gap":
                 self._skip("the first audio chunk (the stream header) never arrived")
@@ -120,13 +111,13 @@ class LiveDecoder:
             if found is not None:
                 index, offset = found
                 return seq - (len(files[-2:]) - 1) + index, offset
-            got = self.wait_chunk(seq + 1)
+            got = self.next_chunk(seq + 1)
             if not isinstance(got, Path):
                 return seq + 1 if got == "gap" else None
             seq += 1
             files.append(got)
 
-    def _decode(self, stream: "ChunkStream") -> None:
+    def _decode(self, stream: ChunkStream) -> None:
         assert self._wav is not None
         with stream:
             try:
@@ -158,7 +149,7 @@ class LiveDecoder:
                     if not self._cancelled:
                         self._skip(f"live audio stream could not be read on: {e}")
 
-    def wait_chunk(self, seq: int) -> Path | NoChunkReason:
+    def next_chunk(self, seq: int) -> Path | NoChunkReason:
         gap_since: float | None = None
         while True:
             self._forget_wakeups_before_checking()
@@ -197,48 +188,6 @@ class LiveDecoder:
         self._file.flush()
         self.samples = self._wav.samples
         self._notify()
-
-
-class ChunkStream(io.RawIOBase):
-    def __init__(
-        self,
-        decoder: LiveDecoder,
-        prefix: bytes,
-        seq: int,
-        path: Path,
-        offset: int,
-    ):
-        self._decoder = decoder
-        self._prefix = io.BytesIO(prefix)
-        self.seq = seq
-        self.ended: NoChunkReason | None = None
-        self._file: io.BufferedReader | None = path.open("rb")
-        self._file.seek(offset)
-
-    def readable(self) -> bool:
-        return True
-
-    def readinto(self, buffer) -> int:  # type: ignore[override]
-        if n := self._prefix.readinto(buffer):
-            return n
-        while self._file is not None:
-            if n := self._file.readinto(buffer):
-                return n
-            got = self._decoder.wait_chunk(self.seq + 1)
-            self._file.close()
-            self._file = None
-            if isinstance(got, Path):
-                self.seq += 1
-                self._file = got.open("rb")
-            else:
-                self.ended = got
-        return 0
-
-    def close(self) -> None:
-        if self._file is not None:
-            self._file.close()
-            self._file = None
-        super().close()
 
 
 def window_cut(samples: np.ndarray, rate: int, min_len: int, max_len: int) -> int:

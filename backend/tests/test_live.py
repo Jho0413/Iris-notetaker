@@ -17,6 +17,7 @@ from iris.llm.errors import UserFacingError
 from iris.llm.usage import append_record
 from iris.main import create_app
 from iris.media.audio import read_wav
+from iris.media.webm import CLUSTER_ID, find_cluster
 from iris.models import (
     LIVE_WITHOUT_AUDIO,
     UNREADABLE_LIVE_AUDIO,
@@ -25,7 +26,6 @@ from iris.models import (
 )
 from iris.pipeline.stages import render, transcribe
 from iris.sources.browser_live import (
-    CLUSTER_ID,
     BrowserLiveSource,
     CapturedFrame,
     ChunkConflict,
@@ -34,7 +34,6 @@ from iris.sources.browser_live import (
     contiguous_runs,
     finalize_audio,
     finalize_frames,
-    find_cluster,
     missing_audio_chunks,
     split_shares,
     store_audio_chunk,
@@ -160,7 +159,7 @@ def test_header_only_first_chunk_then_a_gap(paths: SessionPaths, webm: bytes, pa
 def test_runs_split_at_missing_chunks(tmp_path: Path):
     p = [tmp_path / str(i) for i in range(6)]
     chunks = [(0, p[0]), (1, p[1]), (3, p[3]), (4, p[4]), (5, p[5])]
-    assert contiguous_runs(chunks) == [[p[0], p[1]], [p[3], p[4], p[5]]]
+    assert contiguous_runs(chunks) == [chunks[:2], chunks[2:]]
     assert contiguous_runs([]) == []
 
 

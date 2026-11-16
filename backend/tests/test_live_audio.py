@@ -23,10 +23,10 @@ from iris.live.replay import encode_webm
 from iris.llm import usage
 from iris.llm.transcription import transcribe_chunk
 from iris.media.audio import encode_wav
+from iris.media.webm import CLUSTER_ID
 from iris.models import EventType, SourceKind, Stage, Transcript
 from iris.pipeline.context import StageContext
 from iris.sources.browser_live import (
-    CLUSTER_ID,
     audio_chunks,
     finalize_audio,
     store_audio_chunk,
@@ -168,15 +168,15 @@ def shuffled(n: int, skip: set[int] = frozenset(), seed: int = 0) -> list[int]:
 
 def decoder_waiting_for(monkeypatch, seq: int) -> threading.Event:
     waiting = threading.Event()
-    wait_chunk = audio_lane.LiveDecoder.wait_chunk
+    next_chunk = audio_lane.LiveDecoder.next_chunk
 
     def watched(decoder, n):
         if n == seq:
             decoder._report()
             waiting.set()
-        return wait_chunk(decoder, n)
+        return next_chunk(decoder, n)
 
-    monkeypatch.setattr(audio_lane.LiveDecoder, "wait_chunk", watched)
+    monkeypatch.setattr(audio_lane.LiveDecoder, "next_chunk", watched)
     return waiting
 
 
