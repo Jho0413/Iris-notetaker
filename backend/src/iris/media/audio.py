@@ -12,7 +12,7 @@ SAMPLE_BYTES = 2
 QUIET_RATIO = 2.0
 TRANSCRIPTION_UPLOAD_LIMIT_BYTES = 25 * 1024 * 1024
 WAV_HEADER_ALLOWANCE_BYTES = 1024
-POWER_BLOCK_SAMPLES = 4_000_000
+POWER_BLOCK_SAMPLES_TO_BOUND_MEMORY = 4_000_000
 
 
 @contextmanager
@@ -51,7 +51,7 @@ def fits_transcription_upload(samples: float) -> bool:
 def _power_per_frame_in_blocks(samples: np.ndarray, frame: int) -> np.ndarray:
     n_frames = len(samples) // frame
     power = np.empty(n_frames, dtype=np.float64)
-    block = max(1, POWER_BLOCK_SAMPLES // frame)
+    block = max(1, POWER_BLOCK_SAMPLES_TO_BOUND_MEMORY // frame)
     for i in range(0, n_frames, block):
         j = min(i + block, n_frames)
         x = samples[i * frame : j * frame].astype(np.float32).reshape(j - i, frame)
