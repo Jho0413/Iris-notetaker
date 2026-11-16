@@ -67,9 +67,6 @@ fails if it:
 List each problem concretely, as an instruction to fix it.
 """
 
-
-EVENT_FIELDS_FREE_OF_MODEL_TEXT = {"id", "path", "render_as", "verified"}
-
 RENDERERS: dict[RenderAs, tuple[RenderAs, ...]] = {
     "svg": ("svg", "image"),
     "image": ("image", "svg"),
@@ -170,12 +167,6 @@ DRAWERS: dict[RenderAs, tuple[Drawer, str]] = {
 }
 
 
-def _per_call_efforts_unless_default(ctx: StageContext) -> dict[str, list[str]]:
-    efforts = [_effort(ctx, "diagram"), _effort(ctx, "check")]
-    keyed_like_older_caches = efforts == [ctx.settings.reasoning_effort] * 2
-    return {} if keyed_like_older_caches else {"efforts": efforts}
-
-
 def _cache_key(ctx: StageContext, visual: Visual, source: bytes) -> str:
     s = ctx.settings
     payload = {
@@ -183,7 +174,12 @@ def _cache_key(ctx: StageContext, visual: Visual, source: bytes) -> str:
         "models": [s.diagram_model, s.image_model, s.vision_model, s.image_quality],
         "effort": s.reasoning_effort,
         "attempts": s.render_attempts,
-        **_per_call_efforts_unless_default(ctx),
+        **(
+            {"efforts": efforts}
+            if (efforts := [_effort(ctx, "diagram"), _effort(ctx, "check")])
+            != [s.reasoning_effort] * 2
+            else {}
+        ),
         "visual": visual.model_dump(mode="json", exclude={"id", "path", "source_path"}),
         "source": hashlib.sha256(source).hexdigest(),
     }
@@ -259,13 +255,12 @@ def _error_fallback(
     ctx: StageContext, visual: Visual, source_rel: str, attempts: int, exc: Exception
 ) -> RenderedVisual:
     reason = describe(exc)
-    might_be_a_bug = not isinstance(exc, openai.APIError)
     log.warning(
         "session %s: redrawing %s failed (%s); using the source crop",
         ctx.session_id,
         visual.id,
         reason,
-        exc_info=might_be_a_bug,
+        exc_info=not isinstance(exc, openai.APIError),
     )
     path = _publish(ctx, ctx.paths.root / source_rel, visual.id, "jpg")
     return RenderedVisual(
@@ -279,7 +274,7 @@ def _error_fallback(
 
 
 def rendered_event(rendered: RenderedVisual) -> dict:
-    return rendered.model_dump(mode="json", include=EVENT_FIELDS_FREE_OF_MODEL_TEXT)
+    return rendered.model_dump(mode="json", include={"id", "path", "render_as", "verified"})
 
 
 async def run(ctx: StageContext) -> None:

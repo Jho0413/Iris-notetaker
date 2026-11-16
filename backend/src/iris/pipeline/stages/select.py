@@ -215,8 +215,7 @@ def prepare_batch(
             },
             sort_keys=True,
         )
-        everything_about_the_moment = item.model_dump_json().encode()
-        digest.update(everything_about_the_moment)
+        digest.update(item.model_dump_json().encode())
         digest.update(metadata.encode())
         digest.update(hashlib.sha256(raw).digest())
         content.append({"type": "text", "text": metadata})

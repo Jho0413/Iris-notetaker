@@ -14,8 +14,6 @@ from iris.notes_format import scan, upgraded
 from iris.store.layout import inside
 from iris.svg import rasterize_svg
 
-ESCAPED_PUNCTUATION_TOKEN = "text_special"
-
 
 def _image_markdown(node: RenderTreeNode, context: RenderContext) -> str:
     literal_alt = escape_text(node.meta["export_alt"])
@@ -88,7 +86,7 @@ def _prepare_images(tokens: list[Token], root: Path, parser: MarkdownIt, env: di
     for token in tokens:
         if token.children:
             _prepare_images(token.children, root, parser, env)
-        if token.type == ESCAPED_PUNCTUATION_TOKEN:
+        if token.type == "text_special":
             token.type = "text"
         if token.type == "image":
             token.meta["export_alt"] = RendererHTML().renderInlineAsText(
