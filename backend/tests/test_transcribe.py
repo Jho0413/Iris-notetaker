@@ -235,6 +235,51 @@ async def test_transcribe_chunk_plain_string_response():
     assert result.segments[0].text == "hello"
 
 
+async def test_a_stretch_is_sent_as_a_wav_with_its_prompt_and_placed_at_its_start():
+    client = Recorder(
+        {"language": "english", "segments": [{"start": 0.5, "end": 1.0, "text": "a"}]}
+    )
+    samples = np.arange(SPEECH_RATE * 2, dtype="<i2")
+    result = await transcription.transcribe_stretch_at(
+        client,
+        "whisper-1",
+        samples,
+        SPEECH_RATE,
+        3 * SPEECH_RATE,
+        prompt="before",
+        language="en",
+        retry_delays_s=[0],
+        what="a stretch",
+    )
+    assert client.kwargs["file"] == ("chunk.wav", encode_wav(samples, SPEECH_RATE), "audio/wav")
+    assert (client.kwargs["prompt"], client.kwargs["language"]) == ("before", "en")
+    assert result.language == "english"
+    assert [(s.start, s.end, s.text) for s in result.segments] == [(3.5, 4.0, "a")]
+
+
+async def test_a_stretch_is_retried_after_a_temporary_error():
+    calls = []
+
+    async def create(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            raise status_error(503)
+        return {"text": "hi"}
+
+    result = await transcription.transcribe_stretch_at(
+        SimpleNamespace(audio=SimpleNamespace(transcriptions=SimpleNamespace(create=create))),
+        "gpt-4o-transcribe",
+        np.zeros(SPEECH_RATE, dtype="<i2"),
+        SPEECH_RATE,
+        0,
+        language=None,
+        retry_delays_s=[0],
+        what="a stretch",
+    )
+    assert len(calls) == 2
+    assert [(s.start, s.end, s.text) for s in result.segments] == [(0.0, 1.0, "hi")]
+
+
 async def test_stage_offsets_and_merges_timestamps(ctx, monkeypatch):
     pattern = bursts_pattern(20)
     write_wav(ctx.paths.audio, make_audio(pattern))

@@ -813,6 +813,42 @@ async def test_a_cached_window_just_past_its_bounds_still_commits(
     assert starts == sorted(starts)
 
 
+WINDOW_KEYS_AS_FIRST_WRITTEN = [
+    "index",
+    "start",
+    "end",
+    "audio_sha1",
+    "model",
+    "requested_language",
+    "prompt",
+    "prompt_through",
+    "language",
+    "segments",
+]
+
+
+async def test_a_window_cached_with_its_keys_in_the_first_written_order_is_reused(
+    tmp_path: Path, paths: SessionPaths, webm: bytes, monkeypatch
+):
+    chunks = split(webm, 2000)
+    s = settings(tmp_path)
+    run = Run(paths, s, FakeTranscriber(), monkeypatch)
+    run.store(chunks, range(len(chunks)))
+    await run.stop()
+    for path in paths.live_transcript_windows_dir.iterdir():
+        window = json.loads(path.read_text())
+        assert sorted(window) == sorted(WINDOW_KEYS_AS_FIRST_WRITTEN)
+        path.write_text(json.dumps({k: window[k] for k in WINDOW_KEYS_AS_FIRST_WRITTEN}, indent=2))
+
+    again = FakeTranscriber()
+    rerun = Run(paths, s, again, monkeypatch)
+    await rerun.stop()
+    assert again.calls == []
+    assert [seg.text for seg in rerun.timeline.segments] == [
+        seg.text for seg in run.timeline.segments
+    ]
+
+
 GAP_WORDS = [(0.2, 0.9), (1.4, 2.3), (8.2, 8.8), (9.3, 10.4), (10.9, 11.6)]
 
 
