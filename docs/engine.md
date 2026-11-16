@@ -248,6 +248,12 @@ Settings page saved (`settings.json`); which one wins is in
 desktop app, the key and the [launch token](desktop.md#key-words) arrive on the engine's stdin
 instead.
 
+A change saved on the Settings page applies at once, without restarting the engine: the next
+session uses it, and so does a re-run that transcribes again. A re-run that resumes after
+transcription keeps the transcript it has, and a session already recording keeps the language its
+live transcription started with. Saves go one at a time, so the file and the running settings
+agree. The page learns only whether the engine has a key, never the key itself.
+
 ## The CLI
 
 The `iris` CLI builds its own store and job runner from the same code, in its own process, on

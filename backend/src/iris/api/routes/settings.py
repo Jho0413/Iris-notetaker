@@ -1,11 +1,3 @@
-"""The Settings page: read and save the settings a user can change (``iris/user_settings.py``).
-
-A saved change applies at once, without restarting the engine: the next session started uses it,
-and so does a re-run (Try again) that transcribes again; one that resumes after transcription keeps
-the transcript it has. A session already recording keeps the language its live transcription
-started with.
-"""
-
 import asyncio
 import logging
 from enum import StrEnum
@@ -15,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, field_validator
 
 from iris import __version__
-from iris.config import TRANSCRIBE_LANGUAGES, Settings, check_language
+from iris.config import TRANSCRIBE_LANGUAGES, Settings
 from iris.user_settings import (
     UserSettings,
     apply_user_settings,
@@ -32,42 +24,36 @@ LANGUAGE_ENV = "IRIS_TRANSCRIBE_LANGUAGE"
 
 class SettingSource(StrEnum):
     DEFAULT = "default"
-    SAVED = "saved"  # saved from the Settings page
-    PINNED = "pinned"  # set by an environment variable or .env, which wins over the page
+    SAVED = "saved"
+    PINNED = "pinned"
 
 
 class LanguageSetting(BaseModel):
-    value: str  # what new sessions use: a Whisper language code, or "auto"
+    value: str
     default: str
     source: SettingSource
-    env_var: str  # the variable that pins it (named on the page when pinned)
+    env_var: str
 
 
 class AppSettings(BaseModel):
     transcribe_language: LanguageSetting
-    languages: list[str]  # the Whisper codes the language can be set to (besides "auto")
+    languages: list[str]
     version: str
-    data_dir: str  # absolute path of the data folder
-    # Whether the engine has an OpenAI API key, so the UI can warn that notes can't be made.
-    # Only this yes or no: the key itself never reaches the API.
+    data_dir: str
     api_key_set: bool
 
 
-class SettingsUpdate(BaseModel):
+class SettingsUpdate(UserSettings):
     """Fields to change. A field left out (or null) is left as it is."""
 
     model_config = ConfigDict(extra="forbid")
 
-    transcribe_language: str | None = None  # a Whisper code, or "auto"
-
-    @field_validator("transcribe_language")
+    @field_validator("transcribe_language", mode="before")
     @classmethod
-    def _check_language(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        if not value.strip():  # "auto" must be asked for, not implied by an empty value
+    def _refuse_blank_language(cls, value: object) -> object:
+        if isinstance(value, str) and not value.strip():
             raise ValueError('transcribe_language is empty: use a code such as "en", or "auto"')
-        return check_language(value) or "auto"
+        return value
 
 
 def _view(request: Request) -> AppSettings:
@@ -111,7 +97,7 @@ async def update_app_settings(
 ) -> AppSettings:
     """Save the given settings. 409 if one is pinned by the environment or ``.env``."""
     state = request.app.state
-    async with lock:  # one save at a time, so the file and the running settings agree
+    async with lock:
         loaded: Settings = state.loaded_settings
         changes = body.model_dump(exclude_none=True)
         if "transcribe_language" in changes and is_pinned(loaded, "transcribe_language"):
@@ -128,5 +114,5 @@ async def update_app_settings(
             settings = apply_user_settings(loaded, user)
             state.user_settings = user
             state.settings = settings
-            state.runner.settings = settings  # the next session and re-run use it
+            state.runner.settings = settings
     return _view(request)
