@@ -5,6 +5,7 @@ from fastapi import Depends, HTTPException, Request
 from iris.config import Settings
 from iris.events import EventBus
 from iris.jobs.runner import JobRunner
+from iris.llm.usage import with_cost
 from iris.models import Session
 from iris.store.db import SessionStore
 from iris.store.layout import SessionPaths, session_paths
@@ -32,14 +33,27 @@ BusDep = Annotated[EventBus, Depends(get_bus)]
 RunnerDep = Annotated[JobRunner, Depends(get_runner)]
 
 
-def get_session(session_id: str, store: StoreDep) -> Session:
+def find_session(session_id: str, store: StoreDep) -> Session:
     session = store.get(session_id)
     if session is None:
         raise HTTPException(404, "session not found")
     return session
 
 
-SessionDep = Annotated[Session, Depends(get_session)]
+SessionDep = Annotated[Session, Depends(find_session)]
+
+
+def session_with_cost(session: Session, settings: Settings) -> Session:
+    return with_cost(session, session_paths(settings.sessions_dir, session.id).usage_log)
+
+
+def current_session(session_id: str, store: SessionStore, settings: Settings) -> Session:
+    return session_with_cost(find_session(session_id, store), settings)
+
+
+def refuse_while_processing(session_id: str, runner: JobRunner) -> None:
+    if runner.is_running(session_id):
+        raise HTTPException(409, "session is processing")
 
 
 def get_paths(session: SessionDep, settings: SettingsDep) -> SessionPaths:

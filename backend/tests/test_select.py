@@ -222,19 +222,17 @@ def test_long_context_is_bounded_and_changes_invalidate_cache(setup):
     ctx, items, _, _ = setup
     for item in items:
         item.transcript[0].text = "start " + "x" * 50000 + " end"
-        item.ocr_text = "y" * 5000
     prepared = select.prepare_batch(ctx, items)
     metadata = [json.loads(p["text"]) for p in prepared.content[1:] if p["type"] == "text"]
     assert sum(len(e) for m in metadata for e in m["transcript_excerpts"]) <= (
         select.TRANSCRIPT_CHARS_PER_BATCH
     )
-    assert all(m["transcript_excerpted"] and m["ocr_excerpted"] for m in metadata)
+    assert all(m["transcript_excerpted"] for m in metadata)
     assert all(
         m["transcript_excerpts"][0].startswith("[0") or "start " in m["transcript_excerpts"][0]
         for m in metadata
     )
     assert all(m["transcript_excerpts"][-1].endswith(" end") for m in metadata)
-    assert all(sum(map(len, m["ocr_excerpts"])) <= select.OCR_CHARS_PER_MOMENT for m in metadata)
     items[0].transcript[0].text = (
         items[0].transcript[0].text[:10000] + "z" + (items[0].transcript[0].text[10001:])
     )

@@ -1,7 +1,8 @@
 import pytest
+from markdown_it import MarkdownIt
 
-from iris import notes_format as nf
 from iris.models import Notes, SessionType
+from iris.notes import format as nf
 from tests.builders import notes_visual
 
 
@@ -302,4 +303,45 @@ def test_split_sections_keeps_a_line_separator_inside_its_line():
         "Copied\u2028from a PDF",
         "# Setup\n:::box[Tip]{color=green}\n# Inner\n:::",
         "# Next\nMore.",
+    ]
+
+
+def forbidden(markdown: str) -> list[str]:
+    return [t.type for t in nf.forbidden_tokens(MarkdownIt().parse(markdown))]
+
+
+@pytest.mark.parametrize(
+    ("markdown", "found"),
+    [
+        ("Plain *text* and `code`.", []),
+        ("![x](https://example.com/x.png)", ["image"]),
+        ("Text <b>bold</b>.", ["html_inline", "html_inline"]),
+        ("<div>\nblock\n</div>", ["html_block"]),
+        ("![a <i>b</i>](x.png)", ["image", "html_inline", "html_inline"]),
+        ("- item ![y](y.png)\n\n<p>x</p>", ["image", "html_block"]),
+    ],
+)
+def test_forbidden_tokens_finds_images_and_html_in_document_order(markdown, found):
+    assert forbidden(markdown) == found
+
+
+@pytest.mark.parametrize("vid", ["v1", "v000001", "a_b-C9"])
+def test_every_marker_pattern_reads_the_same_visual_ids(vid):
+    assert nf.MARKER.fullmatch(f"[visual:{vid}]").group(1) == vid
+    assert nf.FIGURE.match(f"::figure{{#{vid}}}").group("id") == vid
+    assert nf.LINE_START_OR_INLINE_MARKER.search(f"x [visual:{vid}]").group(2) == vid
+
+
+@pytest.mark.parametrize("vid", ["", "v 1", "v.1", "v/1", "é"])
+def test_no_marker_pattern_reads_an_unsafe_visual_id(vid):
+    assert nf.MARKER.search(f"[visual:{vid}]") is None
+    assert nf.FIGURE.match(f"::figure{{#{vid}}}") is None
+    assert nf.LINE_START_OR_INLINE_MARKER.search(f"[visual:{vid}]") is None
+
+
+def test_a_marker_starting_a_line_is_matched_with_its_indentation():
+    lines = nf.LINE_START_OR_INLINE_MARKER.finditer("  [visual:v1]\ntext [visual:v2]")
+    assert [(m.group(0), m.group(1), m.group(2)) for m in lines] == [
+        ("  [visual:v1]", "v1", None),
+        ("[visual:v2]", None, "v2"),
     ]

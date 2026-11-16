@@ -11,13 +11,9 @@ from iris.models import (
     SynthesizedDraft,
     Visual,
 )
-from iris.notes_format import FORMAT_VERSION
+from iris.notes.format import FORMAT_VERSION, LINE_START_OR_INLINE_MARKER
 from iris.pipeline.context import StageContext
 from iris.store.layout import read_model, read_optional, write_model
-
-MARKER = re.compile(
-    r"^[ \t]*\[visual:([A-Za-z0-9_\-]+)\]|\[visual:([A-Za-z0-9_\-]+)\]", re.MULTILINE
-)
 
 
 def resolve_markers(markdown: str, visuals: list[Visual]) -> str:
@@ -31,7 +27,7 @@ def resolve_markers(markdown: str, visuals: list[Visual]) -> str:
         placed.add(vid)
         return f"::figure{{#{vid}}}" if match.group(1) else f"\n\n::figure{{#{vid}}}\n\n"
 
-    return MARKER.sub(repl, markdown)
+    return LINE_START_OR_INLINE_MARKER.sub(repl, markdown)
 
 
 def drop_title_heading(markdown: str, title: str) -> str:

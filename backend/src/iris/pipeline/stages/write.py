@@ -5,14 +5,13 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from markdown_it import MarkdownIt
-from markdown_it.token import Token
 from pydantic import BaseModel
 
-from iris import notes_format
 from iris.llm import structured
 from iris.llm.errors import UserFacingError
-from iris.markdown import protect_math
 from iris.models import NOTHING_TO_WRITE, EventType, NotesDraft, Selection, SessionType, Transcript
+from iris.notes import format as notes_format
+from iris.notes.markdown import protect_math
 from iris.pipeline.context import StageContext
 from iris.store.layout import read_model, write_model
 
@@ -146,7 +145,7 @@ def evidence_records(transcript: Transcript, selection: Selection, budget: int) 
             )
     ids: set[str] = set()
     for visual in selection.visuals:
-        if not re.fullmatch(r"[A-Za-z0-9_-]+", visual.id) or visual.id in ids:
+        if not re.fullmatch(notes_format.VISUAL_ID, visual.id) or visual.id in ids:
             raise ValueError("visual ids must be unique marker-safe identifiers")
         ids.add(visual.id)
         if not math.isfinite(visual.frame.t) or visual.frame.t < 0:
@@ -217,14 +216,6 @@ def plan_parts(transcript: Transcript, selection: Selection, budget: int) -> lis
     return [*closed, last]
 
 
-def _check_tokens(tokens: list[Token]) -> None:
-    for token in tokens:
-        if token.type in {"image", "html_inline", "html_block"}:
-            raise ValueError("notes must use visual_ids instead of images or HTML")
-        if token.children:
-            _check_tokens(token.children)
-
-
 def validate_section(
     section: WrittenSection, part: WritingPart, first: WrittenSection | None
 ) -> None:
@@ -244,7 +235,8 @@ def validate_section(
         if not block.markdown.strip() or "[visual:" in block.markdown:
             raise ValueError("notes blocks need text and must use visual_ids for markers")
         parser = MarkdownIt()
-        _check_tokens(parser.parse(protect_math(block.markdown)[0]))
+        if any(notes_format.forbidden_tokens(parser.parse(protect_math(block.markdown)[0]))):
+            raise ValueError("notes must use visual_ids instead of images or HTML")
         layout = notes_format.scan(block.markdown)
         if layout.figures:
             raise ValueError("notes must use visual_ids instead of figure commands")

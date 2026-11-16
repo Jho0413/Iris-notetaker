@@ -194,10 +194,6 @@ class SessionPaths:
     def usage_log(self) -> Path:
         return self.root / "usage_calls.jsonl"
 
-    @property
-    def usage(self) -> Path:
-        return self.root / "usage.json"
-
     def remove_source_crops_except(self, keep: set[str]) -> None:
         for path in self.visuals_dir.glob(f"v*{SOURCE_CROP_SUFFIX}"):
             if f"{VISUALS_DIR}/{path.name}" not in keep:

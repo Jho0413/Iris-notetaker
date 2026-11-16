@@ -106,7 +106,6 @@ Promotion is a live recording's results kept as the stages' own
 | `notes.json` | the finished notes | assemble |
 | `notes_edits.json` | the user's edited notes, the latest save only | the API, never a stage |
 | `usage_calls.jsonl` | one line per model call | the usage log |
-| `usage.json` | those calls' totals | the usage log, after each stage |
 
 A live recording keeps its own files in `live/`:
 
@@ -198,9 +197,9 @@ redraw again.
    where the model has one; otherwise they count as ordinary tokens. An image model's output
    with no breakdown counts as image tokens. Audio billed by length is charged per second,
    rounded up.
-4. When a stage that made calls ends, a summary of totals per stage, model and purpose is
-   rewritten from the log. The API and `iris cost` read the log itself, so they are current while
-   a stage runs. A re-run that only hits its caches makes no calls, so it adds nothing.
+4. Totals per stage, model and purpose are added up from the log each time the API or `iris cost`
+   asks, so they are current while a stage runs; no summary is kept beside the log. A re-run that
+   only hits its caches makes no calls, so it adds nothing.
 5. The session list shows each session's cost from totals kept in memory that read only the
    lines added since the last look, so listing stays cheap however long the logs grow. Only
    complete lines count: one still being written waits for the next look. A log that shrank or
@@ -248,6 +247,12 @@ Settings page saved (`settings.json`); which one wins is in
 desktop app, the key and the [launch token](desktop.md#key-words) arrive on the engine's stdin
 instead.
 
+A change saved on the Settings page applies at once, without restarting the engine: the next
+session uses it, and so does a re-run that transcribes again. A re-run that resumes after
+transcription keeps the transcript it has, and a session already recording keeps the language its
+live transcription started with. Saves go one at a time, so the file and the running settings
+agree. The page learns only whether the engine has a key, never the key itself.
+
 ## The CLI
 
 The `iris` CLI builds its own store and job runner from the same code, in its own process, on
@@ -275,8 +280,8 @@ All in `backend/src/iris/`:
 - `store/layout.py`: every file in a session folder, writing files whole (`write_model`), and
   keeping paths inside the session.
 - `store/db.py`: the store.
-- `notes_edits.py`: which version of the notes a reader gets.
-- `export.py`: the Markdown export.
+- `notes/edits.py`: which version of the notes a reader gets.
+- `notes/export.py`: the Markdown export.
 - `events.py`: the event bus.
 - `llm/client.py`: the one OpenAI client.
 - `llm/errors.py`: error kinds and retries.

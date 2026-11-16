@@ -1,7 +1,7 @@
 import hashlib
 
 from iris.models import Notes, NotesEdited, NotesEdits
-from iris.notes_format import upgraded
+from iris.notes.format import upgraded
 from iris.store.layout import SessionPaths, read_model, read_optional
 
 MAX_EDITED_CHARS = 1_000_000

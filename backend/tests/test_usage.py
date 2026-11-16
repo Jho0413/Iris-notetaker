@@ -26,6 +26,7 @@ from iris.models import (
     SessionUsage,
     SourceKind,
     Stage,
+    UsageCounts,
     UsageRecord,
 )
 from iris.pipeline.context import StageContext
@@ -120,8 +121,7 @@ def test_pipeline_records_every_call_and_cached_rerun_costs_nothing(tmp_path, fa
         body = client.get(f"/api/sessions/{sid}/usage").json()
         result = SessionUsage.model_validate(body)
         assert len(result.records) == len(fake.calls) > 0
-        summary = settings.sessions_dir / sid / "usage.json"
-        assert read_model(summary, SessionUsage) == result
+        assert result == usage.read_usage(session_paths(settings.sessions_dir, sid).usage_log)
 
         expected = {
             ("transcription", Stage.TRANSCRIBE, "whisper-1", WHISPER_COST),
@@ -163,7 +163,7 @@ def test_pipeline_records_every_call_and_cached_rerun_costs_nothing(tmp_path, fa
         assert len(fake.calls) == calls_before
         again = SessionUsage.model_validate(client.get(f"/api/sessions/{sid}/usage").json())
         assert again.records == result.records
-        assert read_model(summary, SessionUsage) == result
+        assert not (settings.sessions_dir / sid / "usage.json").exists()
         assert again.total.cost_usd == pytest.approx(total)
         listed = next(s for s in client.get("/api/sessions").json() if s["id"] == sid)
         assert listed["cost_usd"] == pytest.approx(total)
@@ -247,7 +247,6 @@ async def test_session_list_cost_is_current_while_processing(api, fake):
     ctx = StageContext(session_id=sid, source=SourceKind.UPLOAD, paths=paths, settings=settings)
     with usage.recording(ctx, Stage.SELECT):
         await get_openai(settings).chat.completions.parse(model="gpt-5.5", messages=[])
-        assert not paths.usage.exists()
         row = listed(client, sid)
         assert row["status"] == "processing"
         assert row["cost_usd"] == pytest.approx(CHAT_COST)
@@ -344,7 +343,7 @@ async def test_unpriced_model_is_flagged_not_guessed(ctx, fake):
     with usage.recording(ctx, Stage.SELECT):
         await get_openai(ctx.settings).chat.completions.parse(model="mystery-1", messages=[])
         await get_openai(ctx.settings).chat.completions.parse(model="gpt-5.5", messages=[])
-    result = read_model(ctx.paths.usage, SessionUsage)
+    result = usage.read_usage(ctx.paths.usage_log)
     unpriced, priced = result.records
     assert unpriced.cost_usd is None
     assert unpriced.unpriced == "no price for model 'mystery-1'"
@@ -364,7 +363,7 @@ async def test_usage_recording_failure_never_fails_the_stage(ctx, fake, monkeypa
         await render.run(ctx)
     [rendered] = read_model(ctx.paths.renders, Renders).visuals
     assert rendered.verified and rendered.render_as == "image"
-    assert not ctx.paths.usage.exists() and not ctx.paths.usage_log.exists()
+    assert not ctx.paths.usage_log.exists()
     assert "could not record usage" in caplog.text
 
 
@@ -384,7 +383,7 @@ async def test_unreadable_usage_in_a_response_is_logged_and_the_result_returned(
     install_client(monkeypatch, fake_openai(parse=parse))
     with usage.recording(ctx, Stage.WRITE):
         assert await get_openai(ctx.settings).chat.completions.parse(model="gpt-5.5") is weird
-    assert not ctx.paths.usage.exists()
+    assert not ctx.paths.usage_log.exists()
 
 
 async def test_failed_call_is_recorded_and_still_raises(ctx, monkeypatch):
@@ -394,16 +393,16 @@ async def test_failed_call_is_recorded_and_still_raises(ctx, monkeypatch):
     install_client(monkeypatch, fake_openai(parse=parse))
     with usage.recording(ctx, Stage.WRITE), pytest.raises(TimeoutError):
         await get_openai(ctx.settings).chat.completions.parse(model="gpt-5.5")
-    [record] = read_model(ctx.paths.usage, SessionUsage).records
+    [record] = usage.read_usage(ctx.paths.usage_log).records
     assert record.error == "TimeoutError: took too long"
     assert (record.cost_usd, record.input_tokens, record.purpose) == (0, 0, "notes")
-    assert read_model(ctx.paths.usage, SessionUsage).total.failed_calls == 1
+    assert usage.read_usage(ctx.paths.usage_log).total.failed_calls == 1
 
 
 async def test_calls_outside_a_stage_are_not_recorded(ctx, fake):
     await get_openai(ctx.settings).chat.completions.parse(model="gpt-5.5", messages=[])
     assert len(fake.calls) == 1
-    assert not ctx.paths.usage.exists()
+    assert not ctx.paths.usage_log.exists()
 
 
 async def test_with_options_client_is_metered(ctx, fake):
@@ -411,7 +410,7 @@ async def test_with_options_client_is_metered(ctx, fake):
     with usage.recording(ctx, Stage.WRITE):
         client = get_openai(ctx.settings).with_options(max_retries=5)
         await client.chat.completions.parse(model="gpt-5.5", messages=[])
-    assert read_model(ctx.paths.usage, SessionUsage).total.calls == 1
+    assert usage.read_usage(ctx.paths.usage_log).total.calls == 1
 
 
 async def test_other_client_attributes_pass_through(ctx, monkeypatch):
@@ -456,7 +455,7 @@ async def test_concurrent_stages_and_threads_keep_every_record(ctx, fake, tmp_pa
     assert result.by_stage["render"].calls == 15
     assert result.by_stage["none"].calls == 40
     assert result.total.calls == 75
-    assert read_model(other.paths.usage, SessionUsage).total.calls == 5
+    assert usage.read_usage(other.paths.usage_log).total.calls == 5
 
 
 def test_damaged_log_lines_are_skipped(ctx, caplog):
@@ -492,7 +491,7 @@ def test_appending_does_not_reread_the_log(ctx, monkeypatch):
 async def test_stage_with_only_cache_hits_leaves_usage_untouched(ctx, fake):
     with usage.recording(ctx, Stage.WRITE):
         pass
-    assert not ctx.paths.usage.exists() and not ctx.paths.usage_log.exists()
+    assert not ctx.paths.usage_log.exists()
 
 
 def test_measure_real_sdk_responses():
@@ -765,3 +764,38 @@ def test_iris_cost_with_no_calls():
     assert cli.format_usage("abc", usage.summarize([])) == (
         "session abc: $0.0000 over 0 model calls (none recorded)"
     )
+
+
+def test_totals_add_up_every_usage_count_of_their_records():
+    records = [
+        UsageRecord(
+            at=datetime.now(UTC),
+            stage=stage,
+            purpose="x",
+            operation="op",
+            model="gpt-5.5",
+            latency_s=0,
+            **{name: (n + 1) * (i + 2) for i, name in enumerate(UsageCounts.model_fields)},
+        )
+        for n, stage in enumerate((Stage.WRITE, Stage.RENDER, Stage.RENDER))
+    ]
+    result = usage.summarize(records)
+    for name in UsageCounts.model_fields:
+        assert getattr(result.total, name) == sum(getattr(r, name) for r in records), name
+        assert getattr(result.by_stage["render"], name) == sum(
+            getattr(r, name) for r in records[1:]
+        ), name
+
+
+def test_a_log_line_written_with_the_counts_after_the_call_details_still_reads(ctx):
+    line = (
+        '{"at":"2026-11-03T00:00:00Z","stage":"write","purpose":"notes","operation":"op",'
+        '"model":"gpt-5.5","latency_s":1.5,"input_tokens":10,"cached_input_tokens":2,'
+        '"input_image_tokens":0,"input_audio_tokens":0,"output_tokens":5,"reasoning_tokens":1,'
+        '"output_image_tokens":0,"images":0,"audio_seconds":3.0,"cost_usd":0.01,"unpriced":null,'
+        '"error":null}\n'
+    )
+    ctx.paths.usage_log.write_text(line)
+    [record] = usage.read_usage(ctx.paths.usage_log).records
+    assert (record.input_tokens, record.output_tokens, record.audio_seconds) == (10, 5, 3.0)
+    assert (record.stage, record.cost_usd) == (Stage.WRITE, 0.01)

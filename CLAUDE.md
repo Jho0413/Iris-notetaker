@@ -91,6 +91,8 @@ the form that fits the change; don't invent states where there are none.
   - MCP tool docstrings: the assistant reads them as the tools' descriptions;
   - docstrings of FastAPI routes and of the models the API sends or accepts (the ones that reach
     `schema.d.ts`): they become the OpenAPI schema;
+  - docstrings of models sent to a model as its output schema (structured output): they become
+    the schema's descriptions, which the model reads and which are part of cache keys;
   - the module or class docstring that states an interface's contract (today `sources/base.py`
     and `live/lane.py`), not its methods.
 

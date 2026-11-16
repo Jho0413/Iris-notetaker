@@ -1,7 +1,7 @@
 import pytest
 
 from iris.models import Notes, SessionType
-from iris.notes_text import (
+from iris.notes.text import (
     MAX_PASSAGES_PER_SESSION,
     SNIPPET_CHARS,
     figure_origin,

@@ -1,10 +1,15 @@
+from datetime import UTC, datetime
 from urllib.parse import unquote
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
+from iris.api import deps
 from iris.config import Settings
-from iris.models import UNREADABLE_UPLOAD, Notes, SourceKind
+from iris.llm.usage import append_record
+from iris.models import UNREADABLE_UPLOAD, Notes, SourceKind, UsageRecord
+from iris.notes.edits import generated_hash
 from iris.store.layout import read_model, session_paths, write_model
 from tests.builders import session_with_notes
 from tests.waiting import wait_for_status
@@ -169,3 +174,62 @@ def test_old_notes_are_upgraded_on_read_and_left_as_they_are_on_disk(client, set
     assert notes["markdown"] == ":::box[Answer]{color=green}\nIt works.\n:::"
     assert notes["format_version"] == 2
     assert paths.notes.read_text() == on_disk
+
+
+def priced_call(cost: float) -> UsageRecord:
+    return UsageRecord(
+        at=datetime.now(UTC), purpose="x", operation="op", model="m", latency_s=1, cost_usd=cost
+    )
+
+
+def test_find_session_answers_404_for_a_session_that_does_not_exist(client: TestClient):
+    with pytest.raises(HTTPException) as refused:
+        deps.find_session("nope", client.app.state.store)
+    assert (refused.value.status_code, refused.value.detail) == (404, "session not found")
+
+
+def test_session_with_cost_adds_the_cost_from_the_call_log(client: TestClient, settings):
+    session = client.app.state.store.create("Talk", SourceKind.UPLOAD)
+    assert deps.session_with_cost(session, settings).cost_usd is None
+    paths = session_paths(settings.sessions_dir, session.id).ensure()
+    append_record(paths.usage_log, priced_call(0.5))
+    assert deps.session_with_cost(session, settings).cost_usd == 0.5
+
+
+def test_current_session_reads_the_session_again_with_its_cost(client: TestClient, settings):
+    store = client.app.state.store
+    session = store.create("Talk", SourceKind.UPLOAD)
+    append_record(
+        session_paths(settings.sessions_dir, session.id).ensure().usage_log, priced_call(1)
+    )
+    store.update(session.id, title="Renamed")
+    current = deps.current_session(session.id, store, settings)
+    assert (current.title, current.cost_usd) == ("Renamed", 1)
+    store.delete(session.id)
+    with pytest.raises(HTTPException) as refused:
+        deps.current_session(session.id, store, settings)
+    assert refused.value.status_code == 404
+
+
+def test_refuse_while_processing_answers_409_only_while_the_session_runs(client, monkeypatch):
+    runner = client.app.state.runner
+    deps.refuse_while_processing("s1", runner)
+    monkeypatch.setattr(runner, "is_running", lambda _: True)
+    with pytest.raises(HTTPException) as refused:
+        deps.refuse_while_processing("s1", runner)
+    assert (refused.value.status_code, refused.value.detail) == (409, "session is processing")
+
+
+def test_every_route_refused_while_processing_says_so_in_the_same_words(
+    client: TestClient, settings, monkeypatch
+):
+    sid, notes = session_with_notes(client.app.state.store, settings, "Talk")
+    monkeypatch.setattr(client.app.state.runner, "is_running", lambda _: True)
+    edits = {"markdown": "Edited.", "based_on": generated_hash(notes)}
+    for r in (
+        client.delete(f"/api/sessions/{sid}"),
+        client.post(f"/api/sessions/{sid}/run"),
+        client.put(f"/api/sessions/{sid}/notes/edits", json=edits),
+        client.delete(f"/api/sessions/{sid}/notes/edits"),
+    ):
+        assert (r.status_code, r.json()["detail"]) == (409, "session is processing")

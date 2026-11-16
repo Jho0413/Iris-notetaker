@@ -69,7 +69,7 @@ to every change; the reviewer says which ones it checked. Principles are those i
   rewrite that loses a figure, maths, a decision, an action item or a box is rejected and its
   sections kept as written; a figure is dropped only as a confirmed duplicate; any failure keeps
   the assembled notes.
-- **Notes format and edits:** model output and saved edits pass `notes_format` (unknown command
+- **Notes format and edits:** model output and saved edits pass `notes/format.py` (unknown command
   or colour, too deep, unclosed, unknown figure, raw HTML, outside images); only the writer
   repairs, and only what needs no guess; old notes (`format_version` 1) still display;
   `notes/format.ts` and the editor follow the same rules, and a round trip keeps every construct;
@@ -143,13 +143,14 @@ to every change; the reviewer says which ones it checked. Principles are those i
   import from or copy; an interface or `Protocol` has two real implementations.
 - Names say what things mean. In hand-written code and tests (`backend/`, `frontend/`, `desktop/`),
   no comments in any form and no docstrings, except MCP tools, FastAPI routes and the models that
-  reach `schema.d.ts`, and the module or class contract of an interface (`sources/base.py`,
-  `live/lane.py`), not its methods. Tool directives stay with nothing after them (shebangs,
-  `# noqa`, `# type: ignore`, `// eslint-disable`). Files the change touches have their other
-  comments and docstrings removed. A reason is kept only by renaming something that already has a
-  name, by a test, or, if it is a design decision, in the docs page in plain words; a function,
-  variable, alias or constant added only to hold a reason is a should-fix. Generated files and
-  config and example files of any format keep their comments. No dead code left behind.
+  reach `schema.d.ts`, models sent to a model as its output schema, and the module or class contract
+  of an interface (`sources/base.py`, `live/lane.py`), not its methods. Tool directives stay with
+  nothing after them (shebangs, `# noqa`, `# type: ignore`, `// eslint-disable`). Files the change
+  touches have their other comments and docstrings removed. A reason is kept only by renaming
+  something that already has a name, by a test, or, if it is a design decision, in the docs page in
+  plain words; a function, variable, alias or constant added only to hold a reason is a should-fix.
+  Generated files and config and example files of any format keep their comments. No dead code left
+  behind.
 - A change in behaviour leaves nothing describing the old one: search for comments, docstrings,
   UI wording and files that still say or do what the code used to.
 - No secrets in code or logs; no new dependency without a reason.
@@ -160,4 +161,5 @@ to every change; the reviewer says which ones it checked. Principles are those i
   the code.
 - A change that alters a flow or a decision updates that page in `docs/`.
 - The docstrings that stay (MCP tools, FastAPI routes and the models that reach `schema.d.ts`,
-  interface contracts) match the code, and new MCP tools, routes and API models have one.
+  models sent to a model as its output schema, interface contracts) match the code, and new MCP
+  tools, routes and API models have one.

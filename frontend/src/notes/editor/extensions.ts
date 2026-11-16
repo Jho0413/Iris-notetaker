@@ -1,14 +1,3 @@
-// The notes format as Tiptap nodes, with the Markdown each reads and writes (@tiptap/markdown).
-// Saved Markdown follows src/notes/format.ts: plain ::: fences, {color=…} always written.
-//
-//   box, step      a title (blockTitle, inline text) then blocks; color attribute
-//   figure         an atom holding a figure id from this session
-//   inlineMath     $…$, an atom holding LaTeX (Iris's rule: no space inside the dollars, so
-//                  "$5 and $10" stays text)
-//   blockMath      $$ … $$ on lines of their own
-//
-// No React here: node views that need the page are added by the editor component, so this module
-// runs in plain Node for the round-trip tests.
 import { Node, type JSONContent, type MarkdownToken } from '@tiptap/core'
 import { TaskItem, TaskList } from '@tiptap/extension-list'
 import { TableKit } from '@tiptap/extension-table'
@@ -24,16 +13,13 @@ interface ContainerToken extends MarkdownToken {
   tokens: MarkdownToken[]
 }
 
-/** A title written back between [ ]: brackets in pairs stay as they are (maths keeps its
- *  LaTeX); an unpaired ] is escaped, so the title can't end early. */
 export function titleMarkdown(rendered: string): string {
   const out: string[] = []
-  const opened: number[] = [] // where each unclosed [ is in out
+  const opened: number[] = []
   const text = rendered.replace(/\n+/g, ' ')
   for (let i = 0; i < text.length; i++) {
     const c = text[i]
     if (c === '\\') {
-      // A lone backslash at the end would escape the closing ]: it is written \\.
       out.push(i + 1 < text.length ? text.slice(i, i + 2) : '\\\\')
       i++
     } else if (c === '[') {
@@ -62,7 +48,6 @@ function container(name: Container) {
         ? [{ tag: 'section[data-type="box"]' }]
         : [{ tag: 'div[data-type="step"]', contentElement: 'section' }]
     },
-    // Classes as in the reading view (NotesView), so a block looks the same while it is edited.
     renderHTML({ node }) {
       const colour = `c-${node.attrs.color as string}`
       return name === 'box'
@@ -72,14 +57,13 @@ function container(name: Container) {
     markdownTokenizer: {
       name,
       level: 'block',
-      // A block of a kind Iris doesn't know is read as a box, as the reading view draws it.
       start: (src: string) => src.match(name === 'box' ? /^:{3,}(?!step\b)[A-Za-z]/m : /^:{3,}step\b/m)?.index ?? -1,
       tokenize(src, _tokens, lexer) {
         const lines = src.split('\n')
         const m = lines[0].match(OPEN)
         if (!m || (name === 'step') !== (m[2] === 'step')) return undefined
         const end = blockEnd(lines)
-        const last = end === -1 ? lines.length : end // a block never closed runs to the end
+        const last = end === -1 ? lines.length : end
         const written = colourOf(m[4])
         return {
           type: name,
@@ -110,7 +94,6 @@ function container(name: Container) {
 export const Box = container('box')
 export const Step = container('step')
 
-/** A box's or step's title: shown as its heading, written between [ ]. */
 export const BlockTitle = Node.create({
   name: 'blockTitle',
   content: 'inline*',
@@ -141,8 +124,6 @@ export const Figure = Node.create({
   renderMarkdown: (node) => `::figure{#${node.attrs?.id as string}}`,
 })
 
-// Inline maths as Iris reads it (backend iris.markdown.MATH): no space just inside the dollars,
-// and not followed by a digit, so prices stay text.
 const INLINE_MATH = /^\$(?=\S)([^$\n]*?[^\s\\])\$(?!\d)/
 
 export const InlineMath = Node.create({
@@ -180,22 +161,18 @@ export const BlockMath = Node.create({
     name: 'blockMath',
     level: 'block',
     start: (src: string) => src.match(/^\$\$/m)?.index ?? -1,
-    // $$ on a line of its own, the LaTeX, then $$ ending a line; or $$…$$ alone on one line.
     tokenize(src) {
       const m = src.match(/^\$\$([\s\S]+?)\$\$[ \t]*(?:\n|$)/)
       return m ? { type: 'blockMath', raw: m[0], latex: m[1].trim() } : undefined
     },
   },
   parseMarkdown: (token, h) => h.createNode('blockMath', { latex: (token as MarkdownToken & { latex: string }).latex }),
-  // A formula left empty is dropped.
   renderMarkdown: (node) => (node.attrs?.latex ? `$$\n${node.attrs.latex as string}\n$$` : ''),
 })
 
-/** Every extension the notes use; the editor adds its node views and placeholders on top. */
 export function notesExtensions() {
   return [
     StarterKit.configure({
-      // Markdown has no underline; links are edited, never followed, while editing.
       underline: false,
       trailingNode: false,
       link: { openOnClick: false },

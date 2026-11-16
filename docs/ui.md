@@ -96,10 +96,10 @@ testable without a browser.
 
 ### Reading and editing notes
 
-1. The notes arrive as Markdown in the [notes format](making-notes.md#key-words). The reading view
-   splits them into boxes, steps and figures, draws the rest as Markdown with KaTeX for maths,
-   and puts each figure in from the session's files by its id. A block that can't be read as
-   written is shown with a note saying why, instead of breaking the page.
+1. The notes arrive as Markdown in the [notes format](making-notes.md#the-notes-format). The
+   reading view splits them into boxes, steps and figures, draws the rest as Markdown with KaTeX
+   for maths, and puts each figure in from the session's files by its id. A block that can't be
+   read as written is shown with a note saying why, instead of breaking the page.
 2. The editor shows the same notes, editable in place: blocks can be added, turned into another
    kind, coloured and dragged. Each change is one step that Undo puts back.
 3. Saving sends the whole edited Markdown, with a stamp of the generated notes it started from.

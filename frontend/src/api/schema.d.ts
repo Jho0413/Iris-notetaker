@@ -142,7 +142,7 @@ export interface paths {
          * Save Notes Edits
          * @description Save the user's edited notes, replacing any earlier save; the generated notes are kept.
          *
-         *     The markdown is checked like the writer's (``iris.notes_format.validate``): 422 names the
+         *     The markdown is checked like the writer's (``iris.notes.format.validate``): 422 names the
          *     first problem in plain words. 409 while the session is processing.
          */
         put: operations["save_notes_edits_api_sessions__session_id__notes_edits_put"];
@@ -641,11 +641,6 @@ export interface components {
             prices_checked: string;
             /**
              * @default {
-             *       "calls": 0,
-             *       "unpriced_calls": 0,
-             *       "failed_calls": 0,
-             *       "cost_usd": 0,
-             *       "latency_s": 0,
              *       "input_tokens": 0,
              *       "cached_input_tokens": 0,
              *       "input_image_tokens": 0,
@@ -654,7 +649,12 @@ export interface components {
              *       "reasoning_tokens": 0,
              *       "output_image_tokens": 0,
              *       "images": 0,
-             *       "audio_seconds": 0
+             *       "audio_seconds": 0,
+             *       "calls": 0,
+             *       "unpriced_calls": 0,
+             *       "failed_calls": 0,
+             *       "cost_usd": 0,
+             *       "latency_s": 0
              *     }
              */
             total: components["schemas"]["UsageTotals"];
@@ -732,6 +732,51 @@ export interface components {
          */
         UsageRecordView: {
             /**
+             * Input Tokens
+             * @default 0
+             */
+            input_tokens: number;
+            /**
+             * Cached Input Tokens
+             * @default 0
+             */
+            cached_input_tokens: number;
+            /**
+             * Input Image Tokens
+             * @default 0
+             */
+            input_image_tokens: number;
+            /**
+             * Input Audio Tokens
+             * @default 0
+             */
+            input_audio_tokens: number;
+            /**
+             * Output Tokens
+             * @default 0
+             */
+            output_tokens: number;
+            /**
+             * Reasoning Tokens
+             * @default 0
+             */
+            reasoning_tokens: number;
+            /**
+             * Output Image Tokens
+             * @default 0
+             */
+            output_image_tokens: number;
+            /**
+             * Images
+             * @default 0
+             */
+            images: number;
+            /**
+             * Audio Seconds
+             * @default 0
+             */
+            audio_seconds: number;
+            /**
              * At
              * Format: date-time
              */
@@ -745,6 +790,18 @@ export interface components {
             model: string;
             /** Latency S */
             latency_s: number;
+            /** Cost Usd */
+            cost_usd?: number | null;
+            /** Unpriced */
+            unpriced?: string | null;
+            /**
+             * Failed
+             * @default false
+             */
+            failed: boolean;
+        };
+        /** UsageTotals */
+        UsageTotals: {
             /**
              * Input Tokens
              * @default 0
@@ -790,18 +847,6 @@ export interface components {
              * @default 0
              */
             audio_seconds: number;
-            /** Cost Usd */
-            cost_usd?: number | null;
-            /** Unpriced */
-            unpriced?: string | null;
-            /**
-             * Failed
-             * @default false
-             */
-            failed: boolean;
-        };
-        /** UsageTotals */
-        UsageTotals: {
             /**
              * Calls
              * @default 0
@@ -827,51 +872,6 @@ export interface components {
              * @default 0
              */
             latency_s: number;
-            /**
-             * Input Tokens
-             * @default 0
-             */
-            input_tokens: number;
-            /**
-             * Cached Input Tokens
-             * @default 0
-             */
-            cached_input_tokens: number;
-            /**
-             * Input Image Tokens
-             * @default 0
-             */
-            input_image_tokens: number;
-            /**
-             * Input Audio Tokens
-             * @default 0
-             */
-            input_audio_tokens: number;
-            /**
-             * Output Tokens
-             * @default 0
-             */
-            output_tokens: number;
-            /**
-             * Reasoning Tokens
-             * @default 0
-             */
-            reasoning_tokens: number;
-            /**
-             * Output Image Tokens
-             * @default 0
-             */
-            output_image_tokens: number;
-            /**
-             * Images
-             * @default 0
-             */
-            images: number;
-            /**
-             * Audio Seconds
-             * @default 0
-             */
-            audio_seconds: number;
         };
         /** ValidationError */
         ValidationError: {

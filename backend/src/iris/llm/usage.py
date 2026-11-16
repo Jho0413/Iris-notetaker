@@ -15,8 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from iris.config import PRICES_CHECKED, ModelPrice
-from iris.models import Session, SessionUsage, Stage, UsageRecord, UsageTotals
-from iris.store.layout import write_model
+from iris.models import Session, SessionUsage, Stage, UsageCounts, UsageRecord, UsageTotals
 
 if TYPE_CHECKING:
     from iris.pipeline.context import StageContext
@@ -29,26 +28,14 @@ STAGE_PURPOSES: dict[Stage, str] = {
     Stage.WRITE: "notes",
 }
 
-TOKEN_FIELDS = (
-    "input_tokens",
-    "cached_input_tokens",
-    "input_image_tokens",
-    "input_audio_tokens",
-    "output_tokens",
-    "reasoning_tokens",
-    "output_image_tokens",
-    "images",
-)
 MAX_ERROR_CHARS = 500
 
 
 @dataclass
 class _Scope:
     log: Path
-    summary: Path
     stage: Stage | None
     prices: Mapping[str, ModelPrice]
-    recorded: int = 0
 
 
 _scope: ContextVar[_Scope | None] = ContextVar("iris_usage_scope", default=None)
@@ -58,17 +45,11 @@ _lock = threading.Lock()
 
 @contextmanager
 def recording(ctx: "StageContext", stage: Stage | None) -> Iterator[None]:
-    scope = _Scope(ctx.paths.usage_log, ctx.paths.usage, stage, ctx.settings.model_prices)
-    token = _scope.set(scope)
+    token = _scope.set(_Scope(ctx.paths.usage_log, stage, ctx.settings.model_prices))
     try:
         yield
     finally:
         _scope.reset(token)
-        if scope.recorded:
-            try:
-                write_summary(scope.log, scope.summary)
-            except Exception:
-                log.warning("could not write %s", scope.summary, exc_info=True)
 
 
 @contextmanager
@@ -245,7 +226,6 @@ def record_call(
             **m,
         )
         append_record(scope.log, record)
-        scope.recorded += 1
     except Exception:
         log.warning("could not record usage of %s", operation, exc_info=True)
 
@@ -289,10 +269,6 @@ def read_records(log_path: Path) -> list[UsageRecord]:
     return records
 
 
-def write_summary(log_path: Path, summary_path: Path) -> None:
-    write_model(summary_path, read_usage(log_path))
-
-
 def summarize(records: list[UsageRecord]) -> SessionUsage:
     total = UsageTotals()
     by_stage: dict[str, UsageTotals] = {}
@@ -326,8 +302,7 @@ def _add(totals: UsageTotals, r: UsageRecord) -> None:
     else:
         totals.cost_usd = round(totals.cost_usd + r.cost_usd, 8)
     totals.latency_s = round(totals.latency_s + r.latency_s, 3)
-    totals.audio_seconds += r.audio_seconds
-    for name in TOKEN_FIELDS:
+    for name in UsageCounts.model_fields:
         setattr(totals, name, getattr(totals, name) + getattr(r, name))
 
 

@@ -1,11 +1,11 @@
-"""Settings page API and the saved settings file (iris/user_settings.py)."""
-
 import json
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
+from iris.api.routes.settings import SettingsUpdate
 from iris.config import Settings
 from iris.main import create_app
 from iris.user_settings import (
@@ -18,7 +18,6 @@ from iris.user_settings import (
 
 @pytest.fixture(autouse=True)
 def no_language_env(monkeypatch):
-    """Each test decides itself whether the language is pinned by the environment."""
     monkeypatch.delenv("IRIS_TRANSCRIBE_LANGUAGE", raising=False)
 
 
@@ -36,15 +35,12 @@ def language(client: TestClient) -> dict:
     return r.json()["transcribe_language"]
 
 
-# --- The file ---------------------------------------------------------------------------------
-
-
 def test_missing_file_means_nothing_saved(tmp_path: Path):
     assert load_user_settings(tmp_path / "settings.json") == UserSettings()
 
 
 def test_save_then_load_round_trips(tmp_path: Path):
-    path = tmp_path / "new" / "settings.json"  # the data folder may not exist yet
+    path = tmp_path / "new" / "settings.json"
     save_user_settings(path, UserSettings(transcribe_language="fr"))
     assert load_user_settings(path).transcribe_language == "fr"
     assert not path.with_suffix(".json.tmp").exists()
@@ -94,9 +90,6 @@ def test_dotenv_wins_over_saved(tmp_path: Path):
     assert apply_user_settings(settings, user).transcribe_language == "es"
 
 
-# --- The API ----------------------------------------------------------------------------------
-
-
 def test_defaults(tmp_path: Path):
     settings = make_settings(tmp_path)
     with app_client(settings) as client:
@@ -120,13 +113,12 @@ def test_save_applies_to_the_next_session_and_survives_a_restart(tmp_path: Path)
         assert r.status_code == 200
         assert r.json()["transcribe_language"]["value"] == "fr"
         assert r.json()["transcribe_language"]["source"] == "saved"
-        # No restart: the next session's stages see the new language.
         sid = client.post("/api/live", json={"title": "cours"}).json()["id"]
         ctx = client.app.state.runner.context(sid)
         assert ctx.settings.transcribe_language == "fr"
     saved = json.loads(settings.user_settings_path.read_text())
     assert saved["transcribe_language"] == "fr"
-    with app_client(settings) as client:  # an engine restart
+    with app_client(settings) as client:
         assert language(client)["value"] == "fr"
         assert client.app.state.runner.settings.transcribe_language == "fr"
 
@@ -147,6 +139,19 @@ def test_unknown_language_is_rejected_with_a_clear_message(tmp_path: Path, value
     assert r.status_code == 422
     assert "not a language Whisper knows" in r.text or "is empty" in r.text
     assert not settings.user_settings_path.exists()
+
+
+@pytest.mark.parametrize("value", [None, "auto", "AUTO", " en ", "Fr"])
+def test_an_update_reads_a_language_as_the_saved_settings_do(value):
+    expected = UserSettings(transcribe_language=value).transcribe_language
+    assert SettingsUpdate(transcribe_language=value).transcribe_language == expected
+
+
+@pytest.mark.parametrize("value", ["", "  ", "\t"])
+def test_an_update_refuses_a_blank_language_the_saved_settings_read_as_auto(value):
+    assert UserSettings(transcribe_language=value).transcribe_language == "auto"
+    with pytest.raises(ValidationError, match="transcribe_language is empty"):
+        SettingsUpdate(transcribe_language=value)
 
 
 def test_unknown_fields_are_rejected(tmp_path: Path):
@@ -201,9 +206,6 @@ def test_failed_write_keeps_the_old_settings(tmp_path: Path, monkeypatch):
         assert "disk full" not in r.text
         assert language(client)["value"] == "en"
         assert client.app.state.runner.settings.transcribe_language == "en"
-
-
-# --- The API key (only whether one is set) ----------------------------------------------------
 
 
 @pytest.mark.parametrize(

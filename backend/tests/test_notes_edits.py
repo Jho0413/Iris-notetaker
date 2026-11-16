@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 
 from iris.main import create_app
 from iris.models import Notes, NotesEdits, SessionType, SourceKind
-from iris.notes_edits import MAX_EDITED_CHARS, generated_hash, newest
+from iris.notes.edits import MAX_EDITED_CHARS, generated_hash, newest
 from iris.store.layout import read_model, session_paths, write_model
 from tests.builders import markdown_images, notes_visual, session_with_notes
 

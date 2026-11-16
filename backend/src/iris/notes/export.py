@@ -8,9 +8,9 @@ from markdown_it.renderer import RendererHTML
 from markdown_it.token import Token
 from mdformat.renderer import MDRenderer, RenderContext, RenderTreeNode
 
-from iris.markdown import escape_text, protect_math, restore_math
 from iris.models import Notes
-from iris.notes_format import scan, upgraded
+from iris.notes.format import scan, upgraded
+from iris.notes.markdown import escape_text, protect_math, restore_math
 from iris.store.layout import inside
 from iris.svg import rasterize_svg
 
