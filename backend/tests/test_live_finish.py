@@ -428,7 +428,6 @@ def test_notes_made_after_a_restart_keep_the_live_work(tmp_path: Path, fake: Fak
         assert promoted == ["transcribe", "detect", "align", "select"]
         assert not SessionPaths(root).transcript_chunks_dir.exists()
         transcript = read_model(root / "transcript.json", Transcript)
-        assert transcript == read_model(root / "live/transcript.json", Transcript)
         assert transcript.segments[: len(before_restart.segments)] == before_restart.segments
         moments = read_model(root / "moments.json", Moments).moments
         assert len(moments) == len(SCREENS)

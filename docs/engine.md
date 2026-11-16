@@ -116,10 +116,6 @@ A live recording keeps its own files in `live/`:
 | `live/frames/` | the screen stills as captured, by time and share | the API, while recording |
 | `live/audio.pcm` | the chunks decoded so far, as one stream | the audio lane |
 | `live/transcript_windows/` | each transcribed window (a cache) | the audio lane |
-| `live/transcript.json` | the transcript so far | the audio lane |
-| `live/frames.json` | the stills fed to the moment detector so far | the screen lane |
-| `live/moments.json` | the moments closed so far | the screen lane |
-| `live/selection.json` | what has been read on screen so far | the select lane |
 | `live/select_batches.json` | which moments went into each batch read, so a restarted lane reads the same batches and finds them cached | the select lane |
 
 ## Runs and the job runner

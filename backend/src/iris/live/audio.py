@@ -26,7 +26,7 @@ from iris.llm.transcription import (
 )
 from iris.media.audio import SAMPLE_BYTES, fits_transcription_upload, quiet_profile
 from iris.media.webm import ChunkStream, NoChunkReason, PlacedWav, find_cluster, stream_header
-from iris.models import EventType, Stage, Transcript, TranscriptSegment
+from iris.models import EventType, Stage, TranscriptSegment
 from iris.pipeline.context import StageContext
 from iris.sources.browser_live import audio_chunks
 from iris.store.layout import SessionPaths, read_model, write_model
@@ -437,11 +437,6 @@ class AudioLane(LiveLane):
     async def _commit(self, window: CachedWindow) -> None:
         segments = _within(window.segments, window.start, window.end)
         language = window.language if segments else None
-        transcript = Transcript(
-            language=self.timeline.language or language,
-            segments=[*self.timeline.segments, *segments],
-        )
-        await asyncio.to_thread(write_model, self.ctx.paths.live_transcript, transcript)
         self.ctx.emit(
             EventType.TRANSCRIPT_CHUNK,
             {"chunk": window.index, "segments": [s.model_dump() for s in segments]},
@@ -459,9 +454,6 @@ class AudioLane(LiveLane):
 
     async def _finish(self, decoded: int) -> None:
         await self.timeline.publish_transcript([], decoded / self.rate)
-        if not self._committed:
-            empty = Transcript(segments=[])
-            await asyncio.to_thread(write_model, self.ctx.paths.live_transcript, empty)
         for old in self.ctx.paths.live_transcript_windows_dir.glob("*.json"):
             if old.name not in self._kept:
                 old.unlink(missing_ok=True)

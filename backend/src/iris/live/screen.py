@@ -7,16 +7,15 @@ import cv2
 from iris.live.lane import LiveLane
 from iris.live.timeline import Lane, LiveTimeline
 from iris.media.frames import FrameNormaliser, GridSampler, clear_frames
-from iris.models import EventType, FrameIndex, FrameRef, Moment, Moments
+from iris.models import EventType, FrameRef, Moment
 from iris.pipeline.context import StageContext
 from iris.pipeline.stages.detect import DetectParams, MomentDetector, moment_event, share_end
 from iris.sources.browser_live import CapturedFrame, captured_frames
-from iris.store.layout import SessionPaths, write_model
+from iris.store.layout import SessionPaths
 
 log = logging.getLogger(__name__)
 
 FEED_BATCH = 30
-INDEX_SAVE_S = 30.0
 
 
 class ScreenFeed:
@@ -31,10 +30,7 @@ class ScreenFeed:
         self.shares_seen = 0
         self._share_of_latest_ref = 0
         self.refs: list[FrameRef] = []
-        self.share_starts: list[float] = []
-        self.moments: list[Moment] = []
         self._sampled_in_cell: dict[int, tuple[float, int]] = {}
-        self._index_saved_through_t: float | None = None
 
     def would_sample(self, frame: CapturedFrame) -> bool:
         picked = self._sampled_in_cell.get(self.sampler.cell(frame.t))
@@ -58,7 +54,6 @@ class ScreenFeed:
                 end = share_end(self.refs[-1].t, self.fps, ref.t)
                 if (moment := self.detector.end_share(end)) is not None:
                     closed.append(moment)
-                self.share_starts.append(ref.t)
             self._share_of_latest_ref = self.shares_seen
             self.refs.append(ref)
             image = cv2.imread(str(self.paths.root / ref.path), cv2.IMREAD_COLOR)
@@ -66,34 +61,13 @@ class ScreenFeed:
                 continue
             if (moment := self.detector.feed(ref.t, ref, image)) is not None:
                 closed.append(moment)
-        saved = self._index_saved_through_t
-        due = bool(self.refs) and (saved is None or self.refs[-1].t - saved >= INDEX_SAVE_S)
-        self._save(closed, index=due)
         return closed
 
     def finish(self) -> list[Moment]:
         closed = []
         if self.refs and (moment := self.detector.finish(share_end(self.refs[-1].t, self.fps))):
             closed.append(moment)
-        self._save(closed, final=True)
         return closed
-
-    def _save(self, closed: list[Moment], *, index: bool = False, final: bool = False) -> None:
-        self.moments.extend(closed)
-        self.paths.live_dir.mkdir(parents=True, exist_ok=True)
-        if index or final:
-            self._index_saved_through_t = self.refs[-1].t if self.refs else None
-            width, height = self.normaliser.first_size or (0, 0)
-            frame_index = FrameIndex(
-                fps=self.fps,
-                width=width,
-                height=height,
-                frames=self.refs,
-                share_starts=self.share_starts,
-            )
-            write_model(self.paths.live_frame_index, frame_index)
-        if closed or final:
-            write_model(self.paths.live_moments, Moments(moments=self.moments))
 
 
 def _lateness(feed: ScreenFeed, frame: CapturedFrame, closed_to: float) -> str | None:

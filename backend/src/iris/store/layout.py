@@ -105,22 +105,6 @@ class SessionPaths:
         return self.live_transcript_windows_dir / transcript_cache_name(index, start, end, rate)
 
     @property
-    def live_transcript(self) -> Path:
-        return self.live_dir / "transcript.json"
-
-    @property
-    def live_frame_index(self) -> Path:
-        return self.live_dir / "frames.json"
-
-    @property
-    def live_moments(self) -> Path:
-        return self.live_dir / "moments.json"
-
-    @property
-    def live_selection(self) -> Path:
-        return self.live_dir / "selection.json"
-
-    @property
     def live_select_batches(self) -> Path:
         return self.live_dir / "select_batches.json"
 

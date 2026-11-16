@@ -202,7 +202,6 @@ async def test_moments_closing_during_a_call_are_batched_and_ids_continue(
     assert [v.moment_id for v in timeline.visuals] == ["m001", "m002", "m003", "m004"]
     assert [c.moment_id for c in timeline.contents] == ["m001", "m002", "m003", "m004"]
     assert all((ctx.paths.root / v.source_path).is_file() for v in timeline.visuals)
-    assert read_model(ctx.paths.live_selection, Selection) == timeline.selection()
     selected = [data["id"] for kind, data in events if kind == EventType.VISUAL_SELECTED]
     assert selected == ["v000001", "v000002", "v000003", "v000004"]
 
@@ -498,13 +497,12 @@ async def test_stop_reads_the_rest_once_the_transcript_is_done_and_waits_for_ren
     assert timeline.selected_to == 30
     assert [c.moment_id for c in timeline.contents] == ["m001", "m002", "m003"]
     assert renderer.started == ["v000001"]
-    assert read_model(ctx.paths.live_selection, Selection) == timeline.selection()
 
 
 async def test_no_moments_finishes_at_stop(ctx: StageContext, vision, renderer):
     timeline = await Driver(ctx).start().stop()
     assert vision.calls == [] and timeline.selection() == Selection(visuals=[])
-    assert not ctx.paths.live_selection.exists()
+    assert not ctx.paths.live_select_batches.exists()
 
 
 async def test_a_failed_select_call_fails_the_lane(ctx: StageContext, monkeypatch):

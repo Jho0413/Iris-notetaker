@@ -124,11 +124,8 @@ class SelectLane(LiveLane):
             result.rejected_moment_ids,
             selected_to=min(moments[-1].end, tl.closed_to),
         )
-        paths = self.ctx.paths
-        paths.live_dir.mkdir(parents=True, exist_ok=True)
-        write_model(paths.live_selection, tl.selection())
         record = SelectBatches(batches=self._batches + self._replay)
-        write_model(paths.live_select_batches, record)
+        write_model(self.ctx.paths.live_select_batches, record)
         for visual in result.visuals:
             task = asyncio.create_task(self._render(visual), name=f"live-render-{visual.id}")
             self._renders.add(task)

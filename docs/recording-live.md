@@ -125,8 +125,7 @@ flowchart LR
   back. Once a share has started, its last moment stays open until the next share's frames or
   make notes say where it ended: nothing else can tell sharing having stopped from frames still
   on their way. A restarted lane clears the frames it made and replays every captured one, so
-  its output is the same as if it had run all along. Its list of frames fed is rewritten every
-  so often rather than per frame, since it grows with the session.
+  its output is the same as if it had run all along.
 - **Select lane:** waits until the speech around a closed moment is transcribed, a little past its
   end so speech that outlasts the screen is part of it, reads the moments in batches with the
   select stage's own step, and redraws each new figure in the background by the render stage's
