@@ -24,6 +24,13 @@ class CachedChunk(BaseModel):
     language: str | None = None
     segments: list[TranscriptSegment]
 
+    def matches(self, digest: str, model: str, language: str | None) -> bool:
+        return (
+            self.audio_sha1 == digest
+            and self.model == model
+            and self.requested_language == language
+        )
+
 
 def _field(obj: Any, name: str, default: Any = None) -> Any:
     if isinstance(obj, dict):

@@ -350,9 +350,7 @@ class AudioLane(LiveLane):
         t0, t1 = start / self.rate, end / self.rate
         return (
             cached.index == i
-            and cached.audio_sha1 == digest
-            and cached.model == self.model
-            and cached.requested_language == self.language
+            and cached.matches(digest, self.model, self.language)
             and abs(cached.start - t0) < 1e-6
             and abs(cached.end - t1) < 1e-6
             and -1 <= cached.prompt_through < i

@@ -124,11 +124,7 @@ async def run(
             except ValueError:
                 log.warning("ignoring unreadable chunk cache %s", path)
             else:
-                if (
-                    cached.audio_sha1 == digest
-                    and cached.model == model
-                    and cached.requested_language == requested
-                ):
+                if cached.matches(digest, model, requested):
                     finish(cached)
                     continue
         todo.append((i, s, e, digest))
