@@ -1,14 +1,9 @@
-// The menu bar icon (Electron Tray), as pure functions (tested in test/tray.test.cjs). Recording
-// itself happens in the Live page: it reports its phase over the bridge (pages/preload-main.cjs),
-// relay() decides when the page is sent "start" or "stop", and main.cjs shows what trayView() says.
-
-/** The Live page's phases (frontend/src/pages/LivePage.tsx), as the tray groups them. */
 const TRAY_PHASE = {
   idle: 'idle',
   requesting: 'starting',
   recording: 'recording',
   stopped: 'stopped',
-  continuing: 'continuing', // asking for the sources again; like a start, but the recording is open
+  continuing: 'continuing',
   stopping: 'stopping',
   finishing: 'stopping',
   unfinished: 'unfinished',
@@ -16,15 +11,6 @@ const TRAY_PHASE = {
 
 const IDLE = Object.freeze({ phase: 'idle', startedAt: 0, macSoundRefused: false, screen: false })
 
-/**
- * A report from the page ({phase, startedAt, macSoundRefused, screen}), checked once here: the
- * tray's state, or null for anything malformed. `startedAt` (ms since the epoch) matters only
- * while recording: a page that goes away still uploading reports "stopping" without one.
- * `macSoundRefused`: macOS refused the Mac's sound to this recording, so only the mic is
- * recorded; required while recording, and kept while stopped and continuing, so the window shows
- * once per recording, not again after each Continue. `screen`: the screen is shared now (only
- * while recording), so the menu offers Stop Sharing instead of Share Screen….
- */
 function parseReport(report) {
   const name = report?.phase
   if (typeof name !== 'string' || !Object.hasOwn(TRAY_PHASE, name)) return null
@@ -37,8 +23,6 @@ function parseReport(report) {
   return { phase, startedAt, macSoundRefused, screen: report.screen }
 }
 
-/** Elapsed time as the Live page's clock shows it (formatClock in frontend/src/session/state.ts):
- * "4:05", "1:02:03". */
 function clock(ms) {
   const total = Math.max(0, Math.floor(ms / 1000))
   const h = Math.floor(total / 3600)
@@ -54,13 +38,6 @@ const QUIT = { id: 'quit', label: 'Quit Iris' }
 const SEPARATOR = { type: 'separator' }
 const status = (label) => ({ label, enabled: false })
 
-/**
- * What the icon shows in `state` at `now`: `recording` (the red icon), `title` (the text beside
- * it: the elapsed time while recording) and the menu `items`. An item with an `id` is an action
- * main.cjs runs: 'recordAudio', 'recordScreen', 'shareScreen' or 'stopSharing' while recording,
- * 'stop', a stopped recording's 'continue',
- * 'makeNotes', 'startOver' or 'discard', 'show' or 'quit'.
- */
 function trayView(state, now) {
   switch (state.phase) {
     case 'recording':
@@ -77,7 +54,6 @@ function trayView(state, now) {
         ],
       }
     case 'stopped':
-      // Start Over and Discard delete the recording: the window shows to confirm them.
       return {
         recording: false,
         title: '',
@@ -99,7 +75,6 @@ function trayView(state, now) {
     case 'continuing':
       return { recording: false, title: '', items: [status('Continuing…'), SHOW, SEPARATOR, QUIT] }
     case 'unfinished':
-      // The Live page offers Try again: the recording is kept, its notes not started yet.
       return { recording: false, title: '', items: [status('Recording stopped'), SHOW, SEPARATOR, QUIT] }
     default:
       return {
@@ -116,74 +91,29 @@ function trayView(state, now) {
   }
 }
 
-/**
- * Whether closing the window hides it instead: while a recording is open (recording, stopped,
- * continuing or finishing its upload), closing would end it, and the menu bar can still act on it
- * and show the window again.
- */
 function hideOnClose(state) {
   return ['recording', 'stopped', 'continuing', 'stopping'].includes(state.phase)
 }
 
-/** Asking for sources (a start, or a stopped recording's Continue), so a picker may be open. */
 const asking = (phase) => phase === 'starting' || phase === 'continuing'
 
-/**
- * Whether the Live page holds a recording: capturing, stopped, continuing, still uploading one,
- * or ended with notes not started (Try again). A start that is only asking for permissions holds
- * none (its session is made once they are granted), so quitting then cuts nothing short.
- */
 function holdsRecording(state) {
   return state.phase !== 'idle' && state.phase !== 'starting'
 }
 
-/** A stopped recording's choices from the menu bar: the command each sends the page, and whether
- * the window shows (the page confirms the ones that delete the recording). */
 const STOPPED_CHOICES = {
-  // Like a start from the menu bar: quiet (only a picker shows), and the window shows if it fails.
   continue: { send: 'continue', show: false, quiet: true },
   makeNotes: { send: 'make-notes', show: false },
   startOver: { send: 'start-over', show: true },
   discard: { send: 'discard', show: true },
 }
 
-/**
- * The relay between the menu bar and the main window's UI. `recording`: what the Live page last
- * reported. `listening`: the UI has subscribed to commands. `startPending`: the start command
- * ('start-audio' or 'start-screen') waiting for the UI to load (the window was closed, or the
- * engine is still starting), or null. `quietStart`: a start (or a stopped recording's Continue)
- * from the menu bar is under way with the window left as it was (hidden, or in another Space):
- * only the picker shows (none for audio), and the window only if it fails.
- */
 const RELAY_START = Object.freeze({ recording: IDLE, listening: false, startPending: null, quietStart: false })
 
-/** The command each menu bar start sends the page. */
 const START_COMMAND = { audio: 'start-audio', screen: 'start-screen' }
 
-/** How long a page sent "start" has to report it is starting. It does within a render; one that
- * doesn't is held up by something it shows (e.g. "Leave without saving?" on another page). */
 const START_ANSWER_MS = 3000
 
-/**
- * The relay's next state for `event`, and what main.cjs does about it: `send` a command to the UI
- * ('start-audio', 'start-screen', 'share-screen', 'stop-sharing', 'stop', or a STOPPED_CHOICES
- * command), `closePicker` (a picker opened by Share Screen belongs to a recording that is no
- * longer running), `show` the window, or log a `malformed` report. Events:
- *   record        "Record Audio" or "Record Screen…", `event.mode` 'audio' or 'screen' (main.cjs
- *                 makes the window if it was closed, but doesn't show it)
- *   screen        "Share Screen…" (`event.on` true: only the picker shows) or "Stop Sharing"
- *   stop          "Stop": the page stops capturing and offers what next
- *   choice        a stopped recording's choice, `event.choice` a STOPPED_CHOICES key
- *   listening     the UI subscribed (after each load of the UI)
- *   report        the Live page's phase, `event.report` as sent over the bridge
- *   pageGone      the page was replaced (a reload, the UI after the starting screen) or crashed
- *   windowClosed  the main window is gone
- *   pickerCancelled  the picker was cancelled: the user's choice, so a failed start shows nothing
- *   startUnanswered  START_ANSWER_MS after a quiet start was sent: a page still idle is held up
- *                 by something it asks, in a window the user may not see
- *   engineFailed  the engine didn't start: a start waiting for the UI is dropped, so a later
- *                 Restart doesn't start recording without being asked again
- */
 function relay(state, event) {
   switch (event.type) {
     case 'record': {
@@ -193,13 +123,11 @@ function relay(state, event) {
       return { state: { ...state, startPending: command, quietStart: true } }
     }
     case 'screen': {
-      // Never queued, like Stop; and only a change: the menu may be older than the page's state.
       const { recording } = state
       if (!state.listening || recording.phase !== 'recording' || recording.screen === event.on) return { state }
       return { state, send: event.on ? 'share-screen' : 'stop-sharing' }
     }
     case 'stop':
-      // Never queued: a page that loads later has nothing to stop.
       return state.listening && state.recording.phase === 'recording' ? { state, send: 'stop' } : { state }
     case 'choice': {
       const choice = Object.hasOwn(STOPPED_CHOICES, event.choice) ? STOPPED_CHOICES[event.choice] : null
@@ -215,21 +143,13 @@ function relay(state, event) {
     case 'report': {
       const recording = parseReport(event.report)
       if (!recording) return { state, malformed: true }
-      // A stop that failed (the Live page's Try again): the window may be hidden, so show it.
       const stopFailed = state.recording.phase === 'stopping' && recording.phase === 'unfinished'
-      // A quiet start (or Continue) that ended without recording, and wasn't cancelled in the
-      // picker: the page says why.
       const startEnded = asking(state.recording.phase) && !asking(recording.phase)
       const backTo = recording.phase === 'idle' || recording.phase === 'stopped'
       const startFailed = state.quietStart && startEnded && backTo
-      // macOS refused the Mac's sound (at the start or later): the page says how to allow it,
-      // and a call's other side isn't recorded meanwhile, so show it even mid-call, once.
       const soundRefused = recording.macSoundRefused && !state.recording.macSoundRefused
       const quietStart = state.quietStart && !startEnded
       const show = stopFailed || startFailed || soundRefused
-      // Stopped (or finishing) while Share Screen's picker is open: the picker is its own window,
-      // so the page's Stop doesn't close it, and Chromium would hold the next capture request
-      // (Continue, Start over) behind it.
       const closePicker = state.recording.phase === 'recording' && recording.phase !== 'recording'
       return {
         state: { ...state, recording, quietStart },
@@ -247,7 +167,6 @@ function relay(state, event) {
     case 'windowClosed':
       return { state: RELAY_START }
     case 'engineFailed': {
-      // The engine's dialog is about to ask: a quiet start shows the window it belongs to.
       const show = state.startPending && state.quietStart
       return { state: { ...state, startPending: null, quietStart: false }, ...(show && { show: true }) }
     }

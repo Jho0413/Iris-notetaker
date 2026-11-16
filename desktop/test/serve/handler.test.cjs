@@ -1,17 +1,15 @@
-// The app:// handler end to end, without Electron: a fake `protocol` captures the handler, which
-// is called with real Requests; a local HTTP server stands in for the backend.
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const http = require('node:http')
 const os = require('node:os')
 const path = require('node:path')
 const { after, before, test } = require('node:test')
-const { handleAppProtocol, registerScheme } = require('../src/handler.cjs')
+const { handleAppProtocol, registerScheme } = require('../../src/serve/handler.cjs')
 
 const TOKEN = 'launch-token'
 let dist, outside, server, port, handle
 let backendUp = true
-const seen = [] // requests the fake backend received
+const seen = []
 
 before(async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'iris-handler-'))
@@ -38,7 +36,7 @@ before(async () => {
       res.writeHead(200, { 'content-type': 'text/event-stream' })
       res.write('event: a\ndata: 1\n\n')
       setTimeout(() => res.write('event: b\ndata: 2\n\n'), 150)
-      res.on('close', () => seen.push({ closed: '/api/events' })) // the client went away mid-stream
+      res.on('close', () => seen.push({ closed: '/api/events' }))
       return
     }
     if (req.url === '/api/redirect') {
@@ -129,7 +127,6 @@ test('API requests reach the backend with the token, the page’s own token repl
   assert.equal(seen[0].headers['x-iris-token'], TOKEN)
   assert.equal(seen[0].headers.host, `127.0.0.1:${port}`)
   assert.deepEqual(res.headers.getSetCookie(), ['a=1', 'b=2'])
-  // Shown as a document (a figure opened in its own window), an API response runs no script.
   assert.match(res.headers.get('content-security-policy'), /default-src 'none'.*sandbox/)
 })
 
@@ -196,7 +193,6 @@ test('503 while the backend is not running, 502 when it does not answer', async 
     const res = await get('app://iris/api/sessions')
     assert.equal(res.status, 503)
     assert.match((await res.json()).detail, /not running/)
-    // The UI itself still loads.
     assert.equal((await get('app://iris/')).status, 200)
   } finally {
     backendUp = true

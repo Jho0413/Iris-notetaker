@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict')
 const { test } = require('node:test')
-const { listSources, defaultSelection, chosenId, soundOnly } = require('../src/picker.cjs')
+const { listSources, defaultSelection, chosenId, soundOnly } = require('../../src/recording/picker.cjs')
 
 const screen = (id, displayId) => ({ id: `screen:${id}:0`, name: 'Entire screen', displayId, hasThumbnail: true })
 const win = (id, name, hasThumbnail = true) => ({ id: `window:${id}:0`, name, displayId: '', hasThumbnail })
@@ -23,7 +23,7 @@ test('several displays: the main display first, numbered, with each display name
       { id: 1, label: 'Built-in Retina Display' },
       { id: 5, label: 'DELL U2723QE' },
     ],
-    primaryDisplayId: 5, // the external display is the main one
+    primaryDisplayId: 5,
   }
   const list = listSources([screen(1, '1'), screen(5, '5')], context)
   assert.deepEqual(list.screens, [

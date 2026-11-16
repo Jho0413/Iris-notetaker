@@ -1,9 +1,3 @@
-// The picker: what to record when a recording starts. window.irisPicker comes from
-// preload-picker.cjs. The list is a snapshot taken as the picker opened (src/picker.cjs decides
-// what is in it and what is selected); this page only shows it and sends back the choice.
-//
-// Click selects, double-click or Return records the selection, the arrow keys move it, Esc
-// cancels. Window titles come from other apps: they are set as text, never as HTML.
 const sources = document.getElementById('sources')
 const record = document.getElementById('record')
 const template = document.getElementById('card')
@@ -18,7 +12,7 @@ function select(id, { scroll = true } = {}) {
   for (const card of cards()) {
     const on = card.dataset.id === id
     card.setAttribute('aria-checked', String(on))
-    card.tabIndex = on ? 0 : -1 // one tab stop for the group; the arrows move within it
+    card.tabIndex = on ? 0 : -1
     if (on) card.focus({ preventScroll: !scroll })
   }
   record.disabled = selected === null
@@ -93,8 +87,6 @@ function show(snapshot) {
   sources.hidden = false
   document.getElementById('audio').hidden = false
   record.hidden = false
-  // Opening at the top: the thumbnails are still loading, so scrolling to the card now would
-  // overshoot and hide the "Entire screen" heading.
   select(snapshot.selected, { scroll: false })
   if (selected === null) record.focus()
 }
@@ -109,7 +101,6 @@ document.addEventListener('keydown', (e) => {
     window.irisPicker.cancel()
     return
   }
-  // A focused footer button (Cancel, Open System Settings) answers Return itself.
   if (e.key === 'Enter' && !record.hidden && !e.target.closest('footer button:not(#record), #settings')) {
     e.preventDefault()
     choose()

@@ -2,7 +2,6 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <!-- Thumbnails and app icons arrive as data: URLs from the main process. -->
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:" />
     <title>Record with Iris</title>
     <link rel="stylesheet" href="page.css" />
@@ -14,8 +13,7 @@
       <p>Recording the entire screen keeps going whichever app you switch to.</p>
     </header>
 
-    <main class="scroll">
-      <!-- picker.js fills the cards from the snapshot taken as the picker opened. -->
+    <main>
       <div id="sources" role="radiogroup" aria-label="What to record" hidden>
         <h2 id="screens-title">Entire screen</h2>
         <div id="screens" class="grid screens" aria-labelledby="screens-title"></div>

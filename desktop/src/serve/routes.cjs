@@ -1,12 +1,3 @@
-// What the app:// handler does with a request, as pure functions (tested in test/routes.test.cjs).
-// The Electron glue is in handler.cjs.
-//
-//   app://iris/api/...   → forwarded to the backend at http://127.0.0.1:<port>/api/...
-//   app://iris/<file>    → a file inside the built UI (frontend/dist); a missing path with no
-//                          extension → index.html, so React Router can show deep routes after a
-//                          reload (handler.cjs); a missing file → 404
-//   anything else        → denied (another host, user info, a bad escape or a NUL): 404
-
 const path = require('node:path')
 
 const SCHEME = 'app'
@@ -14,7 +5,6 @@ const HOST = 'iris'
 const ORIGIN = `${SCHEME}://${HOST}`
 const TOKEN_HEADER = 'x-iris-token'
 
-// Hop-by-hop headers (RFC 9110 §7.6.1) are not forwarded, and nor is a token the page made up.
 const DROPPED_REQUEST_HEADERS = new Set([
   'connection',
   'keep-alive',
@@ -28,11 +18,6 @@ const DROPPED_REQUEST_HEADERS = new Set([
   TOKEN_HEADER,
 ])
 
-/**
- * Decide what a request URL is for.
- * @returns {{kind: 'api', path: string} | {kind: 'static', pathname: string} | {kind: 'deny'}}
- *   `path` is the path and query to forward; `pathname` is the decoded file path to look up.
- */
 function route(requestUrl) {
   let url
   try {
@@ -50,16 +35,12 @@ function route(requestUrl) {
   try {
     pathname = decodeURIComponent(url.pathname)
   } catch {
-    return { kind: 'deny' } // malformed escapes, e.g. "%E0%A4%A"
+    return { kind: 'deny' }
   }
   if (pathname.includes('\0')) return { kind: 'deny' }
   return { kind: 'static', pathname }
 }
 
-/**
- * The backend URL for an `api` route. Only the path and query come from the request: the result
- * is always on 127.0.0.1:<port>, whatever the path holds ("//evil.example", "@evil", ...).
- */
 function forwardUrl(port, apiPath) {
   if (!Number.isInteger(port) || port <= 0 || port > 65535) throw new Error(`bad port ${port}`)
   if (!apiPath.startsWith('/api')) throw new Error(`not an API path: ${apiPath}`)
@@ -68,11 +49,6 @@ function forwardUrl(port, apiPath) {
   return target.href
 }
 
-/**
- * A backend redirect's Location as seen by the page: a backend URL (or a relative one) becomes
- * the same path on app://iris; anything else is dropped (null), so a redirect can never send the
- * page, or the token, elsewhere.
- */
 function rewriteLocation(location, port) {
   const backend = `http://127.0.0.1:${port}`
   let url
@@ -85,11 +61,6 @@ function rewriteLocation(location, port) {
   return `${ORIGIN}${url.pathname}${url.search}${url.hash}`
 }
 
-/**
- * Headers to send to the backend: the page's own, minus hop-by-hop ones, plus the launch token.
- * The token always overwrites anything the page sent under that name.
- * @param {Iterable<[string, string]>} headers
- */
 function forwardHeaders(headers, token) {
   const out = new Headers()
   for (const [name, value] of headers) {
@@ -99,10 +70,6 @@ function forwardHeaders(headers, token) {
   return out
 }
 
-/**
- * The file in `distDir` for a decoded pathname, or null if it would fall outside it (`..`,
- * absolute paths). Symlinks are checked by the caller against the real path.
- */
 function resolveInDist(distDir, pathname) {
   const root = path.resolve(distDir)
   const relative = pathname.replace(/^\/+/, '')
@@ -110,17 +77,12 @@ function resolveInDist(distDir, pathname) {
   return isInside(root, file) ? file : null
 }
 
-/** Whether `file` is `root` or below it. Both must be absolute and normalized. */
 function isInside(root, file) {
   const rel = path.relative(root, file)
   if (rel === '') return true
   return rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel)
 }
 
-/**
- * A missing path is a client-side route (index.html) unless it names a file, e.g. a missing
- * "/assets/x.js" is a 404 rather than HTML served as JavaScript.
- */
 function isClientRoute(pathname) {
   const last = pathname.split('/').pop() ?? ''
   return !last.includes('.')

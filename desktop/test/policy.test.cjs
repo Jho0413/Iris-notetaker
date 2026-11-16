@@ -11,15 +11,6 @@ test('isIrisUrl matches app://iris only', () => {
   }
 })
 
-test('isDesktopPage: html files inside the pages folder', () => {
-  const pages = path.resolve('/Applications/Iris.app/Contents/Resources/app/pages')
-  assert.ok(policy.isDesktopPage(pathToFileURL(path.join(pages, 'key.html')).href + '?mode=first', pages))
-  assert.ok(!policy.isDesktopPage(pathToFileURL(path.join(pages, '..', 'main.cjs')).href, pages))
-  assert.ok(!policy.isDesktopPage(pathToFileURL('/etc/key.html').href, pages))
-  assert.ok(!policy.isDesktopPage('app://iris/key.html', pages))
-  assert.ok(!policy.isDesktopPage('file:///Applications/Iris.app/Contents/Resources/app/pages/../../x.html', pages))
-})
-
 test('externalUrl lets http(s) out, nothing else', () => {
   assert.equal(policy.externalUrl('https://platform.openai.com/api-keys'), 'https://platform.openai.com/api-keys')
   assert.equal(policy.externalUrl('http://example.com'), 'http://example.com/')
@@ -62,7 +53,6 @@ test('figures open in an Iris window; other app:// URLs do not', () => {
   ]) {
     assert.ok(!policy.isSessionFileUrl(u), u)
   }
-  // And such a URL is never handed to the system browser.
   assert.equal(policy.externalUrl('app://iris/api/sessions/ab12cd/files/visuals/v1.jpg'), null)
 })
 
@@ -73,7 +63,6 @@ test('fromIrisWindow: only the Iris page’s top frame in that window', () => {
   const top = (url) => ({ url, parent: null })
   assert.ok(policy.fromIrisWindow(event(top('app://iris/settings')), win))
   assert.ok(policy.fromIrisWindow(event(top('app://iris/')), win))
-  // Another window's contents, an iframe, another origin, the app's own pages, no frame, no window.
   assert.ok(!policy.fromIrisWindow(event(top('app://iris/settings'), {}), win))
   assert.ok(!policy.fromIrisWindow(event({ url: 'app://iris/settings', parent: top('app://iris/') }), win))
   for (const url of ['https://evil.example/', 'file:///Applications/Iris.app/pages/starting.html', 'app://iris.evil/', '']) {
@@ -82,4 +71,21 @@ test('fromIrisWindow: only the Iris page’s top frame in that window', () => {
   assert.ok(!policy.fromIrisWindow({ sender: contents, senderFrame: null }, win))
   assert.ok(!policy.fromIrisWindow(event(top('app://iris/')), null))
   assert.ok(!policy.fromIrisWindow(event(top('app://iris/')), { webContents: contents, isDestroyed: () => true }))
+})
+
+test('fromDesktopPage: only that page file, in the top frame of that window', () => {
+  const pages = path.resolve('/Applications/Iris.app/Contents/Resources/app/pages')
+  const keyPage = path.join(pages, 'key.html')
+  const contents = {}
+  const win = { webContents: contents, isDestroyed: () => false }
+  const event = (url, { sender = contents, parent = null } = {}) => ({ sender, senderFrame: { url, parent } })
+  const keyUrl = pathToFileURL(keyPage).href + '?mode=first'
+  assert.ok(policy.fromDesktopPage(event(keyUrl), win, keyPage))
+  assert.ok(!policy.fromDesktopPage(event(pathToFileURL(path.join(pages, 'picker.html')).href), win, keyPage))
+  assert.ok(!policy.fromDesktopPage(event(pathToFileURL('/etc/key.html').href), win, keyPage))
+  assert.ok(!policy.fromDesktopPage(event('app://iris/key.html'), win, keyPage))
+  assert.ok(!policy.fromDesktopPage(event(keyUrl, { parent: {} }), win, keyPage))
+  assert.ok(!policy.fromDesktopPage(event(keyUrl, { sender: {} }), win, keyPage))
+  assert.ok(!policy.fromDesktopPage(event(keyUrl), { webContents: contents, isDestroyed: () => true }, keyPage))
+  assert.ok(!policy.fromDesktopPage(event(keyUrl), null, keyPage))
 })

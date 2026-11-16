@@ -9,7 +9,7 @@
     "postinstall": "install-electron",
     "start": "open -n -W node_modules/electron/dist/Electron.app --args \"$PWD\"",
     "start:fresh": "npm --prefix ../frontend run build && npm start",
-    "test": "node --test test/*.test.cjs"
+    "test": "node --test \"test/**/*.test.cjs\""
   },
   "devDependencies": {
     "electron": "^45.2.2",

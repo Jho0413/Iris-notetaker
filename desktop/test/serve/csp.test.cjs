@@ -3,7 +3,7 @@ const crypto = require('node:crypto')
 const fs = require('node:fs')
 const path = require('node:path')
 const { test } = require('node:test')
-const { contentSecurityPolicy, inlineScriptHashes } = require('../src/csp.cjs')
+const { contentSecurityPolicy, inlineScriptHashes } = require('../../src/serve/csp.cjs')
 
 const sha = (s) => `'sha256-${crypto.createHash('sha256').update(s).digest('base64')}'`
 
@@ -24,7 +24,6 @@ test('the policy allows only the app and the hashed inline scripts', () => {
 
 test("workers load only from the app's own files, as the live frame timer does (#39)", () => {
   const directives = contentSecurityPolicy('<script>theme()</script>').split('; ')
-  // Workers follow the first of worker-src, child-src and script-src that is set.
   const workers = ['worker-src', 'child-src', 'script-src']
     .map((name) => directives.find((d) => d.startsWith(`${name} `)))
     .find(Boolean)
@@ -33,7 +32,7 @@ test("workers load only from the app's own files, as the live frame timer does (
 })
 
 test("the frontend's index.html theme script is covered", () => {
-  const index = path.join(__dirname, '..', '..', 'frontend', 'index.html')
+  const index = path.join(__dirname, '..', '..', '..', 'frontend', 'index.html')
   const html = fs.readFileSync(index, 'utf8')
   const hashes = inlineScriptHashes(html)
   assert.equal(hashes.length, 1, 'index.html has one inline script (the theme)')

@@ -34,15 +34,13 @@ test('removing the key while sessions are busy is refused, worded for several', 
 
 test('a recording counts as busy only while the Live page captures it', () => {
   const sessions = [
-    { id: 'a', status: 'recording' }, // left by an earlier quit, or the one being captured now
+    { id: 'a', status: 'recording' },
     { id: 'b', status: 'processing' },
     { id: 'c', status: 'done' },
     { id: 'd', status: 'failed' },
   ]
   assert.deepEqual(busyNow(sessions, { capturing: true }).map((s) => s.id), ['a', 'b'])
-  // Nothing capturing (e.g. a start cancelled in the picker): a leftover recording doesn't block.
   assert.deepEqual(busyNow(sessions, { capturing: false }).map((s) => s.id), ['b'])
-  // Stopped without notes: nothing is cut short by quitting.
   assert.deepEqual(busyNow([{ id: 'e', status: 'stopped' }], { capturing: true }), [])
 })
 
@@ -81,16 +79,15 @@ test('every session still recording is found to stop, whoever recorded it', () =
   const sessions = [
     { id: 'a', status: 'recording' },
     { id: 'b', status: 'processing' },
-    { id: 'c', status: 'stopped' }, // already stopped: nothing to do
+    { id: 'c', status: 'stopped' },
     { id: 'd', status: 'recording' },
-    { status: 'recording' }, // no id: can't be addressed
+    { status: 'recording' },
     null,
   ]
   assert.deepEqual(recordingIds(sessions), ['a', 'd'])
   for (const answer of [null, undefined, {}, 'oops']) assert.deepEqual(recordingIds(answer), [])
 })
 
-/** A stand-in for the app's Backend: answers the session list, records each POST. */
 function fakeBackend(sessions, answer = 200) {
   const calls = []
   return {
@@ -116,7 +113,7 @@ test('stopping recordings reads the list, then stops each recording and waits fo
   await stopRecordings(backend, 'quitting', (line) => logged.push(line))
   assert.deepEqual(backend.calls.map(([method, path]) => [method, path]), [
     ['GET', '/api/sessions'],
-    ['POST', '/api/live/r%201/stop'], // the id is escaped in the path
+    ['POST', '/api/live/r%201/stop'],
   ])
   assert.ok(backend.calls[0][2] > REQUEST_TIMEOUT_MS, 'the list gets longer than the default: it adds up costs')
   assert.deepEqual(logged, ['[sessions] stopped recordings (quitting): r 1 200'])

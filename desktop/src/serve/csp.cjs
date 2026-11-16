@@ -1,11 +1,5 @@
-// The Content-Security-Policy sent with index.html. Scripts load from the app only; the inline
-// theme script in index.html (it runs before first paint) is allowed by its hash, so editing it
-// keeps working without touching this file. Styles allow inline: React and KaTeX set style
-// attributes.
-
 const crypto = require('node:crypto')
 
-/** sha256 sources for each inline <script> (one without a src) in an HTML document. */
 function inlineScriptHashes(html) {
   const hashes = []
   for (const match of html.matchAll(/<script(\s[^>]*)?>([\s\S]*?)<\/script>/gi)) {

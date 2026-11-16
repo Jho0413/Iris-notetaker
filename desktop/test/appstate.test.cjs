@@ -13,7 +13,7 @@ test('flags are remembered across launches, in a folder that may not exist yet',
   const file = path.join(tmpDir(), 'Iris', 'app-state.json')
   assert.equal(createAppState(file).get('welcomeShown'), undefined)
   assert.equal(createAppState(file).set('welcomeShown', true), null)
-  assert.equal(createAppState(file).get('welcomeShown'), true) // a later launch
+  assert.equal(createAppState(file).get('welcomeShown'), true)
   assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), { welcomeShown: true })
   assert.ok(!fs.existsSync(`${file}.tmp`))
 })
@@ -56,6 +56,6 @@ test('a read-only folder returns the error and keeps the flags already there', (
   const state = createAppState(file)
   const err = state.set('welcomeShown', true)
   assert.equal(err?.code, 'EACCES')
-  assert.ok(err.message.includes(dir), err.message) // says where, for the log
+  assert.ok(err.message.includes(dir), err.message)
   assert.equal(state.get('welcomeShown'), false)
 })

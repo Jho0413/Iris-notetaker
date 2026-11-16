@@ -1,10 +1,9 @@
 const assert = require('node:assert/strict')
 const { test } = require('node:test')
-const { saveNewKey } = require('../src/keysave.cjs')
+const { saveNewKey } = require('../../src/key/keysave.cjs')
 
 const KEY = 'sk-test-0123456789abcdefghij'
 
-/** Fakes that record what happened, in order. */
 function deps({ check = { ok: true }, open = true, storeThrows = null } = {}) {
   const log = []
   return {
@@ -14,14 +13,13 @@ function deps({ check = { ok: true }, open = true, storeThrows = null } = {}) {
     store: (key) => {
       log.push(['store', key])
       if (storeThrows) throw new Error(storeThrows)
-      return key
     },
   }
 }
 
 test('a good key is checked, then stored', async () => {
   const d = deps()
-  assert.deepEqual(await saveNewKey(`  ${KEY}\n`, d), { ok: true, key: KEY })
+  assert.deepEqual(await saveNewKey(`  ${KEY}\n`, d), { ok: true })
   assert.deepEqual(d.log, [['check', KEY], ['stillOpen'], ['store', KEY]])
 })
 

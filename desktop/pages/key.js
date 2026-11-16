@@ -1,10 +1,3 @@
-// The key screen. window.irisKey comes from preload-key.cjs: save(), cancel() and hasApiKey()
-// (unused here); the stored key is never sent back to this page. Saving checks the new key with
-// OpenAI first.
-//
-// mode=first (first run): two steps, Welcome then Connect, with Next and Back; "Set up later"
-// opens Iris without a key. mode=add / mode=change (from the app): the Connect form on its own,
-// and the app restarts its engine with the new key.
 const welcome = document.getElementById('welcome')
 const connect = document.getElementById('connect')
 const form = document.getElementById('form')
@@ -23,7 +16,6 @@ if (mode === 'first') {
 }
 const saveLabel = save.textContent
 
-/** Show one step; the other is hidden, so the window only ever holds one. */
 function show(step) {
   welcome.hidden = step !== 'welcome'
   connect.hidden = step !== 'connect'

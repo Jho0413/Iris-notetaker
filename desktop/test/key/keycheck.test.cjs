@@ -1,10 +1,9 @@
 const assert = require('node:assert/strict')
 const { test } = require('node:test')
-const { checkKeyWithOpenAI, MODELS_URL, REJECTED, UNREACHABLE, CANT_CHECK } = require('../src/keycheck.cjs')
+const { checkKeyWithOpenAI, MODELS_URL, REJECTED, UNREACHABLE, CANT_CHECK } = require('../../src/key/keycheck.cjs')
 
 const KEY = 'sk-test-0123456789abcdefghij'
 
-/** A fake fetch answering with `status`, recording what it was asked. */
 function fakeFetch(status) {
   const calls = []
   const fetch = async (url, init) => {
@@ -48,7 +47,6 @@ test('no connection says OpenAI couldn’t be reached', async () => {
 test('a request that hangs times out as unreachable', async () => {
   const fetch = (_url, init) =>
     new Promise((_resolve, reject) => init.signal.addEventListener('abort', () => reject(init.signal.reason)))
-  // AbortSignal.timeout's timer doesn't keep Node alive on its own; hold the test open meanwhile.
   const hold = setTimeout(() => {}, 1000)
   try {
     const { ok, error, reason } = await checkKeyWithOpenAI(KEY, { fetch, timeoutMs: 20 })

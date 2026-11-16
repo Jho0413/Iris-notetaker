@@ -1,12 +1,6 @@
-// The OpenAI API key, encrypted with Electron's safeStorage (the macOS Keychain holds the
-// encryption key) in a file in userData. Never written in plain text, never logged, never sent
-// to a page: main.cjs passes it to the backend on its stdin at each start, never in its
-// environment.
-
 const fs = require('node:fs')
 const path = require('node:path')
 
-/** Trim and check a pasted key. Returns the key, or an error message for the key screen. */
 function checkApiKey(input) {
   const key = typeof input === 'string' ? input.trim() : ''
   if (!key) return { ok: false, error: 'Paste your OpenAI API key.' }
@@ -17,19 +11,13 @@ function checkApiKey(input) {
   return { ok: true, key }
 }
 
-/**
- * @param {object} opts
- * @param {Pick<Electron.SafeStorage, 'isEncryptionAvailable' | 'encryptString' | 'decryptString'>} opts.safeStorage
- * @param {string} opts.file  where the encrypted key lives
- */
 function createKeyStore({ safeStorage, file }) {
+  let loaded
   return {
     has() {
       return fs.existsSync(file)
     },
 
-    /** Encrypt and store a key that passed checkApiKey; returns the key as stored (trimmed).
-     * Throws if encryption isn't available. */
     save(key) {
       const checked = checkApiKey(key)
       if (!checked.ok) throw new Error(checked.error)
@@ -41,11 +29,12 @@ function createKeyStore({ safeStorage, file }) {
       const tmp = `${file}.tmp`
       fs.writeFileSync(tmp, data, { mode: 0o600 })
       fs.renameSync(tmp, file)
-      return checked.key
+      loaded = checked.key
     },
 
-    /** The stored key, or null if there is none or it can't be decrypted (then ask again). */
     load() {
+      if (loaded !== undefined) return loaded
+      loaded = null
       let data
       try {
         data = fs.readFileSync(file)
@@ -54,14 +43,16 @@ function createKeyStore({ safeStorage, file }) {
       }
       try {
         const key = safeStorage.decryptString(data)
-        return checkApiKey(key).ok ? key : null
+        loaded = checkApiKey(key).ok ? key : null
       } catch {
         return null
       }
+      return loaded
     },
 
     clear() {
       fs.rmSync(file, { force: true })
+      loaded = null
     },
   }
 }

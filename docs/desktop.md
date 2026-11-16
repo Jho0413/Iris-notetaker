@@ -65,7 +65,9 @@ sequenceDiagram
    (kept, never turned into notes) before the UI loads.
 
 *Why the starting page:* the first launch of a new copy can be slow while macOS checks the
-bundled libraries; a blank window would look broken.
+bundled libraries; a blank window would look broken. *Why decrypt once:* each decrypt reads the
+Keychain, and macOS asks the user again for every rebuilt copy of an ad-hoc signed app; a key it
+won't decrypt isn't asked for again in the same launch.
 
 ## The app handler
 
@@ -106,10 +108,16 @@ first session.
    permission, only System Audio Recording.
 3. Choosing a window brings its app to the front, so the user lands on what they are recording.
 4. Without the Screen Recording permission macOS lists nothing, so the picker explains how to
-   allow it.
+   allow it. It still asks macOS for the list every time: that request is what puts Iris in
+   System Settings' list, so the user can turn it on.
+5. The app window isn't slowed down in the background, since recording goes on while the user
+   works in other apps.
 
 *Why Iris's own picker:* it can offer the entire screen first, which keeps recording whichever
-app the user switches to, and leave out Iris's own windows, which recording never wants.
+app the user switches to, and leave out Iris's own windows, which recording never wants. *Why the
+app brings the window's app forward:* Chromium's own focus-on-share does nothing for a window Iris
+picks, so the main process asks macOS which app owns the window and activates it, which needs no
+extra permission.
 
 ## The menu bar
 
@@ -117,34 +125,44 @@ app the user switches to, and leave out Iris's own windows, which recording neve
    app, with the window hidden or closed.
 2. It doesn't record itself: it relays commands to the Live page, which records, and shows what
    the page reports.
+3. Starting from the menu bar keeps the window hidden: showing it would switch to Iris's Space,
+   and the picker would then offer that Space's windows instead of the ones the user was on.
 
-*Why relay:* one recorder, in the page, for the browser and the app alike.
+*Why relay:* one recorder, in the page, for the browser and the app alike. The bridge passes on
+only the commands the page knows, from its own list: a sandboxed bridge can't load the app's files.
 
 ## Quitting and crashes
 
 1. Closing the window doesn't quit: Iris keeps running, and making notes, in the Dock and menu bar.
    While a recording is open, closing only hides the window, since closing would end the
-   recording; the menu bar or the Dock brings it back.
+   recording; the menu bar or the Dock brings it back. A full-screen window leaves full screen
+   before it hides, or macOS would leave an empty Space behind.
 2. Quitting while a session is recording or making notes asks first. Iris then stops its
    recordings (kept), then the engine, then exits ([`recording-live.md`](recording-live.md)).
-3. If the engine dies, the app offers to restart it; the window stays loaded and its uploads
+   It waits only briefly for the engine's last log lines: in development a process uv started
+   can hold them open.
+3. A page that refuses to leave (the Live page while it records, an unsaved change) gets its
+   question from the app: Electron would otherwise cancel the close or reload without a word.
+4. If the engine dies, the app offers to restart it; the window stays loaded and its uploads
    retry until the engine is back.
-4. If the window's page crashes, its recordings are stopped and the page reloads; if it keeps
+5. If the window's page crashes, its recordings are stopped and the page reloads; if it keeps
    crashing, the app asks whether to reload or quit.
-5. The engine watches the app's process and exits when it is gone, so a killed app leaves no
+6. The engine watches the app's process and exits when it is gone, so a killed app leaves no
    engine behind.
 
 ## Security
 
 - **Windows** are sandboxed, with no Node. They may load only Iris's own pages; links open in the
-  browser, and new windows are refused except a session's figure opened full size.
+  browser, and new windows are refused except a session's figure opened full size. The engine's
+  answers tell the browser to run no script and give them no origin, so even a hostile SVG opened
+  that way can't call the engine.
 - **Permissions:** only media capture (the mic or a camera; the UI only ever asks for the mic)
   and screen capture, only for the Iris UI.
 - **The bridge** gives the UI a few actions and nothing to read, and the main process accepts
   them only from the main window showing the UI.
 - **Fuses** turn off running Iris as plain Node, `NODE_OPTIONS`, `--inspect` and loading code
   from outside its signed `app.asar`; the packaged app quits at once if started with remote
-  debugging.
+  debugging, before Chromium can open the debugging port.
 - **No developer tools** in the packaged app: from them, whoever is at the keyboard could call
   the engine through the window with the token added. The dev app keeps them.
 - **The hardened runtime** has macOS refuse a debugger attaching to the app or its engine, and
@@ -160,8 +178,10 @@ to read the key. The fuses close Electron's ways in, the hardened runtime the Ma
 1. `make desktop` builds the UI, then a standalone Python with Iris installed into it, then the
    app and a `.dmg` with electron-builder.
 2. The engine runs from that bundled Python, isolated from the user's environment, so nothing has
-   to be installed. A smoke test runs the bundle before the build is accepted, and again once it
-   is signed inside the app, where the hardened runtime decides what it may load.
+   to be installed. It is started through Python's module runner, since the installed `iris`
+   command names the build machine's Python, and never writes compiled files into the app. A
+   smoke test runs the bundle before the build is accepted, and again once it is signed inside
+   the app, where the hardened runtime decides what it may load.
 3. The engine's code is compiled ahead, in a form that stays valid when the build copies it into
    the app, so the engine starts without compiling it again. The second smoke test runs it in a way
    that would save anything it had to compile, and the signature is checked afterwards: a write
@@ -185,8 +205,10 @@ The key protection keeps it from other programs running as the user. It doesn't 
 
 - `desktop/main.cjs`: the wiring: windows, the engine, menus, capture, quitting.
 - `desktop/src/`: the main process's parts, each tested in `desktop/test/`; the decisions
-  (`routes.cjs`, `policy.cjs`, `tray.cjs`, `picker.cjs`) are pure functions.
-- `desktop/pages/`: the starting page, the key window and the picker, with their preloads.
+  (`serve/routes.cjs`, `policy.cjs`, `recording/tray.cjs`, `recording/picker.cjs`) are pure
+  functions.
+- `desktop/pages/`: the starting page, the key window and the picker.
+- `desktop/preload/`: the bridges of the app window, the key window and the picker.
 - `desktop/electron-builder.yml`: packaging, signing, the fuses and the hardened runtime, with its
   entitlements in `desktop/build-resources/`.
 - `desktop/scripts/`: the build, the backend bundle and its smoke test.
