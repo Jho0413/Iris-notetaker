@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api, type Notes, type Session, type Transcript } from '../api/client'
+import { Banner } from '../components/Banner'
 import { ConfirmDialog } from '../components/ConfirmDialog'
+import { ErrorPanel } from '../components/ErrorPanel'
 import { FiguresGrid } from '../notes/FiguresGrid'
 import { Icon } from '../components/Icon'
 import { NotesEditor } from '../notes/NotesEditor'
@@ -14,7 +16,7 @@ import { TabPanel, Tabs } from '../components/Tabs'
 import { TitleField } from '../session/TitleField'
 import { TranscriptList } from '../session/TranscriptList'
 import { stepCosts, usageCost, usageRefreshKey } from '../session/cost'
-import { againLink, detailsLabel, NOTES_EDIT, PDF_FAILED, UNREACHABLE } from '../lib/messages'
+import { actionFailure, againLink, detailsLabel, NOTES_EDIT, PDF_FAILED, UNREACHABLE } from '../lib/messages'
 import { fetchNotes, fetchTranscript } from '../notes/load'
 import { usePdfExport } from '../notes/usePdfExport'
 import { act } from '../api/request'
@@ -30,6 +32,10 @@ import { renameSession } from '../session/renameSession'
 import { useTitle } from '../hooks/useTitle'
 
 type TabId = 'notes' | 'transcript' | 'figures'
+
+const notesSkeleton = [90, 100, 95, 60, 100, 85].map((w, i) => (
+  <div key={i} className="skeleton sk-line" style={{ width: `${w}%` }} />
+))
 type LoadError = 'not-found' | 'unreachable' | null
 
 async function fetchSession(id: string): Promise<Session | 'not-found' | 'unreachable'> {
@@ -137,9 +143,7 @@ function SessionView({ id }: { id: string }) {
       }),
     )
     setBusy(false)
-    if (!result.ok) {
-      setActionError(result.status === 409 ? 'This session is already processing.' : UNREACHABLE)
-    }
+    if (!result.ok) setActionError(actionFailure(result.status, "Couldn't restart this session. It may already be processing."))
     setReload((n) => n + 1)
   }
 
@@ -150,7 +154,7 @@ function SessionView({ id }: { id: string }) {
     setBusy(false)
     if (!result.ok) {
       const what = ui?.kind === 'stopped' ? "Couldn't make notes from the recording." : "Couldn't finish the recording."
-      setActionError(result.status === 0 ? UNREACHABLE : `${what} It may already be processing.`)
+      setActionError(actionFailure(result.status, `${what} It may already be processing.`))
     }
     setReload((n) => n + 1)
   }
@@ -161,7 +165,7 @@ function SessionView({ id }: { id: string }) {
     setBusy(false)
     setConfirmDelete(false)
     if (result.ok) navigate('/')
-    else setActionError(result.status === 0 ? UNREACHABLE : "Couldn't delete this session. It may be processing.")
+    else setActionError(actionFailure(result.status, "Couldn't delete this session. It may be processing."))
   }
 
   async function dropEdits() {
@@ -170,7 +174,7 @@ function SessionView({ id }: { id: string }) {
     const result = await act(api.DELETE('/api/sessions/{session_id}/notes/edits', { params: { path: { session_id: id } } }))
     setBusy(false)
     setConfirmDrop(null)
-    if (!result.ok) setActionError(result.status === 0 ? UNREACHABLE : NOTES_EDIT.restoreFailed)
+    if (!result.ok) setActionError(actionFailure(result.status, NOTES_EDIT.restoreFailed))
     setReload((n) => n + 1)
   }
 
@@ -223,39 +227,18 @@ function SessionView({ id }: { id: string }) {
   }
 
   if (loadError === 'not-found') {
-    return (
-      <div className="page error-panel">
-        <h2>This session doesn't exist</h2>
-        <p>It may have been deleted.</p>
-        <Link className="btn" to="/">
-          Back to the library
-        </Link>
-      </div>
-    )
+    return <ErrorPanel page title="This session doesn't exist" detail="It may have been deleted." />
   }
   if (!session || !ui) {
-    if (loadError === 'unreachable') {
-      return (
-        <div className="page error-panel" role="alert">
-          <h2>{UNREACHABLE}</h2>
-          <button type="button" className="btn" onClick={() => setReload((n) => n + 1)}>
-            <Icon name="retry" /> Retry
-          </button>
-        </div>
-      )
-    }
+    if (loadError === 'unreachable') return <ErrorPanel page onRetry={() => setReload((n) => n + 1)} />
     return (
       <div className="session" aria-busy="true" aria-label="Loading session">
-        <div className="skeleton sk-line" style={{ width: 120 }} />
-        <div className="skeleton" style={{ height: 28, width: '40%', margin: '12px 0' }} />
+        <div className="skeleton sk-line" style={{ width: '7.5rem' }} />
+        <div className="skeleton" style={{ height: '1.75rem', width: '40%', margin: '0.75rem 0' }} />
         <div className="skeleton sk-line" style={{ width: '25%' }} />
         <div className="session-body">
-          <div>
-            {[90, 100, 95, 60, 100, 85].map((w, i) => (
-              <div key={i} className="skeleton sk-line" style={{ width: `${w}%` }} />
-            ))}
-          </div>
-          <div className="skeleton" style={{ height: 260 }} />
+          <div>{notesSkeleton}</div>
+          <div className="skeleton" style={{ height: '16.25rem' }} />
         </div>
       </div>
     )
@@ -391,65 +374,36 @@ function SessionView({ id }: { id: string }) {
 
       <div className="session-body">
         <div>
-          {actionError && (
-            <div className="banner banner-error" role="alert">
-              <Icon name="alert" />
-              <div className="banner-body">
-                <p>{actionError}</p>
-              </div>
-            </div>
-          )}
+          {actionError && <Banner tone="error">{actionError}</Banner>}
           {failure && (
-            <div className="banner banner-error" role="alert">
-              <Icon name="alert" />
-              <div className="banner-body">
-                <p>
-                  <strong>{failure.headline}.</strong> {failure.message}
-                </p>
-                {failure.kind === 'general' && <p>Try again resumes from {fromLabel}.</p>}
-              </div>
-            </div>
+            <Banner tone="error" details={failure.kind === 'general' && <p>Try again resumes from {fromLabel}.</p>}>
+              <strong>{failure.headline}.</strong> {failure.message}
+            </Banner>
           )}
           {ui.kind === 'stalled' && (
-            <div className="banner banner-warning" role="status">
-              <Icon name="alert" />
-              <div className="banner-body">
-                <p>
-                  <strong>Processing stopped unexpectedly.</strong> Iris probably restarted while this
-                  session was running. Resume picks up from {fromLabel} and reuses finished steps.
-                </p>
-              </div>
-            </div>
+            <Banner tone="warning">
+              <strong>Processing stopped unexpectedly.</strong> Iris probably restarted while this
+              session was running. Resume picks up from {fromLabel} and reuses finished steps.
+            </Banner>
           )}
           {ui.kind === 'recording-orphan' && (
-            <div className="banner banner-info" role="status">
-              <Icon name="record" />
-              <div className="banner-body">
-                <p>
-                  <strong>This live session was never stopped.</strong> If it's still recording in
-                  another tab, stop it there. Otherwise, finish it here to make notes from what was
-                  captured.
-                </p>
-              </div>
-            </div>
+            <Banner tone="info" icon="record">
+              <strong>This live session was never stopped.</strong> If it's still recording in
+              another tab, stop it there. Otherwise, finish it here to make notes from what was
+              captured.
+            </Banner>
           )}
           {ui.kind === 'stopped' && (
-            <div className="banner banner-info" role="status">
-              <Icon name="record" />
-              <div className="banner-body">
-                <p>
-                  <strong>This recording was stopped before notes were made.</strong> What was recorded is
-                  kept. Make notes from it, or delete it.
-                </p>
-              </div>
-            </div>
+            <Banner tone="info" icon="record">
+              <strong>This recording was stopped before notes were made.</strong> What was recorded is
+              kept. Make notes from it, or delete it.
+            </Banner>
           )}
 
           {notes?.edited?.stale && finished && !editing && (
-            <div className="banner banner-warning" role="status">
-              <Icon name="alert" />
-              <div className="banner-body">
-                <p>{NOTES_EDIT.stale}</p>
+            <Banner
+              tone="warning"
+              details={
                 <div className="banner-actions">
                   <button type="button" className="btn btn-sm" onClick={() => setConfirmDrop('use-new')} disabled={busy}>
                     {NOTES_EDIT.useNew}
@@ -458,8 +412,10 @@ function SessionView({ id }: { id: string }) {
                     {NOTES_EDIT.keep}
                   </button>
                 </div>
-              </div>
-            </div>
+              }
+            >
+              {NOTES_EDIT.stale}
+            </Banner>
           )}
 
           {progress ? (
@@ -528,11 +484,7 @@ function SessionView({ id }: { id: string }) {
                     <p>Reload the page to try again.</p>
                   </div>
                 ) : (
-                  <div aria-busy="true" aria-label="Loading notes">
-                    {[90, 100, 95, 60, 100, 85].map((w, i) => (
-                      <div key={i} className="skeleton sk-line" style={{ width: `${w}%` }} />
-                    ))}
-                  </div>
+                  <div aria-busy="true" aria-label="Loading notes">{notesSkeleton}</div>
                 )}
               </TabPanel>
 

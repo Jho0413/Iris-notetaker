@@ -3,7 +3,6 @@ import type { Node as PMNode } from '@tiptap/pm/model'
 import { NodeSelection, TextSelection } from '@tiptap/pm/state'
 import type { EditorView } from '@tiptap/pm/view'
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { useBlocker } from 'react-router-dom'
 import { api, type Notes } from '../api/client'
 import { act } from '../api/request'
 import {
@@ -18,9 +17,11 @@ import { editorPlugins, flashKey, mathWithViews, selectedBlock, selectedBlockKey
 import type { Colour } from './format'
 import { NOTES_EDIT, saveRefused, UNREACHABLE } from '../lib/messages'
 import type { FigureMeta } from '../lib/notes'
-import { ConfirmDialog } from '../components/ConfirmDialog'
+import { Banner } from '../components/Banner'
+import { ConfirmDialog, LeaveWithoutSavingDialog } from '../components/ConfirmDialog'
 import { MathEditor, MenuItem, Popover, Swatches } from './EditorMenu'
 import { Icon, type IconName } from '../components/Icon'
+import { useAskBeforeLeaving } from '../hooks/useAskBeforeLeaving'
 import { FigureView } from './NotesView'
 
 type Visual = Notes['visuals'][number]
@@ -173,23 +174,17 @@ export function NotesEditor(props: {
     [editor],
   )
 
-  // ---- Leaving with unsaved changes asks first (as in Settings), here and in the desktop app.
-  const blocker = useBlocker(({ currentLocation, nextLocation }) => dirty && currentLocation.pathname !== nextLocation.pathname)
-  useEffect(() => {
-    if (!dirty) return
-    const warn = (e: BeforeUnloadEvent) => e.preventDefault()
-    window.addEventListener('beforeunload', warn)
-    return () => window.removeEventListener('beforeunload', warn)
-  }, [dirty])
+  const blocker = useAskBeforeLeaving(dirty)
 
   async function save() {
     if (!editor) return
+    const markdown = toMarkdown(editor.getJSON())
     setSaving(true)
     setError(null)
     const { data, error: failure, status } = await act(
       api.PUT('/api/sessions/{session_id}/notes/edits', {
         params: { path: { session_id: notes.session_id } },
-        body: { markdown: toMarkdown(editor.getJSON()), based_on: notes.generated_hash ?? '' },
+        body: { markdown, based_on: notes.generated_hash ?? '' },
       }),
     )
     setSaving(false)
@@ -499,14 +494,7 @@ export function NotesEditor(props: {
           Save
         </button>
       </div>
-      {error && (
-        <div className="banner banner-error edit-error" role="alert">
-          <Icon name="alert" />
-          <div className="banner-body">
-            <p>{error}</p>
-          </div>
-        </div>
-      )}
+      {error && <Banner tone="error" className="edit-error">{error}</Banner>}
 
       <div className="notes-editor" ref={wrapRef} onClickCapture={(e) => suppressClick.current && e.stopPropagation()}>
         <EditorContent editor={editor} />
@@ -605,15 +593,7 @@ export function NotesEditor(props: {
         onConfirm={() => { setConfirmDiscard(false); props.onClose() }}
         onCancel={() => setConfirmDiscard(false)}
       />
-      <ConfirmDialog
-        open={blocker.state === 'blocked'}
-        title="Leave without saving?"
-        body={NOTES_EDIT.leaveBody}
-        confirm="Leave"
-        cancel="Keep editing"
-        onConfirm={() => blocker.proceed?.()}
-        onCancel={() => blocker.reset?.()}
-      />
+      <LeaveWithoutSavingDialog blocker={blocker} body={NOTES_EDIT.leaveBody} />
     </FigureContext.Provider>
   )
 }

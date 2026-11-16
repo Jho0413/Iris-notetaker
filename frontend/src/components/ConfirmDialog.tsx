@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import type { Blocker } from 'react-router-dom'
 
 /**
  * A native <dialog> for confirming a destructive or disruptive action: it traps focus, closes on
@@ -51,5 +52,19 @@ export function ConfirmDialog(props: {
         </button>
       </div>
     </dialog>
+  )
+}
+
+export function LeaveWithoutSavingDialog(props: { blocker: Blocker; body: string }) {
+  return (
+    <ConfirmDialog
+      open={props.blocker.state === 'blocked'}
+      title="Leave without saving?"
+      body={props.body}
+      confirm="Leave"
+      cancel="Keep editing"
+      onConfirm={() => props.blocker.proceed?.()}
+      onCancel={() => props.blocker.reset?.()}
+    />
   )
 }

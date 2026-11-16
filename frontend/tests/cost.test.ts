@@ -5,6 +5,7 @@ import {
   costLabel, detailRows, formatCost, sessionCost, stepCosts, usageCost, usageRefreshKey,
 } from '../src/session/cost.ts'
 import { applyEvent, emptyRun, reduceEvents, type RunState } from '../src/session/state.ts'
+import { ev, session as base } from './fixtures.ts'
 
 const exact = (usd: number) => formatCost({ usd, partial: false })
 const partial = (usd: number) => formatCost({ usd, partial: true })
@@ -38,11 +39,7 @@ test('costLabel: screen readers hear words, not symbols', () => {
   assert.equal(costLabel({ usd: 0, partial: false }), '$0.00')
 })
 
-const session = (patch: Partial<Session>): Session => ({
-  id: 's1', title: 'Algebra', source: 'upload', status: 'processing', current_stage: null,
-  failure_message: null, failure_kind: null, duration_s: null, created_at: '2026-11-03T12:00:00Z',
-  updated_at: '2026-11-03T12:00:00Z', cost_usd: null, cost_partial: false, ...patch,
-})
+const session = (patch: Partial<Session>): Session => ({ ...base, cost_usd: null, cost_partial: false, ...patch })
 
 test('library row: cost per state', () => {
   const shown = (patch: Partial<Session>) => {
@@ -106,13 +103,6 @@ test('step costs: plain labels in pipeline order, no model names, "Other" last',
   )
   assert.ok(!JSON.stringify(steps).includes('gpt'))
 })
-
-let tick = 0
-function ev(type: IrisEvent['type'], data: Record<string, unknown> = {}, seconds?: number): IrisEvent {
-  tick += 1
-  const at = new Date(Date.UTC(2026, 10, 3, 12, 0, seconds ?? tick)).toISOString()
-  return { type, session_id: 's1', data, at }
-}
 
 test('details rows: a step with a time, a cost or both; times from this run only', () => {
   const run = reduceEvents([

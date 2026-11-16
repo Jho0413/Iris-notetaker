@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState, type DragEvent, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { Banner } from '../components/Banner'
 import { Icon } from '../components/Icon'
 import { formatBytes } from '../lib/format'
+import { UPLOAD_INTERRUPTED, UPLOAD_REFUSED } from '../lib/messages'
 import { UploadError, uploadWithProgress } from '../session/upload'
 import { useTitle } from '../hooks/useTitle'
 
@@ -56,11 +58,7 @@ export function UploadPage() {
     } catch (err) {
       setProgress(null)
       if (err instanceof UploadError && err.kind === 'aborted') return
-      if (err instanceof UploadError && err.kind === 'network') {
-        setError("The upload was interrupted. Iris isn't responding; try again in a moment.")
-      } else {
-        setError("Iris couldn't accept this recording. Try again in a moment.")
-      }
+      setError(err instanceof UploadError && err.kind === 'network' ? UPLOAD_INTERRUPTED : UPLOAD_REFUSED)
     }
   }
 
@@ -126,14 +124,7 @@ export function UploadPage() {
           />
         </div>
 
-        {error && (
-          <div className="banner banner-error" role="alert">
-            <Icon name="alert" />
-            <div className="banner-body">
-              <p>{error}</p>
-            </div>
-          </div>
-        )}
+        {error && <Banner tone="error">{error}</Banner>}
 
         {uploading ? (
           <div className="progress-row">

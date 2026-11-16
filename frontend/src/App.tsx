@@ -1,5 +1,6 @@
 import { createBrowserRouter, Link, NavLink, Outlet, RouterProvider } from 'react-router-dom'
 import { useRecordFromMenuBar } from './capture/menuBar'
+import { ErrorPanel } from './components/ErrorPanel'
 import { Icon, Mark, type IconName } from './components/Icon'
 import { useTheme, type ThemeChoice } from './components/theme'
 import { LibraryPage } from './pages/LibraryPage'
@@ -72,18 +73,6 @@ function Layout() {
   )
 }
 
-function NotFound() {
-  return (
-    <div className="page error-panel">
-      <h2>Page not found</h2>
-      <p>There's nothing at this address.</p>
-      <Link className="btn" to="/">
-        Back to the library
-      </Link>
-    </div>
-  )
-}
-
 const router = createBrowserRouter([
   {
     element: <Layout />,
@@ -93,7 +82,7 @@ const router = createBrowserRouter([
       { path: '/live', element: <LivePage /> },
       { path: '/sessions/:id', element: <SessionPage /> },
       { path: '/settings', element: <SettingsPage /> },
-      { path: '*', element: <NotFound /> },
+      { path: '*', element: <ErrorPanel page title="Page not found" detail="There's nothing at this address." /> },
     ],
   },
 ])

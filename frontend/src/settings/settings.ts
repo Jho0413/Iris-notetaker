@@ -1,5 +1,23 @@
 // The Settings page's wording and language list. Pure, so it is testable under plain Node.
+import type { AppSettings } from '../api/client'
 import { UNREACHABLE } from '../lib/messages.ts'
+
+export type SettingsLoad = { kind: 'loading' } | { kind: 'error' } | { kind: 'ready'; settings: AppSettings }
+
+export const SETTINGS_REREAD_MS = 2000
+const SETTINGS_REREAD_TRIES = 5
+
+export function afterSettingsRead(
+  read: AppSettings | undefined,
+  shown: SettingsLoad,
+  retryFirstRead: boolean,
+  retries: number,
+): { next: SettingsLoad | null; retries: number; retry: boolean } {
+  if (read) return { next: { kind: 'ready', settings: read }, retries: 0, retry: false }
+  if (shown.kind !== 'ready' && !retryFirstRead) return { next: { kind: 'error' }, retries, retry: false }
+  const retry = retries < SETTINGS_REREAD_TRIES
+  return { next: null, retries: retry ? retries + 1 : retries, retry }
+}
 
 /** The language value that lets the transcription model detect the language itself. */
 export const AUTO = 'auto'
@@ -57,11 +75,6 @@ export function pendingLanguage(draft: string | null, saved: string | undefined)
   return draft !== null && saved !== undefined && draft !== saved ? draft : null
 }
 
-/** Whether moving from one page to another inside Iris should ask first (a change is unsaved). */
-export function asksBeforeLeaving(pending: string | null, fromPath: string, toPath: string): boolean {
-  return pending !== null && fromPath !== toPath
-}
-
 /** The no-key warning. In the desktop app the key is added in the app; in the browser the
  * engine reads it from its .env file at start-up, which a page can't change.
  * This module is the only UI code allowed developer setup words (tests/messages.test.ts): they
@@ -81,6 +94,8 @@ export const BROWSER_KEY_NOTE =
 export function keyChanged(action: 'saved' | 'removed'): string {
   return action === 'saved' ? 'Key saved.' : 'Key removed.'
 }
+
+export const ADD_KEY = 'Add key…'
 
 /** When the app couldn't do what was asked (rare: the bridge call itself failed). */
 export const KEY_ACTION_FAILED = 'Iris couldn’t change the key. Try again, or use Iris → Change OpenAI API Key… in the menu.'

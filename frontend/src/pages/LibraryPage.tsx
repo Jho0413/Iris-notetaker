@@ -1,19 +1,21 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api, type Session } from '../api/client'
+import { Banner } from '../components/Banner'
 import { ConfirmDialog } from '../components/ConfirmDialog'
+import { ErrorPanel } from '../components/ErrorPanel'
 import { CostText } from '../session/CostText'
 import { Icon } from '../components/Icon'
 import { NoKeyBanner } from '../settings/NoKeyBanner'
 import { StatusChip } from '../session/StatusChip'
 import { sessionCost } from '../session/cost'
 import { formatWhen, shownTitle, SOURCE_LABEL } from '../lib/format'
-import { PDF_FAILED, UNREACHABLE } from '../lib/messages'
+import { actionFailure, PDF_FAILED } from '../lib/messages'
 import { act } from '../api/request'
 import { emptyRun, failureView, libraryState } from '../session/state'
 import { usePdfExport } from '../notes/usePdfExport'
 import { useTitle } from '../hooks/useTitle'
-import { useApiKeySet } from '../settings/useApiKeySet'
+import { useSettings } from '../settings/useSettings'
 
 /** While anything is processing, refresh this often so status chips stay current. */
 const REFRESH_MS = 4000
@@ -31,7 +33,7 @@ export function LibraryPage() {
   const [pendingDelete, setPendingDelete] = useState<Session | null>(null)
   const [busy, setBusy] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
-  const apiKey = useApiKeySet()
+  const settings = useSettings(true)
 
   const pdf = usePdfExport()
   async function exportPdf(s: Session) {
@@ -65,9 +67,7 @@ export function LibraryPage() {
         params: { path: { session_id: s.id }, query: from ? { from_stage: from } : {} },
       }),
     )
-    if (!result.ok) {
-      setActionError(result.status === 0 ? UNREACHABLE : `Couldn't restart "${s.title}". It may already be processing.`)
-    }
+    if (!result.ok) setActionError(actionFailure(result.status, `Couldn't restart "${s.title}". It may already be processing.`))
     refresh()
   }
 
@@ -75,9 +75,7 @@ export function LibraryPage() {
   async function makeNotes(s: Session) {
     setActionError(null)
     const result = await act(api.POST('/api/live/{session_id}/end', { params: { path: { session_id: s.id } } }))
-    if (!result.ok) {
-      setActionError(result.status === 0 ? UNREACHABLE : `Couldn't make notes for "${s.title}". It may already be processing.`)
-    }
+    if (!result.ok) setActionError(actionFailure(result.status, `Couldn't make notes for "${s.title}". It may already be processing.`))
     refresh()
   }
 
@@ -88,9 +86,7 @@ export function LibraryPage() {
       api.DELETE('/api/sessions/{session_id}', { params: { path: { session_id: pendingDelete.id } } }),
     )
     setBusy(false)
-    if (!result.ok) {
-      setActionError(result.status === 0 ? UNREACHABLE : `Couldn't delete "${pendingDelete.title}". It may be processing.`)
-    }
+    if (!result.ok) setActionError(actionFailure(result.status, `Couldn't delete "${pendingDelete.title}". It may be processing.`))
     setPendingDelete(null)
     refresh()
   }
@@ -103,17 +99,18 @@ export function LibraryPage() {
           <p className="lede">Notes that see what was shown.</p>
         </div>
       </div>
-      {apiKey.set === false && <NoKeyBanner onChanged={apiKey.refresh} />}
+      {settings.load.kind === 'ready' && !settings.load.settings.api_key_set && <NoKeyBanner onChanged={settings.reread} />}
       {actionError && (
-        <div className="banner banner-error" role="alert">
-          <Icon name="alert" />
-          <div className="banner-body">
-            <p>{actionError}</p>
-          </div>
-          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setActionError(null)} aria-label="Dismiss">
-            <Icon name="x" />
-          </button>
-        </div>
+        <Banner
+          tone="error"
+          end={
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setActionError(null)} aria-label="Dismiss">
+              <Icon name="x" />
+            </button>
+          }
+        >
+          {actionError}
+        </Banner>
       )}
 
       {load.kind === 'loading' && (
@@ -131,14 +128,7 @@ export function LibraryPage() {
         </div>
       )}
 
-      {load.kind === 'error' && (
-        <div className="error-panel" role="alert">
-          <h2>{UNREACHABLE}</h2>
-          <button type="button" className="btn" onClick={refresh}>
-            <Icon name="retry" /> Retry
-          </button>
-        </div>
-      )}
+      {load.kind === 'error' && <ErrorPanel onRetry={refresh} />}
 
       {load.kind === 'ready' && load.sessions.length === 0 && (
         <div className="empty">

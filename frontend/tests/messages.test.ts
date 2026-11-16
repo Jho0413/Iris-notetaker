@@ -2,10 +2,28 @@ import assert from 'node:assert/strict'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import test from 'node:test'
-import { againLink, PROVENANCE_LABELS, saveRefused, UNREACHABLE } from '../src/lib/messages.ts'
+import { actionFailure, againLink, PROVENANCE_LABELS, saveRefused, UNREACHABLE } from '../src/lib/messages.ts'
 
 test('an unreachable backend is described in Iris’s own words', () => {
   assert.equal(UNREACHABLE, "Iris isn't responding. Try again in a moment.")
+})
+
+const restartFailed = "Couldn't restart this session. It may already be processing."
+
+test('a failed action the engine never answered says Iris isn’t responding', () => {
+  assert.equal(actionFailure(0, restartFailed), UNREACHABLE)
+})
+
+test('a failed action the engine refused as busy says what couldn’t be done', () => {
+  assert.equal(actionFailure(409, restartFailed), restartFailed)
+})
+
+test('a failed action the engine failed says what couldn’t be done', () => {
+  assert.equal(actionFailure(500, restartFailed), restartFailed)
+})
+
+test('a failed action with any other answer says what couldn’t be done', () => {
+  assert.equal(actionFailure(404, restartFailed), restartFailed)
 })
 
 test('a figure that fell back is labelled neutrally', () => {

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { type Location, useBlocker, useLocation, useNavigate } from 'react-router-dom'
+import { type Location, useLocation, useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import { act } from '../api/request'
 import { CaptureError } from '../capture/captureErrors'
@@ -15,12 +15,14 @@ import {
   recordedMs,
 } from '../capture/liveCapture'
 import { menuBar, type LiveLocationState } from '../capture/menuBar'
+import { Banner } from '../components/Banner'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { Icon, type IconName } from '../components/Icon'
 import { UNREACHABLE } from '../lib/messages'
 import { formatClock } from '../lib/format'
 import { liveProgress } from '../session/state'
 import { useSessionStream } from '../session/useSessionStream'
+import { useAskBeforeLeaving } from '../hooks/useAskBeforeLeaving'
 import { useTitle } from '../hooks/useTitle'
 import { irisApp, type Phase, type RecordCommand } from '../api/appBridge'
 
@@ -83,18 +85,7 @@ export function LivePage() {
   const stream = useSessionStream(open || phase === 'stopping' ? sessionId ?? undefined : undefined)
   const progress = liveProgress(stream.run)
 
-  // Leaving stops the recording (kept, without notes): the browser asks before closing the tab, the
-  // app before navigating. Going to the Live page itself (its header link) isn't leaving: the page
-  // stays mounted, so the recording carries on and nothing is asked.
-  const blocker = useBlocker(
-    ({ currentLocation, nextLocation }) => open && currentLocation.pathname !== nextLocation.pathname,
-  )
-  useEffect(() => {
-    if (!open) return
-    const onBeforeUnload = (e: BeforeUnloadEvent) => e.preventDefault()
-    window.addEventListener('beforeunload', onBeforeUnload)
-    return () => window.removeEventListener('beforeunload', onBeforeUnload)
-  }, [open])
+  const blocker = useAskBeforeLeaving(open)
   useEffect(() => {
     if (!recording) return
     const timer = window.setInterval(() => setNow(Date.now()), 1000)
@@ -328,13 +319,9 @@ export function LivePage() {
             <p className="lede">What was captured is saved on this computer.</p>
           </div>
         </div>
-        <div className="banner banner-error" role="alert">
-          <Icon name="alert" />
-          <div className="banner-body">
-            <p>
-              <strong>{leavingTo ? "Iris couldn't finish keeping the recording." : "Iris couldn't start making the notes."}</strong>{' '}
-              {error}
-            </p>
+        <Banner
+          tone="error"
+          details={
             <div className="banner-actions">
               <button type="button" className="btn btn-primary" onClick={() => void finish()} disabled={phase === 'finishing'}>
                 <Icon name="retry" /> {phase === 'finishing' ? 'Trying…' : 'Try again'}
@@ -345,8 +332,11 @@ export function LivePage() {
                 </button>
               )}
             </div>
-          </div>
-        </div>
+          }
+        >
+          <strong>{leavingTo ? "Iris couldn't finish keeping the recording." : "Iris couldn't start making the notes."}</strong>{' '}
+          {error}
+        </Banner>
       </div>
     )
   }
@@ -409,22 +399,8 @@ export function LivePage() {
               </button>
             ))}
           </div>
-          {error && (
-            <div className="banner banner-error" role="alert">
-              <Icon name="alert" />
-              <div className="banner-body">
-                <p>{error}</p>
-              </div>
-            </div>
-          )}
-          {discarded && !error && (
-            <div className="banner banner-info" role="status">
-              <Icon name="trash" />
-              <div className="banner-body">
-                <p>The recording was discarded. Nothing was kept.</p>
-              </div>
-            </div>
-          )}
+          {error && <Banner tone="error">{error}</Banner>}
+          {discarded && !error && <Banner tone="info" icon="trash">The recording was discarded. Nothing was kept.</Banner>}
           <p className="setup-note">
             Everything is saved on this computer as it's captured, so closing {desktopApp ? 'Iris' : 'the tab'} keeps
             what was recorded.
@@ -514,26 +490,14 @@ export function LivePage() {
             </div>
           </section>
         )}
-        {error && (
-          <div className="banner banner-error" role="alert">
-            <Icon name="alert" />
-            <div className="banner-body">
-              <p>{error}</p>
-            </div>
-          </div>
-        )}
+        {error && <Banner tone="error">{error}</Banner>}
         {soundRefused && recording && (
-          <div className="banner banner-warning" role="alert">
-            <Icon name="alert" />
-            <div className="banner-body">
-              <p>
-                <strong>The Mac's sound isn't being recorded,</strong> only your microphone, so the other
-                side of a call is missing. To record it, allow Iris in System Settings → Privacy &amp;
-                Security → Screen &amp; System Audio Recording → System Audio Recording Only, then quit and
-                reopen Iris.
-              </p>
-            </div>
-          </div>
+          <Banner tone="warning" role="alert">
+            <strong>The Mac's sound isn't being recorded,</strong> only your microphone, so the other
+            side of a call is missing. To record it, allow Iris in System Settings → Privacy &amp;
+            Security → Screen &amp; System Audio Recording → System Audio Recording Only, then quit and
+            reopen Iris.
+          </Banner>
         )}
         {!desktopApp && !display && !stopped && (
           <p className="after">

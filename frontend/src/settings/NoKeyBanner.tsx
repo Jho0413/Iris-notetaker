@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { irisApp } from '../api/appBridge'
-import { KEY_ACTION_FAILED, noKeyWarning } from './settings'
-import { Icon } from '../components/Icon'
+import { Banner } from '../components/Banner'
+import { ADD_KEY, KEY_ACTION_FAILED, noKeyWarning } from './settings'
+import { useKeyChange } from './useKeyChange'
 
 /**
  * The warning that Iris has no OpenAI API key, so it can't make notes. Everything else still
@@ -11,36 +12,23 @@ import { Icon } from '../components/Icon'
 export function NoKeyBanner(props: { withAction?: boolean; onChanged?: () => void }) {
   const app = irisApp()
   const warning = noKeyWarning(Boolean(app))
-  const [busy, setBusy] = useState(false)
   const [failed, setFailed] = useState(false)
-
-  async function addKey() {
-    if (!app) return
-    setBusy(true)
-    setFailed(false)
-    try {
-      const { done } = await app.changeKey()
-      if (done) props.onChanged?.()
-    } catch {
-      setFailed(true)
-    } finally {
-      setBusy(false)
-    }
-  }
+  const key = useKeyChange((result) => (result.ok ? props.onChanged?.() : setFailed(true)))
 
   return (
-    <div className="banner banner-warning banner-inline" role="status">
-      <Icon name="alert" />
-      <div className="banner-body">
-        <p>
-          <strong>{warning.title}</strong> {failed ? KEY_ACTION_FAILED : warning.detail}
-        </p>
-      </div>
-      {app && props.withAction !== false && (
-        <button type="button" className="btn btn-primary btn-sm" onClick={() => void addKey()} disabled={busy}>
-          Add key…
-        </button>
-      )}
-    </div>
+    <Banner
+      tone="warning"
+      className="banner-inline"
+      end={
+        app &&
+        props.withAction !== false && (
+          <button type="button" className="btn btn-primary btn-sm" onClick={() => { setFailed(false); void key.change('saved') }} disabled={key.busy}>
+            {ADD_KEY}
+          </button>
+        )
+      }
+    >
+      <strong>{warning.title}</strong> {failed ? KEY_ACTION_FAILED : warning.detail}
+    </Banner>
   )
 }

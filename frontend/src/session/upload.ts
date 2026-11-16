@@ -4,8 +4,8 @@ import { engineDidNotAnswer } from '../api/request.ts'
 /** Why an upload failed. Its message is ours: never the backend's detail or the status code. */
 export class UploadError extends Error {
   readonly kind: 'network' | 'rejected' | 'aborted'
-  constructor(kind: 'network' | 'rejected' | 'aborted', message: string) {
-    super(message)
+  constructor(kind: 'network' | 'rejected' | 'aborted') {
+    super(kind)
     this.kind = kind
   }
 }
@@ -31,14 +31,14 @@ export function uploadWithProgress(
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) onProgress(e.loaded / e.total)
     }
-    const lost = () => reject(new UploadError('network', 'The connection to Iris was lost'))
+    const lost = () => reject(new UploadError('network'))
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300 && xhr.response) return resolve(xhr.response)
       if (engineDidNotAnswer(xhr.status)) return lost()
-      reject(new UploadError('rejected', 'Iris did not accept the recording'))
+      reject(new UploadError('rejected'))
     }
     xhr.onerror = lost
-    xhr.onabort = () => reject(new UploadError('aborted', 'Upload cancelled'))
+    xhr.onabort = () => reject(new UploadError('aborted'))
     signal?.addEventListener('abort', () => xhr.abort(), { once: true })
     xhr.send(form)
   })

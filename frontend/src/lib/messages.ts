@@ -8,6 +8,14 @@ import type { Provenance } from './notes'
  * is down and the dev proxy or the app's handler answered in its place (`engineDidNotAnswer`). */
 export const UNREACHABLE = "Iris isn't responding. Try again in a moment."
 
+export const RETRY = 'Retry'
+
+export const BACK_TO_LIBRARY = 'Back to the library'
+
+export function actionFailure(status: number, words: string): string {
+  return status === 0 ? UNREACHABLE : words
+}
+
 /** Badges for how a figure was made. An original image is labelled neutrally, with no reason. */
 export const PROVENANCE_LABELS: Record<Provenance, string> = {
   verified: 'Verified redraw',
@@ -53,6 +61,10 @@ export function saveRefused(detail: string): string {
 /** Export PDF failed: the notes couldn't be loaded, or the desktop app couldn't save the file
  *  (the reason is in the console or the app's log). */
 export const PDF_FAILED = 'The PDF couldn’t be saved. Try again.'
+
+export const UPLOAD_INTERRUPTED = "The upload was interrupted. Iris isn't responding; try again in a moment."
+
+export const UPLOAD_REFUSED = "Iris couldn't accept this recording. Try again in a moment."
 
 /** The session details' button, in the rail's bar and beside the tabs (below 1120px). */
 export function detailsLabel(open: boolean): string {
