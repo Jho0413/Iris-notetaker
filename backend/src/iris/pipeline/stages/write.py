@@ -8,11 +8,11 @@ from markdown_it import MarkdownIt
 from markdown_it.token import Token
 from pydantic import BaseModel
 
-from iris import notes_format
 from iris.llm import structured
 from iris.llm.errors import UserFacingError
-from iris.markdown import protect_math
 from iris.models import NOTHING_TO_WRITE, EventType, NotesDraft, Selection, SessionType, Transcript
+from iris.notes import format as notes_format
+from iris.notes.markdown import protect_math
 from iris.pipeline.context import StageContext
 from iris.store.layout import read_model, write_model
 

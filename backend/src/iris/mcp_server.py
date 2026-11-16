@@ -15,8 +15,8 @@ from pydantic import BaseModel
 
 from iris.config import Settings
 from iris.models import Notes, Session, SessionStatus, SessionType
-from iris.notes_edits import read_newest_notes
-from iris.notes_text import (
+from iris.notes.edits import read_newest_notes
+from iris.notes.text import (
     MAX_QUERY_WORDS,
     figure_line,
     figure_origin,

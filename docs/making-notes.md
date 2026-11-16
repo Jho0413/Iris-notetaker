@@ -348,8 +348,8 @@ Prompts treat what was said and shown as data, never as instructions.
 - `backend/src/iris/pipeline/stages/`: one module per stage
 - `backend/src/iris/speech.py`: finding the speech to send
 - `backend/src/iris/models.py`: every stage's output type
-- `backend/src/iris/notes_format.py`: the notes format, its checks and repair (the UI reads it with
+- `backend/src/iris/notes/format.py`: the notes format, its checks and repair (the UI reads it with
   `frontend/src/notes/format.ts`)
 - `backend/src/iris/svg.py`: `sanitize_svg`, for every model-written SVG
-- `backend/src/iris/export.py`: the Markdown export the engine serves on request, with the figures
+- `backend/src/iris/notes/export.py`: the Markdown export the engine serves on request, with the figures
   embedded and the user's edits included

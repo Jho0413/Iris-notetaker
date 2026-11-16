@@ -293,10 +293,10 @@ class Notes(BaseModel):
     session_id: str
     session_type: SessionType
     title: str
-    markdown: str  # the notes format (iris.notes_format); figures as ::figure{#<id>}
+    markdown: str  # the notes format (iris.notes.format); figures as ::figure{#<id>}
     visuals: list[NotesVisual]
     # 2: boxes, steps and figures by id. Missing means 1, notes written before that format with
-    # bold labels and image links, which readers upgrade (iris.notes_format.upgraded).
+    # bold labels and image links, which readers upgrade (iris.notes.format.upgraded).
     format_version: int = 1
     # Set by the API only, never stored by a stage. ``generated_hash`` names the generated notes
     # (send it back as ``based_on`` when saving edits); ``edited`` is set when ``markdown`` is the

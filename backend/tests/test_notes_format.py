@@ -1,7 +1,7 @@
 import pytest
 
-from iris import notes_format as nf
 from iris.models import Notes, SessionType
+from iris.notes import format as nf
 from tests.builders import notes_visual
 
 

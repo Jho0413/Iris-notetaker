@@ -3,8 +3,8 @@ from pathlib import Path
 
 import pytest
 
-from iris.export import export_markdown_embedded
 from iris.models import FrameRef, Visual
+from iris.notes.export import export_markdown_embedded
 from iris.pipeline.stages.assemble import resolve_markers
 from tests.builders import markdown_images, notes
 

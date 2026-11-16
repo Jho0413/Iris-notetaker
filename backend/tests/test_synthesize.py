@@ -6,7 +6,6 @@ import cv2
 import numpy as np
 import pytest
 
-from iris import notes_format
 from iris.config import Settings
 from iris.events import EventBus
 from iris.jobs.runner import JobRunner
@@ -31,6 +30,7 @@ from iris.models import (
     SynthesizedDraft,
     Visual,
 )
+from iris.notes import format as notes_format
 from iris.pipeline import STAGES
 from iris.pipeline.context import StageContext
 from iris.pipeline.stages import assemble, synthesize

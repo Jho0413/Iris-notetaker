@@ -11,7 +11,7 @@ from iris.models import (
     SynthesizedDraft,
     Visual,
 )
-from iris.notes_format import FORMAT_VERSION
+from iris.notes.format import FORMAT_VERSION
 from iris.pipeline.context import StageContext
 from iris.store.layout import read_model, read_optional, write_model
 

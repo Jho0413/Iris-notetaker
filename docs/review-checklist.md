@@ -69,7 +69,7 @@ to every change; the reviewer says which ones it checked. Principles are those i
   rewrite that loses a figure, maths, a decision, an action item or a box is rejected and its
   sections kept as written; a figure is dropped only as a confirmed duplicate; any failure keeps
   the assembled notes.
-- **Notes format and edits:** model output and saved edits pass `notes_format` (unknown command
+- **Notes format and edits:** model output and saved edits pass `notes/format.py` (unknown command
   or colour, too deep, unclosed, unknown figure, raw HTML, outside images); only the writer
   repairs, and only what needs no guess; old notes (`format_version` 1) still display;
   `notes/format.ts` and the editor follow the same rules, and a round trip keeps every construct;

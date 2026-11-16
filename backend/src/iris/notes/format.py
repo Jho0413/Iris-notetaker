@@ -28,8 +28,8 @@ from dataclasses import dataclass, field
 from markdown_it import MarkdownIt
 from markdown_it.token import Token
 
-from iris.markdown import mask_math
 from iris.models import Notes, NotesVisual
+from iris.notes.markdown import mask_math
 
 FORMAT_VERSION = 2  # notes.json written with boxes, steps and figures by id
 

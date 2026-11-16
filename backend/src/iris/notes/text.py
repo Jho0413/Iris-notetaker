@@ -14,7 +14,7 @@ import unicodedata
 from dataclasses import dataclass
 
 from iris.models import Notes, NotesVisual
-from iris.notes_format import heading, scan, split_sections
+from iris.notes.format import heading, scan, split_sections
 
 # Characters of a passage shown around its first match.
 SNIPPET_CHARS = 300

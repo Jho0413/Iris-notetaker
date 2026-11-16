@@ -275,8 +275,8 @@ All in `backend/src/iris/`:
 - `store/layout.py`: every file in a session folder, writing files whole (`write_model`), and
   keeping paths inside the session.
 - `store/db.py`: the store.
-- `notes_edits.py`: which version of the notes a reader gets.
-- `export.py`: the Markdown export.
+- `notes/edits.py`: which version of the notes a reader gets.
+- `notes/export.py`: the Markdown export.
 - `events.py`: the event bus.
 - `llm/client.py`: the one OpenAI client.
 - `llm/errors.py`: error kinds and retries.

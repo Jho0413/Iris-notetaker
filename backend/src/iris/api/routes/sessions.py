@@ -14,11 +14,11 @@ from pydantic import BaseModel, ConfigDict, StringConstraints
 
 from iris.api.deps import PathsDep, RunnerDep, SessionDep, SettingsDep, StoreDep
 from iris.config import Settings
-from iris.export import export_markdown_embedded
 from iris.llm.usage import forget_total, with_cost
 from iris.models import Notes, NotesEdits, Session, SourceKind, Stage, Transcript
-from iris.notes_edits import MAX_EDITED_CHARS, as_read, read_notes
-from iris.notes_format import validate
+from iris.notes.edits import MAX_EDITED_CHARS, as_read, read_notes
+from iris.notes.export import export_markdown_embedded
+from iris.notes.format import validate
 from iris.sources.upload import save_upload
 from iris.store.layout import (
     SERVED_DIRS,
@@ -164,7 +164,7 @@ def save_notes_edits(
 ) -> Notes:
     """Save the user's edited notes, replacing any earlier save; the generated notes are kept.
 
-    The markdown is checked like the writer's (``iris.notes_format.validate``): 422 names the
+    The markdown is checked like the writer's (``iris.notes.format.validate``): 422 names the
     first problem in plain words. 409 while the session is processing.
     """
     generated = _readable(paths, "notes", lambda: read_model(paths.notes, Notes))

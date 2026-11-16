@@ -29,8 +29,8 @@ from iris.models import (
     SessionType,
     SourceKind,
 )
-from iris.notes_edits import generated_hash
-from iris.notes_text import MAX_PASSAGES_PER_SESSION, MAX_QUERY_WORDS
+from iris.notes.edits import generated_hash
+from iris.notes.text import MAX_PASSAGES_PER_SESSION, MAX_QUERY_WORDS
 from iris.store.db import SessionStore
 from iris.store.layout import session_paths, write_model
 from tests.builders import notes_visual, session_with_notes

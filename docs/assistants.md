@@ -148,8 +148,8 @@ claude mcp add iris --scope user -- uv run --directory /path/to/Iris-notetaker/b
 All in `backend/src/iris/`:
 
 - `mcp_server.py`: the server and its tools.
-- `notes_text.py`: notes as text for the assistant, and the search.
-- `notes_edits.py`: which version of the notes a reader gets.
+- `notes/text.py`: notes as text for the assistant, and the search.
+- `notes/edits.py`: which version of the notes a reader gets.
 - `store/db.py`: the store, and opening it read-only.
 
 And `desktop/scripts/smoke_backend.py`: checks that the app's bundled Python serves MCP.

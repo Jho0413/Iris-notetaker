@@ -12,10 +12,8 @@ from markdown_it import MarkdownIt
 from markdown_it.token import Token
 from pydantic import BaseModel
 
-from iris import notes_format
 from iris.llm import structured, usage
 from iris.llm.errors import describe
-from iris.markdown import MATH
 from iris.media.images import grey
 from iris.models import (
     Moment,
@@ -28,6 +26,8 @@ from iris.models import (
     SynthesizedDraft,
     Visual,
 )
+from iris.notes import format as notes_format
+from iris.notes.markdown import MATH
 from iris.pipeline.context import StageContext
 from iris.store.layout import inside, read_model, write_model
 
