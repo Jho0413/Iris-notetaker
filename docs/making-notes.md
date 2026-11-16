@@ -364,5 +364,5 @@ Prompts treat what was said and shown as data, never as instructions.
   `frontend/src/notes/format.ts`); inline maths is read in `backend/src/iris/notes/markdown.py`
   and, in the editor, `frontend/src/notes/editor/extensions.ts`
 - `backend/src/iris/svg.py`: `sanitize_svg`, for every model-written SVG
-- `backend/src/iris/notes/export.py`: the Markdown export the engine serves on request, with the figures
-  embedded and the user's edits included
+- `backend/src/iris/notes/export.py`: the Markdown export the engine serves on request, with the
+  figures embedded and the user's edits included
