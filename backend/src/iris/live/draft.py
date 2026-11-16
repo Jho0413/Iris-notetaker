@@ -1,5 +1,4 @@
 import asyncio
-import contextlib
 import logging
 import math
 
@@ -107,10 +106,11 @@ class DraftLane(LiveLane):
 
     async def _wait(self, seen: tuple, now: float) -> None:
         tl = self.timeline
-        waiting = tl.wait_until(lambda: tl.ending or self._halted() or self._evidence() != seen)
         due = self._due
-        with contextlib.suppress(TimeoutError):
-            await asyncio.wait_for(waiting, None if due is None else max(due - now, 0))
+        await tl.wait_until(
+            lambda: tl.ending or self._halted() or self._evidence() != seen,
+            None if due is None else max(due - now, 0),
+        )
 
     async def _write(
         self,

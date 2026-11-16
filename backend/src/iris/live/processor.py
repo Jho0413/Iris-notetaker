@@ -57,11 +57,7 @@ class LiveProcessor:
             return tl.upstream_failed(lane.lane) or (lane.retries_end_at_notes and tl.ending)
 
         async def pause(delay: float) -> bool:
-            try:
-                await asyncio.wait_for(tl.wait_until(stopped), delay)
-            except TimeoutError:
-                return True
-            return False
+            return not await tl.wait_until(stopped, delay)
 
         try:
             with retries_until(stopped, pause):

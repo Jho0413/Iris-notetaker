@@ -83,9 +83,13 @@ class LiveTimeline:
             contents=list(self.contents),
         )
 
-    async def wait_until(self, predicate: Callable[[], bool]) -> None:
-        async with self._changed:
-            await self._changed.wait_for(predicate)
+    async def wait_until(self, predicate: Callable[[], bool], timeout: float | None = None) -> bool:
+        try:
+            async with asyncio.timeout(timeout), self._changed:
+                await self._changed.wait_for(predicate)
+        except TimeoutError:
+            return False
+        return True
 
     async def _notify(self) -> None:
         async with self._changed:

@@ -39,6 +39,18 @@ async def test_waiters_wake_when_a_watermark_passes():
     assert tl.transcript().language == "en"
 
 
+async def test_waiting_until_a_watermark_passes_says_it_passed():
+    tl = LiveTimeline()
+    waiter = asyncio.create_task(tl.wait_until(lambda: tl.transcribed_to >= 5, timeout=5))
+    await tl.publish_transcript([], transcribed_to=5)
+    assert await waiter is True
+
+
+async def test_waiting_until_a_watermark_that_never_passes_times_out():
+    tl = LiveTimeline()
+    assert await tl.wait_until(lambda: tl.transcribed_to >= 5, timeout=0.05) is False
+
+
 async def test_watermarks_never_move_back():
     tl = LiveTimeline()
     await tl.publish_transcript([], transcribed_to=30)
