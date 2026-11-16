@@ -1,5 +1,5 @@
 // Renaming a session in place. Pure, so it is testable under plain Node.
-import { UNREACHABLE } from './messages.ts'
+import { UNREACHABLE } from '../lib/messages.ts'
 
 /** Longest session name, in characters: the engine's limit (TITLE_MAX_CHARS in
  * backend/src/iris/api/routes/sessions.py), so the field stops where the API would refuse. */

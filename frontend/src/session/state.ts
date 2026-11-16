@@ -9,7 +9,8 @@
 // Events older than the current run's start belong to an earlier run and are ignored, so replaying
 // history (all runs, in order) always lands on the latest run.
 import type { IrisEvent, Notes, Session, SessionStatus, Stage, Transcript } from '../api/client'
-import { formatWhen, SOURCE_LABEL } from './format.ts'
+import { formatClock } from '../lib/format.ts'
+import { notesFigures, type FigureState } from '../lib/notes.ts'
 
 export type FailureMessage = NonNullable<Session['failure_message']>
 export type FailureKind = NonNullable<Session['failure_kind']>
@@ -88,17 +89,6 @@ export interface StageRun {
 /** Done while recording: promoted at stop, and the promotion finished. */
 export function doneLive(step: StageRun): boolean {
   return step.promoted === true && step.status === 'done'
-}
-
-export interface FigureState {
-  id: string
-  caption: string
-  /** Seconds into the session where the figure was shown. */
-  t?: number
-  path?: string
-  renderAs?: string
-  verified?: boolean
-  rendered: boolean
 }
 
 export interface RunState {
@@ -295,20 +285,7 @@ export function transcriptSegments(run: RunState, transcript: Transcript | null)
 
 /** Figures in selection order, merging the finished notes (REST) with this run's events. */
 export function figureList(run: RunState, notes: Notes | null): FigureState[] {
-  const out = new Map<string, FigureState>()
-  for (const v of notes?.visuals ?? []) {
-    out.set(v.id, {
-      id: v.id,
-      caption: v.caption,
-      t: v.frame.t,
-      path: v.path,
-      renderAs: v.render_as,
-      // The notes say how each figure was made. Notes from before they did: a redraw only
-      // reaches them after passing its check, and a screenshot may be requested or a fallback.
-      verified: v.verified ?? (v.render_as === 'screenshot' ? undefined : true),
-      rendered: true,
-    })
-  }
+  const out = new Map(notesFigures(notes).map((f) => [f.id, f] as const))
   for (const id of run.figureOrder) {
     const live = run.figures[id]
     const known = out.get(id)
@@ -317,41 +294,6 @@ export function figureList(run: RunState, notes: Notes | null): FigureState[] {
       : live)
   }
   return [...out.values()]
-}
-
-export type Provenance = 'verified' | 'screenshot' | 'unverified'
-
-/**
- * How a figure was produced, when it is known. `unverified` is the
- * original image, shown because no redraw could be used (labelled neutrally, with no reason). In
- * notes from before figures recorded this, a screenshot may be either, so neither is claimed.
- */
-export function provenance(figure: FigureState): Provenance | undefined {
-  if (!figure.rendered || figure.verified === undefined) return undefined
-  if (!figure.verified) return 'unverified'
-  return figure.renderAs === 'screenshot' ? 'screenshot' : 'verified'
-}
-
-/** Per figure id: when it was shown and how it was made (the figure's caption line). */
-export function figureMeta(figures: readonly FigureState[]): Map<string, { t?: number; provenance?: Provenance }> {
-  return new Map(figures.map((f) => [f.id, { t: f.t, provenance: provenance(f) }]))
-}
-
-/** The session's meta line, on its page and in its PDF: type, source, length and when it was made. */
-export function sessionMetaLine(session: Session, sessionType?: string, length?: number): string[] {
-  return [
-    sessionType ? sessionType.charAt(0).toUpperCase() + sessionType.slice(1) : '',
-    SOURCE_LABEL[session.source] ?? session.source,
-    length !== undefined ? formatClock(length) : '',
-    formatWhen(session.created_at),
-  ].filter((part) => part !== '')
-}
-
-/** Session length in seconds, from the transcript (the backend doesn't set `duration_s` yet). */
-export function sessionLength(session: Session, segs: readonly Segment[]): number | undefined {
-  if (session.duration_s) return session.duration_s
-  const end = segs.reduce((max, s) => Math.max(max, s.end), 0)
-  return end > 0 ? end : undefined
 }
 
 export type UiStateKind =
@@ -576,23 +518,6 @@ export function stageSeconds(step: StageRun): number | undefined {
   if (doneLive(step) || !step.startedAt || !step.finishedAt) return undefined
   const ms = Date.parse(step.finishedAt) - Date.parse(step.startedAt)
   return Number.isFinite(ms) && ms >= 0 ? ms / 1000 : undefined
-}
-
-/** "4:05" or "1:02:09". */
-export function formatClock(seconds: number): string {
-  const s = Math.max(0, Math.floor(seconds))
-  const h = Math.floor(s / 3600)
-  const m = Math.floor((s % 3600) / 60)
-  const ss = String(s % 60).padStart(2, '0')
-  return h ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`
-}
-
-/** "0.8 s", "42 s", "3 min 05 s". */
-export function formatDuration(seconds: number): string {
-  if (seconds < 10) return `${seconds.toFixed(1)} s`
-  if (seconds < 60) return `${Math.round(seconds)} s`
-  const m = Math.floor(seconds / 60)
-  return `${m} min ${String(Math.round(seconds % 60)).padStart(2, '0')} s`
 }
 
 /** The step a failed session stopped at: this run's, else the stored one. */

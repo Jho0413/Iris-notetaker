@@ -2,7 +2,7 @@
 // testable under plain Node. Nothing here names the backend, a provider, a status code or a
 // command: the user assumes Iris is set up, so every failure is said in Iris's own words.
 import type { Session } from '../api/client'
-import type { Provenance } from './state'
+import type { Provenance } from './notes'
 
 /** Nothing answered the request (status 0 from `act()`): the network failed, or only the engine
  * is down and the dev proxy or the app's handler answered in its place (`engineDidNotAnswer`). */

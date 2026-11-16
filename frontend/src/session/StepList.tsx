@@ -1,8 +1,8 @@
 import type { Stage } from '../api/client'
 import {
   STAGE_LABELS, STAGE_ORDER, stageDetail, stepStatus, type RunState, type StepStatus,
-} from '../session/state'
-import { Icon, type IconName } from './Icon'
+} from './state'
+import { Icon, type IconName } from '../components/Icon'
 
 const STEP_ICON: Record<StepStatus, IconName> = {
   pending: 'pending',

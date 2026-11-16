@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { irisApp } from '../api/appBridge'
-import { KEY_ACTION_FAILED, noKeyWarning } from '../settings/settings'
-import { Icon } from './Icon'
+import { KEY_ACTION_FAILED, noKeyWarning } from './settings'
+import { Icon } from '../components/Icon'
 
 /**
  * The warning that Iris has no OpenAI API key, so it can't make notes. Everything else still

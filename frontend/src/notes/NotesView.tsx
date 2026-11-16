@@ -7,19 +7,10 @@ import remarkMath from 'remark-math'
 import { sessionFileUrl, type Notes } from '../api/client'
 import {
   FORMAT_MESSAGES, parseNotes, withPaths, type BlockNode, type NotesNode, type StepPath,
-} from '../notes/format'
-import { formatClock, type Provenance } from '../session/state'
+} from './format'
+import { formatClock } from '../lib/format'
+import type { FigureMeta, OutlineItem } from '../lib/notes'
 import { ProvenanceBadge } from './FiguresGrid'
-
-export interface FigureMeta {
-  t?: number
-  provenance?: Provenance
-}
-
-export interface OutlineItem {
-  id: string
-  text: string
-}
 
 type Visual = Notes['visuals'][number]
 

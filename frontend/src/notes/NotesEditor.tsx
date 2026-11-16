@@ -10,17 +10,18 @@ import {
   ADDABLE, addBelow, blockAt, blockOfSelection, canLand, isContainer, KIND_LABELS, kindOf, makeMaths, moveBy,
   moveTo, remove, setColour, turnInto, turnIntoChoices, usedFigures, within, type Addable, type Block, type Kind,
   type Target,
-} from '../notes/editor/blocks'
-import { Figure, notesExtensions } from '../notes/editor/extensions'
-import { landingSpots, nearestSpot, type Measured, type Spot } from '../notes/editor/landing'
-import { toDoc, toMarkdown } from '../notes/editor/markdown'
-import { editorPlugins, flashKey, mathWithViews, selectedBlock, selectedBlockKey, type OpenMath } from '../notes/editor/plugins'
-import type { Colour } from '../notes/format'
-import { NOTES_EDIT, saveRefused, UNREACHABLE } from '../session/messages'
-import { ConfirmDialog } from './ConfirmDialog'
+} from './editor/blocks'
+import { Figure, notesExtensions } from './editor/extensions'
+import { landingSpots, nearestSpot, type Measured, type Spot } from './editor/landing'
+import { toDoc, toMarkdown } from './editor/markdown'
+import { editorPlugins, flashKey, mathWithViews, selectedBlock, selectedBlockKey, type OpenMath } from './editor/plugins'
+import type { Colour } from './format'
+import { NOTES_EDIT, saveRefused, UNREACHABLE } from '../lib/messages'
+import type { FigureMeta } from '../lib/notes'
+import { ConfirmDialog } from '../components/ConfirmDialog'
 import { MathEditor, MenuItem, Popover, Swatches } from './EditorMenu'
-import { Icon, type IconName } from './Icon'
-import { FigureView, type FigureMeta } from './NotesView'
+import { Icon, type IconName } from '../components/Icon'
+import { FigureView } from './NotesView'
 
 type Visual = Notes['visuals'][number]
 

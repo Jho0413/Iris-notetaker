@@ -1,5 +1,5 @@
 // The Settings page's wording and language list. Pure, so it is testable under plain Node.
-import { UNREACHABLE } from '../session/messages.ts'
+import { UNREACHABLE } from '../lib/messages.ts'
 
 /** The language value that lets the transcription model detect the language itself. */
 export const AUTO = 'auto'

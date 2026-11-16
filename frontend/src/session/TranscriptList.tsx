@@ -1,4 +1,5 @@
-import { formatClock, type Segment } from '../session/state'
+import { formatClock } from '../lib/format'
+import type { Segment } from './state'
 
 /** Transcript segments with start times. */
 export function TranscriptList({ segments }: { segments: Segment[] }) {

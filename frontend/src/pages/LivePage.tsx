@@ -17,10 +17,11 @@ import {
 import { menuBar, type LiveLocationState } from '../capture/menuBar'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { Icon, type IconName } from '../components/Icon'
-import { UNREACHABLE } from '../session/messages'
-import { formatClock, liveProgress } from '../session/state'
+import { UNREACHABLE } from '../lib/messages'
+import { formatClock } from '../lib/format'
+import { liveProgress } from '../session/state'
 import { useSessionStream } from '../session/useSessionStream'
-import { useTitle } from '../session/useTitle'
+import { useTitle } from '../hooks/useTitle'
 import { irisApp, type Phase, type RecordCommand } from '../api/appBridge'
 
 /** A choice on the stopped page that deletes what was recorded, so it is confirmed first. */

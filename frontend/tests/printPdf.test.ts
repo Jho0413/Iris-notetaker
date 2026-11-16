@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { browserPrint, runExport, type ExportSteps } from '../src/session/printPdf.ts'
-import { shownTitle } from '../src/session/format.ts'
+import { browserPrint, runExport, type ExportSteps } from '../src/notes/printPdf.ts'
+import { shownTitle } from '../src/lib/format.ts'
 
 const SHEET = { isConnected: true } as HTMLElement
 

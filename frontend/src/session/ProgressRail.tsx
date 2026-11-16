@@ -1,10 +1,10 @@
 import type { Stage } from '../api/client'
-import { detailRows, type Cost, type StepCost } from '../session/cost'
-import { detailsLabel } from '../session/messages'
-import type { StreamStatus } from '../session/useSessionStream'
-import { STAGE_ORDER, stepLine, stepStatus, type RunState } from '../session/state'
+import { detailRows, type Cost, type StepCost } from './cost'
+import { detailsLabel } from '../lib/messages'
+import type { StreamStatus } from './useSessionStream'
+import { STAGE_ORDER, stepLine, stepStatus, type RunState } from './state'
 import { CostText } from './CostText'
-import type { OutlineItem } from './NotesView'
+import type { OutlineItem } from '../lib/notes'
 import { StepList } from './StepList'
 
 /** What the session's details show: in the rail, or below the tabs under 1120px. */

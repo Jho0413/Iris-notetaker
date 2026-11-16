@@ -1,7 +1,7 @@
 import katex from 'katex'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { PALETTE, type Colour } from '../notes/format'
+import { PALETTE, type Colour } from './format'
 
 /**
  * A small menu floating under the control that opened it (the block toolbar's colour, type and

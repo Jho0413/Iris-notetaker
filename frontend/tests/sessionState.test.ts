@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { IrisEvent, Notes, Session } from '../src/api/client.ts'
+import { formatClock, formatDuration, sessionLength, sessionMetaLine } from '../src/lib/format.ts'
+import { figureMeta, provenance } from '../src/lib/notes.ts'
 import {
-  announcement, currentSteps, emptyRun, eventKey, failureView, figureList, figureMeta, formatClock,
-  formatDuration, GENERIC_FAILURE, knownFailureMessage, libraryState, liveProgress, progressView,
-  provenance, reduceEvents, runSeconds, sessionLength, sessionMetaLine, STAGE_ORDER, stageDetail, stageSeconds,
-  stepLine, stepStatus,
-  transcriptSegments, uiState, type UiStateKind,
+  announcement, currentSteps, emptyRun, eventKey, failureView, figureList, GENERIC_FAILURE, knownFailureMessage,
+  libraryState, liveProgress, progressView, reduceEvents, runSeconds, STAGE_ORDER, stageDetail, stageSeconds,
+  stepLine, stepStatus, transcriptSegments, uiState, type UiStateKind,
 } from '../src/session/state.ts'
 
 let tick = 0

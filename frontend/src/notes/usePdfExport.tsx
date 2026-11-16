@@ -1,9 +1,9 @@
 import { useCallback, useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
 import type { Session } from '../api/client'
-import { PrintSheet, type Printable } from '../components/PrintSheet'
+import { PrintSheet, type Printable } from './PrintSheet'
 import { irisApp } from '../api/appBridge'
-import { shownTitle } from './format'
+import { shownTitle } from '../lib/format'
 import { fetchNotes, fetchTranscript } from './load'
 import { browserPrint, runExport } from './printPdf'
 

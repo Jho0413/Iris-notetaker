@@ -1,7 +1,8 @@
 import { sessionFileUrl } from '../api/client'
-import { formatClock, provenance, type FigureState, type Provenance } from '../session/state'
-import { PROVENANCE_LABELS } from '../session/messages'
-import { Icon } from './Icon'
+import { formatClock } from '../lib/format'
+import { PROVENANCE_LABELS } from '../lib/messages'
+import { provenance, type FigureState, type Provenance } from '../lib/notes'
+import { Icon } from '../components/Icon'
 
 const BADGE_STYLES: Record<Provenance, string> = {
   verified: 'badge-verified',

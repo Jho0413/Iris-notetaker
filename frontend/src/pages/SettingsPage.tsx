@@ -4,9 +4,9 @@ import { api, type AppSettings } from '../api/client'
 import { act } from '../api/request'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { Icon } from '../components/Icon'
-import { NoKeyBanner } from '../components/NoKeyBanner'
-import { UNREACHABLE } from '../session/messages'
-import { useTitle } from '../session/useTitle'
+import { NoKeyBanner } from '../settings/NoKeyBanner'
+import { UNREACHABLE } from '../lib/messages'
+import { useTitle } from '../hooks/useTitle'
 import { irisApp } from '../api/appBridge'
 import {
   asksBeforeLeaving,

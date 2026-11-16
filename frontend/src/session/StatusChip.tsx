@@ -1,5 +1,5 @@
-import type { UiState } from '../session/state'
-import { Icon } from './Icon'
+import type { UiState } from './state'
+import { Icon } from '../components/Icon'
 
 /** Session status in words, with colour and glyph as secondary signals. */
 export function StatusChip({ state }: { state: UiState }) {

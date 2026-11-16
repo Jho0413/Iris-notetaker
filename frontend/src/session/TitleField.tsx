@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react'
-import { nameToSave, RENAME_HINT, renameFailure, TITLE_MAX_CHARS } from '../session/rename'
+import { nameToSave, RENAME_HINT, renameFailure, TITLE_MAX_CHARS } from './rename'
 
 /**
  * A session's name, being edited in place: the title stays text, in its own type and position,

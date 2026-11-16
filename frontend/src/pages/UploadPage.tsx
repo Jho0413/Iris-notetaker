@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, type DragEvent, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Icon } from '../components/Icon'
-import { formatBytes } from '../session/format'
+import { formatBytes } from '../lib/format'
 import { UploadError, uploadWithProgress } from '../session/upload'
-import { useTitle } from '../session/useTitle'
+import { useTitle } from '../hooks/useTitle'
 
 const ACCEPT = 'video/*,audio/*'
 

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import test from 'node:test'
-import { againLink, PROVENANCE_LABELS, saveRefused, UNREACHABLE } from '../src/session/messages.ts'
+import { againLink, PROVENANCE_LABELS, saveRefused, UNREACHABLE } from '../src/lib/messages.ts'
 
 test('an unreachable backend is described in Iris’s own words', () => {
   assert.equal(UNREACHABLE, "Iris isn't responding. Try again in a moment.")

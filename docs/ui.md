@@ -135,7 +135,7 @@ comes from the engine's settings, never from the app. The app's side is in
 - **Logic in pure functions, pages thin.** The run state, the stream's connection, the notes
   format, the editor's block actions and drop spots, and the PDF steps are plain TypeScript,
   tested in plain Node with no browser.
-- **Wording in one place.** What the pages say lives in `session/messages.ts` and each page's own
+- **Wording in one place.** What the pages say lives in `lib/messages.ts` and each page's own
   module; a failed run's message is one of a fixed list the engine owns, typed from the schema;
   raw error text is never shown.
 - **Only the session's own figures are drawn.** An image the notes point at from anywhere else is
@@ -154,9 +154,15 @@ comes from the engine's settings, never from the app. The app's side is in
 - `frontend/src/api/`: the typed client, the generated `schema.d.ts`, the action wrapper `act()`
   (`request.ts`) and the bridge (`appBridge.ts`).
 - `frontend/src/pages/`: one file per page.
-- `frontend/src/session/`: run state (`state.ts`), the progress stream (`stream.ts`), upload, rename,
-  PDF export and the wording (`messages.ts`).
-- `frontend/src/notes/`: the notes format (`format.ts`) and the editor's logic (`editor/`).
-- `frontend/src/components/`: `NotesView.tsx`, `NotesEditor.tsx`, `PrintSheet.tsx` and the rest.
-- `frontend/src/settings/`: the Settings page's logic.
+- `frontend/src/session/`: run state (`state.ts`), the progress stream (`stream.ts`), upload, rename
+  and the session page's parts (`ProgressRail.tsx` and the rest).
+- `frontend/src/notes/`: the notes format (`format.ts`), the editor's logic (`editor/`), the
+  reading view and the editor (`NotesView.tsx`, `NotesEditor.tsx`), and the PDF export
+  (`PrintSheet.tsx`, `usePdfExport.tsx`, `printPdf.ts`).
+- `frontend/src/components/`: the shared building blocks (`Icon.tsx`, `ConfirmDialog.tsx` and the
+  rest).
+- `frontend/src/lib/`: the wording (`messages.ts`), the formatters (`format.ts`) and what the notes
+  views and the session page both know about figures and the outline (`notes.ts`).
+- `frontend/src/hooks/`: the shared hooks (`useTitle.ts`).
+- `frontend/src/settings/`: the Settings page's logic and the no-key warning (`NoKeyBanner.tsx`).
 - `frontend/tests/`: the plain-Node tests.

@@ -1,9 +1,8 @@
 // Model cost as the UI shows it (the rail's Cost slot and the library's Cost column). Pure functions, testable under plain Node (tests/cost.test.ts). Costs are shown
 // per step with the plain step labels; model and provider names never reach the UI.
 import type { Session, SessionStatus, SessionUsage, Stage } from '../api/client'
-import {
-  doneLive, formatDuration, stageSeconds, STAGE_LABELS, STAGE_ORDER, type RunState,
-} from './state.ts'
+import { formatDuration } from '../lib/format.ts'
+import { doneLive, stageSeconds, STAGE_LABELS, STAGE_ORDER, type RunState } from './state.ts'
 
 export interface Cost {
   usd: number

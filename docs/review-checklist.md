@@ -106,7 +106,7 @@ to every change; the reviewer says which ones it checked. Principles are those i
 
 - A user action's request goes through `act()`; destructive or leaving actions ask first
   (`ConfirmDialog`).
-- User-facing wording comes from one place (`session/messages.ts` or the page's own module), not
+- User-facing wording comes from one place (`lib/messages.ts` or the page's own module), not
   copies.
 - Model-written Markdown renders without raw HTML; figures load as images; bad LaTeX shows in
   place.
