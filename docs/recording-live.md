@@ -180,9 +180,10 @@ can be ingested again at any time.
    the next point it can restart from. Each decides for itself when to restart: ingest has every
    chunk, so it sees the gaps up front and restarts after each one, while the lane waits for the
    browser, counts a chunk as lost only once it has waited long enough, and looks for the restart
-   point in the chunks as they arrive. They also differ in what a part that can't be read means:
-   ingest stops with a message saying what to do, while the lane skips it, marks itself as having
-   missed input and carries on, since ingest will decode the recording again anyway.
+   point in the chunks as they arrive. Both skip a part after a gap that can't be read and leave
+   silence there. Only when the recording as a whole can't be read, or holds no audio, does ingest
+   stop with a message saying what to do; the lane instead marks itself as having missed input and
+   carries on, since ingest will decode the recording again anyway.
 2. The frames are picked on the same steady grid as an upload's, by their times. Each share is
    sized from its own first readable frame, and the rest of it is scaled and centred on black to
    that size, because detection compares frames pixel by pixel and a shared window can change
