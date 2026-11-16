@@ -1,15 +1,7 @@
-"""Runs a session's pipeline as an in-process asyncio task. Single user, so no queue server.
-
-A failed run is recorded twice: for the user, one of
-our own messages (``UserFacingError``'s for a known input problem, else ``GENERIC_FAILURE``) and its
-kind, published in the ``error`` event; for developers, the raw error in the log and the session
-record (``iris show``). Exception text never reaches the API. A run cut off by Iris stopping is
-recorded when Iris next starts (``fail_interrupted``).
-"""
-
 import asyncio
 import logging
 
+from iris.aio import cancel_and_wait
 from iris.config import Settings
 from iris.events import EventBus
 from iris.live import LiveRegistry, LiveTimeline, promote
@@ -38,7 +30,6 @@ class JobRunner:
         self.bus = bus
         self.settings = settings
         self._tasks: dict[str, asyncio.Task[None]] = {}
-        # Processors of live sessions being recorded (iris/live/); finished when the run starts.
         self.live = LiveRegistry(self.context, enabled=settings.live_processing)
 
     def is_running(self, session_id: str) -> bool:
@@ -52,18 +43,6 @@ class JobRunner:
         self._tasks[session_id] = task
 
     def fail_interrupted(self) -> None:
-        """Mark as failed every run cut off by Iris stopping, so it can be tried again.
-
-        Called at startup, before any run starts: a session still ``processing`` then was cut off
-        (a quit or restart mid-run, a crash, a forced quit, power loss). Checked here and not at
-        shutdown, which a crash never reaches. The stage it stopped at is kept, and so are the
-        finished stages' outputs, so **Try again** resumes from it. ``recording`` sessions are
-        left alone: in a browser a recording carries on through an engine restart (its uploads
-        are retried), and the desktop app, which owns its only recording page, stops its own at
-        launch (``POST /live/{id}/stop``). A CLI run (``iris process``) on the
-        same data while the engine starts is marked too, though it carries on; if it finishes,
-        ``run`` clears the mark.
-        """
         for session in self.store.list():
             if session.status != SessionStatus.PROCESSING:
                 continue
@@ -95,9 +74,6 @@ class JobRunner:
         try:
             timeline = None
             if ctx.source == SourceKind.BROWSER_LIVE:
-                # Making notes: let the live lanes flush before ingest reads live/.
-                # None when the session has no processor: a re-run, or live processing is off
-                # (making notes starts one if the engine restarted since recording).
                 timeline = await self.live.finish(session_id)
             if timeline is not None and from_stage is None:
                 await self._run_live(ctx, timeline)
@@ -107,7 +83,6 @@ class JobRunner:
             log.exception("session %s failed", session_id)
             self._fail(session_id, exc)
             return
-        # Also forgets a failure recorded while this run went on (``fail_interrupted``).
         self.store.clear_error(session_id)
         self._set_status(session_id, SessionStatus.DONE)
 
@@ -129,13 +104,8 @@ class JobRunner:
 
     async def _run_plan(self, ctx: StageContext, plan: list[list[Stage]]) -> None:
         if any(Stage.SELECT in group for group in plan):
-            # The selection is made again, so visual ids may change: a draft an earlier run wrote
-            # against the old one must never be assembled (e.g. if write fails and a re-run
-            # starts from assemble). Write rewrites it whole.
             ctx.paths.notes_draft.unlink(missing_ok=True)
         for group in plan:
-            # Stages of a group run together. If one fails the run has failed, so the others
-            # are cancelled at once (their finished units are cached for a re-run).
             try:
                 async with asyncio.TaskGroup() as tasks:
                     for stage in group:
@@ -144,13 +114,6 @@ class JobRunner:
                 raise first_error(error) from None
 
     async def _run_live(self, ctx: StageContext, timeline: LiveTimeline) -> None:
-        """A live session's notes: ingest, promote what the live lanes finished, run the rest.
-
-        What can be promoted is decided after ingest, which leaves the frames the live moments
-        refer to in place (``live/promote.py``). The live lanes write no notes draft, only the
-        write stage's section cache, so there is none to keep or drop here: ``_run_plan`` drops an
-        older one if select runs again.
-        """
         await self.run_stage(ctx, Stage.INGEST)
         promoted = promote.promotable(ctx, timeline)
         log.info(
@@ -166,7 +129,6 @@ class JobRunner:
         await self._run_plan(ctx, promote.remaining_plan(promoted))
 
     async def promote_stage(self, ctx: StageContext, timeline: LiveTimeline, stage: Stage) -> None:
-        """Write a stage's output from the live timeline, reported like a run of the stage."""
         self.store.update(ctx.session_id, current_stage=stage)
         data = {"stage": stage, "promoted": True}
         self.bus.publish(ctx.session_id, EventType.STAGE_STARTED, data)
@@ -180,7 +142,7 @@ class JobRunner:
         self.store.update(ctx.session_id, current_stage=stage)
         self.bus.publish(ctx.session_id, EventType.STAGE_STARTED, {"stage": stage})
         try:
-            with usage.recording(ctx, stage):  # model calls in the stage go to usage.json
+            with usage.recording(ctx, stage):
                 await STAGES[stage](ctx)
         except Exception as exc:
             raise StageError(stage, exc) from exc
@@ -192,6 +154,4 @@ class JobRunner:
 
     async def shutdown(self) -> None:
         await self.live.shutdown()
-        for task in self._tasks.values():
-            task.cancel()
-        await asyncio.gather(*self._tasks.values(), return_exceptions=True)
+        await cancel_and_wait(self._tasks.values())

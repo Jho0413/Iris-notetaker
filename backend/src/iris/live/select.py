@@ -3,6 +3,7 @@ import logging
 
 from pydantic import BaseModel
 
+from iris.aio import cancel_and_wait
 from iris.live.lane import LiveLane
 from iris.live.timeline import Lane, LiveTimeline
 from iris.llm import usage
@@ -96,18 +97,12 @@ class SelectLane(LiveLane):
                 else:
                     break
             if self._halted():
-                for task in self._renders:
-                    task.cancel()
-                await asyncio.gather(*self._renders, return_exceptions=True)
+                await cancel_and_wait(self._renders)
             elif self._renders:
                 await asyncio.gather(*self._renders)
             await tl.wait_until(lambda: tl.ending)
         finally:
-            pending = [task for task in self._renders if not task.done()]
-            for task in pending:
-                task.cancel()
-            if pending:
-                await asyncio.gather(*pending, return_exceptions=True)
+            await cancel_and_wait(self._renders)
 
     async def _read(self, moments: list[Moment]) -> None:
         tl = self.timeline

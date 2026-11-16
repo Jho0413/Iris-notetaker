@@ -13,6 +13,7 @@ import av
 import numpy as np
 
 from iris import speech
+from iris.aio import cancel_and_wait
 from iris.live.lane import LiveLane
 from iris.live.timeline import Lane, LiveTimeline
 from iris.llm import usage
@@ -258,10 +259,8 @@ class AudioLane(LiveLane):
             await self._process(decoder, decoding, windows)
         finally:
             decoder.cancel()
-            forwarding.cancel()
-            for task in windows.values():
-                task.cancel()
-            await asyncio.gather(decoding, forwarding, *windows.values(), return_exceptions=True)
+            await cancel_and_wait([forwarding, *windows.values()])
+            await asyncio.gather(decoding, return_exceptions=True)
 
     async def _forward_input(self, decoder: LiveDecoder) -> None:
         while True:

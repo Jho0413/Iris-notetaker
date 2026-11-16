@@ -131,6 +131,9 @@ A live recording keeps its own files in `live/`:
    that no longer exist.
 5. Each time the engine starts, it marks every session still "processing" as failed: its run was
    cut off by a quit, a restart or a crash. A re-run then resumes from the stage it reached.
+   Recordings are left alone: in a browser a recording carries on through a restart, and the
+   desktop app stops its own when it starts. A command-line run on the same data while the engine
+   starts is marked too, though it carries on; if it finishes, the mark is cleared.
 
 *Why:* one user on one machine needs no queue server or worker process. Cut-off runs are found
 at start-up, not at shutdown, because a crash never reaches shutdown code.

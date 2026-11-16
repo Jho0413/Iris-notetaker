@@ -14,6 +14,7 @@ import av
 import cv2
 import numpy as np
 
+from iris.aio import cancel_and_wait
 from iris.media.container import first_video_stream
 from iris.media.images import shrink_to_width
 
@@ -298,8 +299,7 @@ async def replay(
             await asyncio.wait_for(done.wait(), timeout_s)
             report.notes_to_done_s = loop.time() - notes_at[0]
         finally:
-            follower.cancel()
-            await asyncio.gather(follower, return_exceptions=True)
+            await cancel_and_wait([follower])
 
         session = (await client.get(f"{api}/sessions/{sid}")).json()
         report.error = session.get("failure_message")

@@ -2,6 +2,7 @@ import asyncio
 import logging
 from collections.abc import Callable, Sequence
 
+from iris.aio import cancel_and_wait
 from iris.live.audio import AudioLane
 from iris.live.draft import DraftLane
 from iris.live.lane import LiveLane
@@ -102,15 +103,11 @@ class LiveProcessor:
                     sorted(name for name, t in self._tasks.items() if t in pending),
                     self.finish_timeout_s,
                 )
-                for task in pending:
-                    task.cancel()
-                await asyncio.gather(*pending, return_exceptions=True)
+                await cancel_and_wait(pending)
         return self.timeline
 
     async def cancel(self) -> None:
-        for task in self._tasks.values():
-            task.cancel()
-        await asyncio.gather(*self._tasks.values(), return_exceptions=True)
+        await cancel_and_wait(self._tasks.values())
 
 
 class LiveRegistry:
