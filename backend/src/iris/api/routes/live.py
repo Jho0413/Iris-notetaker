@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from iris.api.deps import BusDep, PathsDep, RunnerDep, SessionDep, SettingsDep, StoreDep
+from iris.live import Lane
 from iris.llm.usage import with_cost
 from iris.models import EventType, Session, SessionStatus, SourceKind
 from iris.sources.browser_live import (
@@ -104,7 +105,7 @@ async def post_audio(
     except ChunkConflict as e:
         raise HTTPException(409, str(e)) from e
     if processor := runner.live.ensure(session.id):
-        processor.notify_audio()
+        processor.notify(Lane.AUDIO)
 
 
 @router.post("/{session_id}/frame", status_code=204)
@@ -135,7 +136,7 @@ async def post_frame(
     except ChunkConflict as e:
         raise HTTPException(409, str(e)) from e
     if processor := runner.live.ensure(session.id):
-        processor.notify_screen()
+        processor.notify(Lane.SCREEN)
 
 
 @router.post(

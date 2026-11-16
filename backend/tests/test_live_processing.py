@@ -191,9 +191,9 @@ async def test_input_wakes_only_its_lane_and_finish_flushes_every_lane(tmp_path:
     processor = LiveProcessor(stage_ctx(tmp_path, live=True), factory)
     processor.start()
     processor.start()
-    processor.notify_audio()
+    processor.notify(Lane.AUDIO)
     await settle(5)
-    processor.notify_screen()
+    processor.notify(Lane.SCREEN)
     await settle(5)
     assert lanes[Lane.AUDIO].wakes == 1
     assert lanes[Lane.SCREEN].wakes == 1
@@ -209,9 +209,9 @@ async def test_a_failing_lane_does_not_stop_the_others(tmp_path: Path):
     factory, lanes = fake_lanes(failing={Lane.SCREEN})
     processor = LiveProcessor(stage_ctx(tmp_path, live=True), factory)
     processor.start()
-    processor.notify_screen()
+    processor.notify(Lane.SCREEN)
     await settle(5)
-    processor.notify_audio()
+    processor.notify(Lane.AUDIO)
     await settle(5)
     assert "lane broke" in processor.timeline.failed[Lane.SCREEN]
     assert lanes[Lane.AUDIO].wakes == 1
@@ -225,7 +225,7 @@ async def test_missing_lanes_are_done_but_never_complete(tmp_path: Path):
     factory, _ = fake_lanes(only={Lane.SELECT})
     processor = LiveProcessor(stage_ctx(tmp_path, live=True), factory)
     processor.start()
-    processor.notify_screen()
+    processor.notify(Lane.SCREEN)
     assert processor.timeline.transcribed_through(1e9)
     timeline = await asyncio.wait_for(processor.finish(), 1)
     assert Lane.SELECT in timeline.finished

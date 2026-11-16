@@ -524,7 +524,7 @@ async def test_screen_and_select_lanes_through_the_processor(
     processor.start()
     for i, frame in enumerate(three_slides().frames):
         store_frame(ctx.paths, float(i), 1, image_bytes(frame))
-        processor.notify_screen()
+        processor.notify(Lane.SCREEN)
         await asyncio.sleep(0)
     timeline = await processor.finish()
     assert timeline.finished == {Lane.SCREEN, Lane.SELECT} and not timeline.failed

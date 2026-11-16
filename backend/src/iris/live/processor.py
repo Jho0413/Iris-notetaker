@@ -77,13 +77,9 @@ class LiveProcessor:
             if not self.timeline.done(lane.lane):
                 self.timeline.failed[lane.lane] = "stopped"
 
-    def notify_audio(self) -> None:
-        if lane := self.lanes.get(Lane.AUDIO):
-            lane.wake()
-
-    def notify_screen(self) -> None:
-        if lane := self.lanes.get(Lane.SCREEN):
-            lane.wake()
+    def notify(self, lane: Lane) -> None:
+        if live_lane := self.lanes.get(lane):
+            live_lane.wake()
 
     async def finish(self) -> LiveTimeline:
         await self.timeline.request_end()

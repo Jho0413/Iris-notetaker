@@ -486,7 +486,7 @@ async def test_failing_lane_is_marked_failed_by_the_processor(
     processor.start()
     for seq, data in enumerate(split(webm, 2000)):
         store_audio_chunk(paths, seq, data)
-        processor.notify_audio()
+        processor.notify(Lane.AUDIO)
     timeline = processor.timeline
     await asyncio.wait_for(timeline.wait_until(lambda: Lane.AUDIO in timeline.failed), 10)
     timeline = await processor.finish()
@@ -511,7 +511,7 @@ async def test_a_window_transcribed_at_stop_is_still_retried(
     processor.start()
     for seq, data in enumerate(split(webm, 2000)):
         store_audio_chunk(paths, seq, data)
-        processor.notify_audio()
+        processor.notify(Lane.AUDIO)
     timeline = await processor.finish()
     assert failed_at_stop
     assert Lane.AUDIO in timeline.finished and Lane.AUDIO not in timeline.failed
