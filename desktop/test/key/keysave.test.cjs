@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict')
 const { test } = require('node:test')
-const { saveNewKey } = require('../src/keysave.cjs')
+const { saveNewKey } = require('../../src/key/keysave.cjs')
 
 const KEY = 'sk-test-0123456789abcdefghij'
 

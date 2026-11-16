@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict')
 const { test } = require('node:test')
-const { listSources, defaultSelection, chosenId, soundOnly } = require('../src/picker.cjs')
+const { listSources, defaultSelection, chosenId, soundOnly } = require('../../src/recording/picker.cjs')
 
 const screen = (id, displayId) => ({ id: `screen:${id}:0`, name: 'Entire screen', displayId, hasThumbnail: true })
 const win = (id, name, hasThumbnail = true) => ({ id: `window:${id}:0`, name, displayId: '', hasThumbnail })

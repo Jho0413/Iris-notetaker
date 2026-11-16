@@ -20,25 +20,26 @@ const { execFile } = require('node:child_process')
 const fs = require('node:fs')
 const path = require('node:path')
 const { Backend, backendCommand } = require('./src/backend.cjs')
-const { registerScheme, handleAppProtocol } = require('./src/handler.cjs')
-const { checkKeyWithOpenAI } = require('./src/keycheck.cjs')
-const { createKeyStore } = require('./src/keystore.cjs')
-const { saveNewKey } = require('./src/keysave.cjs')
+const { registerScheme, handleAppProtocol } = require('./src/serve/handler.cjs')
+const { checkKeyWithOpenAI } = require('./src/key/keycheck.cjs')
+const { createKeyStore } = require('./src/key/keystore.cjs')
+const { saveNewKey } = require('./src/key/keysave.cjs')
 const { createAppState } = require('./src/appstate.cjs')
-const { WELCOME_SHOWN, shouldWelcome } = require('./src/welcome.cjs')
+const { WELCOME_SHOWN, shouldWelcome } = require('./src/key/welcome.cjs')
 const policy = require('./src/policy.cjs')
-const { ORIGIN } = require('./src/routes.cjs')
+const { ORIGIN } = require('./src/serve/routes.cjs')
 const { unloadPrompt } = require('./src/unload.cjs')
 const { pdfFileName, PDF_OPTIONS } = require('./src/pdf.cjs')
 const { busyDetail, busyKeyRefusal, busyNow, quitDetail, stopRecordings: stopEach } = require('./src/busy.cjs')
 const { refusedDebugSwitch } = require('./src/debugging.cjs')
-const trayRules = require('./src/tray.cjs')
-const pickerRules = require('./src/picker.cjs')
-const { bringSharedAppForward } = require('./src/focus.cjs')
+const trayRules = require('./src/recording/tray.cjs')
+const pickerRules = require('./src/recording/picker.cjs')
+const { bringSharedAppForward } = require('./src/recording/focus.cjs')
 
 const PACKAGED = app.isPackaged
 const REPO = path.resolve(__dirname, '..')
 const PAGES = path.join(__dirname, 'pages')
+const PRELOADS = path.join(__dirname, 'preload')
 const ASSETS = path.join(__dirname, 'assets')
 const DIST = PACKAGED ? path.join(process.resourcesPath, 'frontend') : path.join(REPO, 'frontend', 'dist')
 const UI_URL = `${ORIGIN}/`
@@ -111,7 +112,7 @@ function newWindow({ preload, ...options }) {
     show: false,
     ...options,
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#0e0f13' : '#f6f6f9',
-    webPreferences: { ...WEB_PREFERENCES, ...(preload && { preload: path.join(PAGES, preload) }) },
+    webPreferences: { ...WEB_PREFERENCES, ...(preload && { preload: path.join(PRELOADS, preload) }) },
   })
 }
 
@@ -129,7 +130,7 @@ function showMainWindow({ show = true } = {}) {
     minWidth: 720,
     minHeight: 520,
     title: 'Iris',
-    preload: 'preload-main.cjs',
+    preload: 'iris-window.cjs',
   })
   mainWindow = win
   if (show) win.once('ready-to-show', () => win.show())
@@ -204,7 +205,7 @@ function askForKey(mode) {
     title: 'OpenAI API key',
     parent: mode !== 'first' && mainWindow ? mainWindow : undefined,
     modal: mode !== 'first' && Boolean(mainWindow),
-    preload: 'preload-key.cjs',
+    preload: 'key.cjs',
   })
   const win = keyWindow
   win.once('ready-to-show', () => win.show())
@@ -352,7 +353,7 @@ async function pickSource() {
     minimizable: false,
     fullscreenable: false,
     title: 'Record with Iris',
-    preload: 'preload-picker.cjs',
+    preload: 'picker.cjs',
   })
   state.win = win
   const focusPicker = () => win.isDestroyed() || win.focus()

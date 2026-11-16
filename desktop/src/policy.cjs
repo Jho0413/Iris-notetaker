@@ -1,5 +1,5 @@
 const { fileURLToPath } = require('node:url')
-const routes = require('./routes.cjs')
+const routes = require('./serve/routes.cjs')
 
 function isIrisUrl(url) {
   try {

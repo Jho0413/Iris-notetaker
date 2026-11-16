@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict')
 const { test } = require('node:test')
-const { checkKeyWithOpenAI, MODELS_URL, REJECTED, UNREACHABLE, CANT_CHECK } = require('../src/keycheck.cjs')
+const { checkKeyWithOpenAI, MODELS_URL, REJECTED, UNREACHABLE, CANT_CHECK } = require('../../src/key/keycheck.cjs')
 
 const KEY = 'sk-test-0123456789abcdefghij'
 

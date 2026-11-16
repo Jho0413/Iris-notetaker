@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict')
 const { test } = require('node:test')
-const { IDLE, RELAY_START, parseReport, trayView, clock, hideOnClose, holdsRecording, relay } = require('../src/tray.cjs')
+const { IDLE, RELAY_START, parseReport, trayView, clock, hideOnClose, holdsRecording, relay } = require('../../src/recording/tray.cjs')
 
 const T0 = 1_800_000_000_000
 const actions = (view) => view.items.filter((i) => i.id).map((i) => i.id)

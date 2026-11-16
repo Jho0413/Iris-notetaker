@@ -205,8 +205,10 @@ The key protection keeps it from other programs running as the user. It doesn't 
 
 - `desktop/main.cjs`: the wiring: windows, the engine, menus, capture, quitting.
 - `desktop/src/`: the main process's parts, each tested in `desktop/test/`; the decisions
-  (`routes.cjs`, `policy.cjs`, `tray.cjs`, `picker.cjs`) are pure functions.
-- `desktop/pages/`: the starting page, the key window and the picker, with their preloads.
+  (`serve/routes.cjs`, `policy.cjs`, `recording/tray.cjs`, `recording/picker.cjs`) are pure
+  functions.
+- `desktop/pages/`: the starting page, the key window and the picker.
+- `desktop/preload/`: the bridges of the app window, the key window and the picker.
 - `desktop/electron-builder.yml`: packaging, signing, the fuses and the hardened runtime, with its
   entitlements in `desktop/build-resources/`.
 - `desktop/scripts/`: the build, the backend bundle and its smoke test.

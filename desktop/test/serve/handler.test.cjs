@@ -4,7 +4,7 @@ const http = require('node:http')
 const os = require('node:os')
 const path = require('node:path')
 const { after, before, test } = require('node:test')
-const { handleAppProtocol, registerScheme } = require('../src/handler.cjs')
+const { handleAppProtocol, registerScheme } = require('../../src/serve/handler.cjs')
 
 const TOKEN = 'launch-token'
 let dist, outside, server, port, handle

@@ -3,7 +3,7 @@ const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
 const { test } = require('node:test')
-const { checkApiKey, createKeyStore } = require('../src/keystore.cjs')
+const { checkApiKey, createKeyStore } = require('../../src/key/keystore.cjs')
 
 const KEY = 'sk-proj-' + 'a'.repeat(40)
 

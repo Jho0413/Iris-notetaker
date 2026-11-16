@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict')
 const path = require('node:path')
 const { test } = require('node:test')
-const routes = require('../src/routes.cjs')
+const routes = require('../../src/serve/routes.cjs')
 
 test('API paths are forwarded with their query', () => {
   assert.deepEqual(routes.route('app://iris/api/sessions'), { kind: 'api', path: '/api/sessions' })

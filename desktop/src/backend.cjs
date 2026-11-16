@@ -5,7 +5,7 @@ const fs = require('node:fs')
 const http = require('node:http')
 const net = require('node:net')
 const path = require('node:path')
-const { TOKEN_HEADER } = require('./routes.cjs')
+const { TOKEN_HEADER } = require('./serve/routes.cjs')
 
 const LOG_ROTATE_BYTES = 10 * 1024 * 1024
 const LOG_DRAIN_MS = 2000

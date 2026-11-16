@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict')
 const { test } = require('node:test')
-const { windowNumber, bringSharedAppForward } = require('../src/focus.cjs')
+const { windowNumber, bringSharedAppForward } = require('../../src/recording/focus.cjs')
 
 function fakeExecFile({ stdout = 'activated', err = null } = {}) {
   const calls = []
