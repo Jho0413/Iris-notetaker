@@ -7,16 +7,14 @@ import { Icon } from '../components/Icon'
 const BADGE_STYLES: Record<Provenance, string> = {
   verified: 'badge-verified',
   screenshot: 'badge-shot',
-  unverified: 'badge-original', // as plain as a screenshot: no warning, no reason
+  unverified: 'badge-original',
 }
 
-/** The badge for a figure's provenance; shared by the Figures tab and the notes. */
 export function ProvenanceBadge({ kind }: { kind: Provenance | undefined }) {
   if (!kind) return null
   return <span className={`badge ${BADGE_STYLES[kind]}`}>{PROVENANCE_LABELS[kind]}</span>
 }
 
-/** Every figure selected, each in a fixed 4:3 box so nothing moves when images arrive. */
 export function FiguresGrid({ sessionId, figures }: { sessionId: string; figures: FigureState[] }) {
   return (
     <ul className="figures" role="list">

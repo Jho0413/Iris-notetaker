@@ -26,18 +26,12 @@ import { useAskBeforeLeaving } from '../hooks/useAskBeforeLeaving'
 import { useTitle } from '../hooks/useTitle'
 import { irisApp, type Phase, type RecordCommand } from '../api/appBridge'
 
-/** A choice on the stopped page that deletes what was recorded, so it is confirmed first. */
 type Destructive = 'discard' | 'start-over'
 
-/**
- * Plain words for a capture failure. Messages from the capture module are ours and shown as they
- * are; anything else (an unexpected error's text) never is.
- */
 function captureError(err: unknown): string {
   return err instanceof CaptureError ? err.message : "Recording couldn't start. Try again."
 }
 
-/** What to say when finishing the recording failed: our own message, or a generic one. */
 function finishError(err: unknown): string {
   return err instanceof EndSessionError ? err.message : "The recording couldn't be finished. Try again."
 }
@@ -49,8 +43,6 @@ export function LivePage() {
   const [phase, setPhase] = useState<Phase>('idle')
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  // The recording's clock leaves stopped time out: what was recorded before, plus the time since
-  // capture last (re)started (`since`, 0 while stopped).
   const [clock, setClock] = useState<RecordingClock>({ recordedMs: 0, since: 0 })
   const [now, setNow] = useState(0)
   const [discarding, setDiscarding] = useState(false)
@@ -58,30 +50,23 @@ export function LivePage() {
   const [discarded, setDiscarded] = useState(false)
   const capture = useRef<LiveCapture | null>(null)
   const stopping = useRef(false)
-  // Leaving was confirmed: where to go once the recording is kept (a failed keep is retried first).
   const [leavingTo, setLeavingTo] = useState<Location | null>(null)
   const [mode, setMode] = useState<CaptureMode>('screen')
-  // The screen share, for its preview; kept while stopped for Continue's label (LiveCapture itself
-  // decides whether Continue asks for a screen again).
   const [display, setDisplay] = useState<MediaStream | null>(null)
-  const [sharing, setSharing] = useState(false) // Share screen: the picker is open
+  const [sharing, setSharing] = useState(false)
   const [macSound, setMacSound] = useState(false)
   const desktopApp = Boolean(irisApp())
   const canShare = typeof navigator !== 'undefined' && canShareScreen(navigator.mediaDevices)
   const recording = phase === 'recording'
   const continuing = phase === 'continuing'
-  // The stopped page shows while asking to continue too, its buttons waiting.
   const stopped = phase === 'stopped' || continuing
   const busy = continuing || discarding
-  // Started and not yet handed over (or thrown away): leaving the page would stop it.
   const open = recording || stopped
-  // Told to the menu bar while stopped too, so a refusal brings the window up once per recording.
   const soundRefused = open && macSoundRefused(desktopApp, { macSound })
   const elapsed = recordedMs(clock, now) / 1000
 
   useTitle(recording ? `● Recording ${formatClock(elapsed)}` : stopped ? `Stopped ${formatClock(elapsed)}` : 'Record live')
 
-  // What live processing has done so far, as one quiet line (not announced: it changes often).
   const stream = useSessionStream(open || phase === 'stopping' ? sessionId ?? undefined : undefined)
   const progress = liveProgress(stream.run)
 
@@ -92,11 +77,6 @@ export function LivePage() {
     return () => window.clearInterval(timer)
   }, [recording])
 
-  // If the page goes away with a recording open anyway, keep it without notes, unless Make notes was
-  // chosen: then the notes are still made. During a start, keeping cancels it: everything granted
-  // is released (and a session made meanwhile is deleted).
-  // Until that settles the app's menu bar says the upload is finishing, so quitting still asks
-  // (capture/menuBar.ts: chunks not yet uploaded are only in this window's memory).
   useEffect(() => () => menuBar.left(capture.current?.keep()), [])
 
   async function start(mode: CaptureMode) {
@@ -104,16 +84,11 @@ export function LivePage() {
     setDiscarded(false)
     setMode(mode)
     setPhase('requesting')
-    // Made only once what is recorded has been granted (LiveCapture.start): asking for
-    // permissions leaves no session behind, whatever happens meanwhile.
     const createSession = async () => {
       const { data } = await act(api.POST('/api/live', { body: { title: title.trim() || 'Live session' } }))
       if (!data) throw new CaptureError(UNREACHABLE)
       return data.id
     }
-    // The mic went away or the recorder failed: finish. Sharing stopped from the browser's or
-    // macOS's own controls only turns the screen off. Held before start() so leaving the page
-    // during a prompt cancels the start.
     const live = new LiveCapture(createSession, {
       onEnded: () => void stopRef.current(),
       onScreenEnded: () => setDisplay(null),
@@ -130,20 +105,12 @@ export function LivePage() {
       setNow(t)
       setPhase('recording')
     } catch (err) {
-      // Nothing was captured, and the capture module has deleted any session it had made.
       capture.current = null
       setPhase('idle')
       setError(captureError(err))
     }
   }
 
-  /**
-   * Stop capture and hand over to processing, or with `keep` (leaving the page) keep the recording
-   * without notes, for the library. Stopping tears capture down, uploads what is still queued,
-   * then tells the backend. A failure leaves the recording stopped but unfinished: the page then
-   * offers to retry (`finish`), which resends what is still queued and the request through the
-   * same capture. Resolves to the session's id, or null.
-   */
   async function stop(keep = false): Promise<string | null> {
     const live = capture.current
     if (!live || stopping.current) return null
@@ -155,7 +122,6 @@ export function LivePage() {
       capture.current = null
       return live.sessionId ?? null
     } catch (err) {
-      // Kept, so finishing again retries the uploads still queued as well as the end request.
       setPhase('unfinished')
       setError(finishError(err))
       return null
@@ -165,7 +131,6 @@ export function LivePage() {
   }
 
   async function finish() {
-    // Unfinished only after a failed stop(), which leaves the capture in place to retry with.
     const live = capture.current
     if (!live || !sessionId) return
     setPhase('finishing')
@@ -180,7 +145,6 @@ export function LivePage() {
     }
   }
 
-  /** Stop: capture pauses and every device is let go; the stopped page offers what next. */
   function pause() {
     const live = capture.current
     if (!live || phase !== 'recording') return
@@ -192,7 +156,6 @@ export function LivePage() {
     setPhase('stopped')
   }
 
-  /** Capture again in the same recording (if the screen was on, the picker opens again). */
   async function continueRecording() {
     const live = capture.current
     if (!live || phase !== 'stopped' || busy) return
@@ -207,12 +170,11 @@ export function LivePage() {
       setNow(t)
       setPhase('recording')
     } catch (err) {
-      setPhase('stopped') // still stopped: nothing recorded is lost
+      setPhase('stopped')
       setError(captureError(err))
     }
   }
 
-  /** Turn the screen on: the picker opens; the recording carries on whatever is chosen. */
   async function shareScreen() {
     const live = capture.current
     if (!live || phase !== 'recording' || sharing || display) return
@@ -220,7 +182,7 @@ export function LivePage() {
     setError(null)
     try {
       const shared = await live.startScreen()
-      if (shared) setDisplay(shared) // null: stopped meanwhile, so nothing is shared
+      if (shared) setDisplay(shared)
     } catch (err) {
       setError(captureError(err))
     } finally {
@@ -228,17 +190,12 @@ export function LivePage() {
     }
   }
 
-  /** Turn the screen off: the recording carries on with the audio. */
   function stopSharing() {
     if (phase !== 'recording') return
     capture.current?.stopScreen()
     setDisplay(null)
   }
 
-  /**
-   * Throw the recording away (its session is deleted); `again` starts a new one with the same
-   * title and mode. A failed delete leaves the page stopped with the error, to try again.
-   */
   async function discard(again: boolean) {
     const live = capture.current
     setConfirming(null)
@@ -248,7 +205,7 @@ export function LivePage() {
     try {
       await live.discard()
     } catch (err) {
-      setError(captureError(err)) // not deleted: the recording is still there, stopped
+      setError(captureError(err))
       return
     } finally {
       setDiscarding(false)
@@ -263,14 +220,11 @@ export function LivePage() {
   }
 
   async function stopAndOpen() {
-    // The id comes from the capture: `sessionId` state can lag if capture ends right after starting.
     const id = await stop()
     if (id) navigate(`/sessions/${id}`)
   }
   const stopRef = useRef(stopAndOpen)
-  // The menu bar's commands for this page (capture/menuBar.ts), always the latest render's.
   const commandRef = useRef<(command: RecordCommand) => void>(() => {})
-  /** Start, unless a recording is already under way (or stopped and not yet finished). */
   function startIfIdle(mode: CaptureMode) {
     if (phase === 'idle') void start(mode)
   }
@@ -290,10 +244,6 @@ export function LivePage() {
     }
   })
 
-  // The desktop app's menu bar icon (capture/menuBar.ts). It shows what this page is doing, and
-  // its Record and Stop go through the same start() and stop as the buttons here.
-  // While recording, the app is told when the clock would have started without the stopped time,
-  // so its clock shows the same elapsed time as the page's.
   const reportedStart = recording ? clockStart(clock) : 0
   const screenOn = recording && display !== null
   useEffect(() => {
@@ -303,7 +253,6 @@ export function LivePage() {
   const startRequest = (location.state as LiveLocationState | null)?.startRequest
   const handledStart = useRef<number | undefined>(undefined)
   useEffect(() => {
-    // Once per request: StrictMode runs effects twice, and a reload keeps the location state.
     if (!startRequest || handledStart.current === startRequest.id) return
     handledStart.current = startRequest.id
     navigate('.', { replace: true, state: null })
@@ -418,8 +367,6 @@ export function LivePage() {
           {phase === 'stopping' ? 'Finishing' : stopped ? 'Stopped' : 'Recording'}
           <span className="num" aria-hidden="true">{formatClock(elapsed)}</span>
         </span>
-        {/* In a narrower window each shows as its icon; the words stay for screen readers and
-            on hover (index.css). */}
         <span className="capture-status">
           {display && !stopped && <CaptureItem icon="screen" words="Screen shared" />}
           <CaptureItem icon="mic" words={`Microphone ${stopped ? 'off' : 'on'}`} />
@@ -446,7 +393,6 @@ export function LivePage() {
               disabled={sharing}
               aria-label={sharing ? 'Choose what to share' : 'Share screen'}
             >
-              {/* On a phone-width window only the icon shows (index.css). */}
               <Icon name="screen" /> <span className="btn-label">{sharing ? 'Choose what to share…' : 'Share screen'}</span>
             </button>
           ))}
@@ -507,7 +453,6 @@ export function LivePage() {
         )}
         {display && !stopped && (
           <video
-            // The recording view mounts after capture starts, so attach the stream on mount.
             ref={(el) => {
               if (el && el.srcObject !== display) el.srcObject = display
             }}
@@ -560,7 +505,6 @@ export function LivePage() {
   )
 }
 
-/** One thing being recorded (or not) in the recording bar: its icon, and its words. */
 function CaptureItem(props: { icon: IconName; words: string; warn?: boolean }) {
   return (
     <span className={props.warn ? 'warn' : undefined} title={props.words}>

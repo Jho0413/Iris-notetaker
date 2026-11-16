@@ -1,7 +1,3 @@
-// Light, dark or system theme (frontend/DESIGN.md). The choice is stored in localStorage; the
-// resolved theme is written to <html data-theme>. index.html runs the same resolution inline
-// before first paint, so dark mode never flashes white. The theme is the screen's only: printing
-// (Export PDF, the browser's Print) always uses the light colours (index.css), whatever it is.
 import { useEffect, useState } from 'react'
 
 export type ThemeChoice = 'system' | 'light' | 'dark'
@@ -40,9 +36,7 @@ export function useTheme(): [ThemeChoice, (choice: ThemeChoice) => void] {
     try {
       if (next === 'system') localStorage.removeItem(THEME_KEY)
       else localStorage.setItem(THEME_KEY, next)
-    } catch {
-      // Storage can be unavailable (private mode); the choice still applies for this visit.
-    }
+    } catch {}
     setChoice(next)
   }
 

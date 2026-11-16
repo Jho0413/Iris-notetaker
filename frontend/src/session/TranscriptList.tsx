@@ -1,7 +1,6 @@
 import { formatClock } from '../lib/format'
 import type { Segment } from './state'
 
-/** Transcript segments with start times. */
 export function TranscriptList({ segments }: { segments: Segment[] }) {
   return (
     <ol className="transcript">

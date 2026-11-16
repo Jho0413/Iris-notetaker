@@ -1,11 +1,7 @@
-// User-facing messages for capture failures. getDisplayMedia and getUserMedia reject with
-// DOMExceptions whose `name` says what went wrong; the default messages are not actionable.
-
 import { irisApp } from '../api/appBridge.ts'
 
 export type CaptureDevice = 'screen' | 'microphone'
 
-/** A capture failure with a message that can be shown to the user as is. */
 export class CaptureError extends Error {
   constructor(message: string, options?: { cause?: unknown }) {
     super(message, options)
@@ -50,18 +46,15 @@ export function describeCaptureError(
     case 'TrackStartError':
       return `The ${device} could not be started. Another app may be using it.`
     case 'AbortError':
-      // The desktop app's picker cancelled (or closed without the permission): Electron rejects
-      // every refused request as AbortError ("Invalid capture constraints"), never NotAllowedError.
       if (desktopApp && device === 'screen') return DESKTOP_SCREEN_REFUSED
       return `Starting the ${device} was interrupted. Try again.`
     case 'CaptureError':
       return (err as Error).message
-    default: // the browser's own message isn't written for users: never shown
+    default:
       return `The ${device} couldn't be started. Try again.`
   }
 }
 
-/** The first audio format MediaRecorder supports that the backend can finalize (WebM). */
 export function pickAudioMimeType(isTypeSupported: (type: string) => boolean): string | null {
   for (const type of ['audio/webm;codecs=opus', 'audio/webm']) {
     if (isTypeSupported(type)) return type

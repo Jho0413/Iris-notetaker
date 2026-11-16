@@ -45,7 +45,6 @@ test('stages promoted at stop are done, marked live and not timed', () => {
   assert.equal(run.stages.ingest.promoted, undefined)
   assert.equal(stageSeconds(run.stages.ingest), 1)
   assert.equal(run.stages.write.status, 'running')
-  // The next run starts fresh: a stage that runs there is no longer marked live.
   const next = reduceEvents([...events, ev('status', { status: 'processing' }),
     ev('stage_started', { stage: 'transcribe' })])
   assert.equal(next.stages.transcribe.promoted, undefined)
@@ -54,9 +53,7 @@ test('stages promoted at stop are done, marked live and not timed', () => {
 test('a promoted transcript is counted from the backend, not from the parts seen since stop', () => {
   const chunk = (i: number) => ev('transcript_chunk', { chunk: i, segments: [{ start: i, end: i + 1, text: 'x' }] })
   const events = [
-    // Recording: the live audio lane's windows.
     ...[0, 1, 2, 3].map(chunk),
-    // Stop: this run's counts reset, then the window cut at stop arrives.
     ev('status', { status: 'processing' }),
     chunk(4),
     ev('stage_started', { stage: 'transcribe', promoted: true }),
@@ -64,14 +61,12 @@ test('a promoted transcript is counted from the backend, not from the parts seen
   ]
   const run = reduceEvents(events)
   assert.equal(stageDetail('transcribe', run), '412 segments · live')
-  // One segment, none (said nothing) and a malformed count.
   const one = reduceEvents([...events.slice(0, -1), ev('stage_finished', { stage: 'transcribe', promoted: true, segments: 1 })])
   assert.equal(stageDetail('transcribe', one), '1 segment · live')
   const none = reduceEvents([...events.slice(0, -1), ev('stage_finished', { stage: 'transcribe', promoted: true, segments: 0 })])
   assert.equal(stageDetail('transcribe', none), 'live')
   const bad = reduceEvents([...events.slice(0, -1), ev('stage_finished', { stage: 'transcribe', promoted: true, segments: 'many' })])
   assert.equal(stageDetail('transcribe', bad), '1 part · live')
-  // A later run that transcribes for real counts its parts again.
   const rerun = reduceEvents([...events, ev('status', { status: 'processing' }),
     ev('stage_started', { stage: 'transcribe' }), chunk(0), chunk(1), ev('stage_finished', { stage: 'transcribe' })])
   assert.equal(stageDetail('transcribe', rerun), '2 parts')
@@ -140,14 +135,11 @@ test('finished notes and run events merge into one figure list', () => {
   const [fig] = figureList(run, notes)
   assert.equal(fig.verified, false)
   assert.equal(fig.t, 12)
-  assert.equal(figureList(emptyRun(), notes)[0].verified, undefined) // unknown without events
-  // A redraw in the finished notes passed its check, events or not.
+  assert.equal(figureList(emptyRun(), notes)[0].verified, undefined)
   const redrawn = { ...notes, visuals: [{ ...notes.visuals[0], render_as: 'svg' as const }] }
   assert.equal(figureList(emptyRun(), redrawn)[0].verified, true)
   assert.equal(provenance(figureList(emptyRun(), redrawn)[0]), 'verified')
-  // A screenshot in older notes may be a fallback crop: no label without this run's events.
   assert.equal(provenance(figureList(emptyRun(), notes)[0]), undefined)
-  // Notes now say how each figure was made: an original image is labelled as such, events or not.
   const original = { ...notes, visuals: [{ ...notes.visuals[0], verified: false }] }
   assert.equal(provenance(figureList(emptyRun(), original)[0]), 'unverified')
   const requested = { ...notes, visuals: [{ ...notes.visuals[0], verified: true }] }
@@ -183,7 +175,6 @@ test('resuming after a backend restart starts clean, even without a failed statu
   const resumed = reduceEvents([...old, ...fresh])
   assert.deepEqual(resumed, reduceEvents(fresh))
   assert.equal(resumed.stages.write.status, 'running')
-  // Replaying everything, both runs included, still lands on the latest run.
   assert.deepEqual(reduceEvents([...old, ...fresh, ...old, ...fresh]), resumed)
 })
 
@@ -199,7 +190,6 @@ test('a failure in a parallel group marks only the named stage failed', () => {
 })
 
 test('UI states cover recording, processing, polishing, stalled, finished and failed', () => {
-  // Sections written are progress, not a readable draft: the state stays processing.
   const writing = reduceEvents([ev('status', { status: 'processing' }),
     ev('stage_started', { stage: 'write' }),
     ev('notes_updated', { final: false, completed_parts: 2, total_parts: 4 })])
@@ -208,18 +198,15 @@ test('UI states cover recording, processing, polishing, stalled, finished and fa
   const final = reduceEvents([ev('notes_updated', { final: false, completed_parts: 4,
     total_parts: 4 }), ev('notes_updated', { final: true })])
   assert.equal(final.notes?.completed, 4)
-  // Assembled, then polished: still not shown until done.
   assert.deepEqual(uiState(session, final),
     { kind: 'polishing', label: 'Polishing notes', stage: 'synthesize' })
 
   const rec = { ...session, status: 'recording' as const }
   assert.equal(uiState(rec, emptyRun(), { capturing: true }).kind, 'recording')
   assert.equal(uiState(rec, emptyRun()).kind, 'recording-orphan')
-  // Stopped without notes (its page went away): the same whether or not a page is capturing.
   const stopped = { ...session, status: 'stopped' as const }
   assert.deepEqual(libraryState(stopped), { kind: 'stopped', label: 'Stopped' })
   assert.equal(uiState(stopped, emptyRun(), { capturing: true }).kind, 'stopped')
-  // Its status event reaches an open session page, and making notes then starts a run.
   const stopEvents = [ev('status', { status: 'stopped' })]
   assert.equal(uiState(rec, reduceEvents(stopEvents)).kind, 'stopped')
   const making = reduceEvents([...stopEvents, ev('status', { status: 'processing' })])
@@ -229,7 +216,6 @@ test('UI states cover recording, processing, polishing, stalled, finished and fa
   assert.equal(uiState({ ...session, status: 'created' }, emptyRun()).kind, 'starting')
   assert.equal(uiState({ ...session, status: 'done' }, emptyRun()).kind, 'finished')
 
-  // The latest status event wins over a stale stored session.
   const done = reduceEvents([ev('status', { status: 'done' })])
   assert.equal(uiState(session, done).kind, 'finished')
 })
@@ -246,7 +232,6 @@ test('the synthesis pass is the last step, after the notes are assembled', () =>
   assert.equal(run.stages.assemble.status, 'done')
   assert.equal(run.stages.synthesize.status, 'running')
   assert.equal(uiState(session, run).kind, 'polishing')
-  // Synthesis re-assembles: a second final notes event changes nothing but stays polishing.
   const again = reduceEvents([ev('status', { status: 'processing' }),
     ev('stage_started', { stage: 'synthesize' }), ev('notes_updated', { final: true }),
     ev('stage_finished', { stage: 'synthesize' })])
@@ -255,7 +240,6 @@ test('the synthesis pass is the last step, after the notes are assembled', () =>
   const done = reduceEvents([ev('status', { status: 'processing' }),
     ev('stage_finished', { stage: 'synthesize' }), ev('status', { status: 'done' })])
   assert.equal(uiState(session, done).kind, 'finished')
-  // A stalled synthesis resumes from synthesis; a library row names the step.
   const stalled = uiState({ ...session, current_stage: 'synthesize' }, emptyRun(), { stalled: true })
   assert.equal(stalled.fromStage, 'synthesize')
   assert.equal(libraryState({ ...session, current_stage: 'synthesize' }).label, 'Polishing notes')
@@ -285,15 +269,12 @@ test('while processing, the label is the running step and its count', () => {
     ev('visual_rendered', { id: 'v2', path: 'visuals/v2.svg' }),
     ev('notes_updated', { final: false, completed_parts: 1, total_parts: 3 }),
   ])
-  // Write and render run side by side: the chip names the later one, the page shows both.
   assert.deepEqual(currentSteps(session, run), ['write', 'render'])
   assert.equal(uiState(session, run).label, 'Redrawing figures · 2 of 3')
   assert.equal(stepLine('write', run), 'Writing notes · 1 of 3')
   assert.equal(stepLine('assemble', run), 'Putting the notes together')
-  // Counts are never announced one by one, only the state and step.
   assert.equal(announcement(uiState(session, run)), 'Processing · Redrawing figures')
   assert.equal(announcement(uiState({ ...session, status: 'done' }, emptyRun())), 'Finished')
-  // Between two steps (or without events) the stored step stands in.
   assert.deepEqual(currentSteps({ ...session, current_stage: 'align' }, emptyRun()), ['align'])
   assert.deepEqual(currentSteps(session, emptyRun()), [])
 })
@@ -307,12 +288,10 @@ test('the progress view replaces the notes in every state but finished', () => {
   assert.deepEqual(views.processing, { heading: 'Making your notes', active: true })
   assert.deepEqual(views.polishing, { heading: 'Polishing your notes', active: true })
   assert.equal(views.starting?.active, true)
-  // Failed, stalled, orphaned and stopped: the banner says what to do; no timer or step line.
   for (const k of ['failed', 'stalled', 'recording-orphan', 'stopped']) {
     assert.equal(views[k]?.active, false, k)
     assert.ok(views[k]?.heading, k)
   }
-  // A re-run of a finished session is processing again, so its old notes are hidden too.
   const rerun = reduceEvents([ev('status', { status: 'done' }), ev('status', { status: 'processing' })])
   assert.notEqual(progressView(uiState({ ...session, status: 'done' }, rerun).kind), null)
 })
@@ -329,7 +308,6 @@ test('step statuses fall back to the stored session without events', () => {
   assert.equal(stepStatus('align', emptyRun(), stored), 'done')
   assert.equal(stepStatus('select', emptyRun(), stored), 'pending')
   assert.equal(stepStatus('write', emptyRun(), { ...stored, finished: true }), 'done')
-  // Events win, even a pending step.
   const run = reduceEvents([ev('stage_started', { stage: 'ingest' })])
   assert.equal(stepStatus('ingest', run, { ...stored, hasEvents: true }), 'running')
   assert.equal(stepStatus('align', run, { ...stored, hasEvents: true }), 'pending')
@@ -353,9 +331,7 @@ test('the live progress line shows only what is non-zero', () => {
   assert.equal(line(), 'Transcribed to 4:30 · 3 screens · 2 figures read · 1 section written')
   events.push(ev('notes_updated', { final: false, completed_parts: 2, live: true }))
   assert.match(line(), /2 sections written$/)
-  // Replayed history (a reconnect) changes nothing.
   assert.equal(liveProgress(reduceEvents([...events, ...events])), line())
-  // Sections can be written before anything is on screen.
   assert.equal(liveProgress(reduceEvents([ev('notes_updated', { final: false, completed_parts: 1,
     live: true })])), '1 section written')
 })
@@ -389,8 +365,6 @@ test('formatting and error helpers', () => {
   assert.equal(sessionLength(session, []), undefined)
   assert.equal(sessionLength({ ...session, duration_s: 90 }, segs), 90)
 })
-
-// --- Failures: only our own messages ------------------------------------------------------------
 
 const SECRET = 'render failed: APIConnectionError: SECRET-sk-proj-42 openai at api.openai.com'
 
@@ -428,7 +402,6 @@ test('an input failure shows its own message and what to do', () => {
   assert.deepEqual(view, {
     message, kind: 'input', stage: 'ingest', headline: "Iris couldn't use this recording",
   })
-  // From this run's error event too.
   const run = reduceEvents([ev('status', { status: 'processing' }), ev('stage_started', { stage: 'ingest' }),
     ev('error', { message, kind: 'input', stage: 'ingest' })])
   assert.equal(failureView(failedSession({}), run).kind, 'input')
@@ -437,17 +410,14 @@ test('an input failure shows its own message and what to do', () => {
 })
 
 test('raw text from a crafted session or event is never shown', () => {
-  // A session whose message isn't on the list (say, an old raw error) gets the generic message.
   const crafted = failedSession({ failure_message: SECRET as Session['failure_message'], failure_kind: 'input' })
   const view = failureView(crafted, emptyRun())
   assert.equal(view.message, GENERIC_FAILURE)
-  assert.equal(view.kind, 'general') // an unknown message can't claim to be an input problem
+  assert.equal(view.kind, 'general')
   assert.ok(!shown(view).includes('SECRET') && !shown(view).includes('openai'))
-  // An old session with the raw `error` field and nothing else.
   const old = { ...failedSession({}), error: SECRET } as Session
   assert.ok(!shown(failureView(old, emptyRun())).includes('SECRET'))
   assert.ok(!shown(uiState(old, emptyRun())).includes('SECRET'))
-  // An error event carrying raw text: dropped for the generic message.
   const run = reduceEvents([ev('stage_started', { stage: 'write' }),
     ev('error', { message: SECRET, kind: 'input', stage: 'write' })])
   assert.deepEqual(run.failure, { message: GENERIC_FAILURE, kind: 'general', stage: 'write' })
@@ -483,12 +453,9 @@ test('the meta line names the type, source, length and date, leaving out what is
   const line = sessionMetaLine(today, 'lecture', 75)
   assert.deepEqual(line.slice(0, 3), ['Lecture', 'Upload', '1:15'])
   assert.match(line[3], /^Today /)
-  // No notes yet (no type), no length: just the source and date.
   assert.equal(sessionMetaLine(today).length, 2)
   assert.equal(sessionMetaLine(today, '', undefined)[0], 'Upload')
-  // A source the UI has no word for is shown as it is; a broken date is left out.
   const odd = { ...session, source: 'zoom' as Session['source'], created_at: 'not a date' }
   assert.deepEqual(sessionMetaLine(odd), ['zoom'])
-  // A zero length is a length.
   assert.deepEqual(sessionMetaLine(odd, undefined, 0), ['zoom', '0:00'])
 })

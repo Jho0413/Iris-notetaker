@@ -3,7 +3,6 @@ import test from 'node:test'
 import createClient from 'openapi-fetch'
 import { act, engineAnswersOnly, engineDidNotAnswer } from '../src/api/request.ts'
 
-/** A typed client like the app's, whose requests all get `answer` instead of reaching a server. */
 function clientAnswering(answer: () => Promise<Response>) {
   const client = createClient({ baseUrl: 'http://iris.test', fetch: answer })
   client.use(engineAnswersOnly)
@@ -13,8 +12,8 @@ function clientAnswering(answer: () => Promise<Response>) {
 const reply = (status: number, body: string | null = '{}') => async () => new Response(body, { status })
 
 test("what the dev proxy or the app's handler answers for a missing engine means no answer", () => {
-  assert.equal(engineDidNotAnswer(502), true) // Vite's proxy, or the app's handler: no reply
-  assert.equal(engineDidNotAnswer(503), true) // the app's handler: the engine isn't running
+  assert.equal(engineDidNotAnswer(502), true)
+  assert.equal(engineDidNotAnswer(503), true)
 })
 
 test("the engine's own answers, errors included, stay as they are", () => {
@@ -42,7 +41,6 @@ test("an action the engine answers keeps the engine's status and answer", async 
 })
 
 test('a load or save answered in place of the engine rejects, as a network failure does', async () => {
-  // Pages that call the client directly catch this the same way they catch a network failure.
   await assert.rejects(clientAnswering(reply(503)).GET('/api/sessions' as never), /didn't answer/)
   const { error, response } = await clientAnswering(reply(404, '{"detail":"x"}')).GET('/api/x' as never)
   assert.ok(error)

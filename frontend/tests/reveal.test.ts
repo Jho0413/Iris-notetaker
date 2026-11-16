@@ -10,7 +10,6 @@ test('an item already in view needs no scroll', () => {
 })
 
 test('an item cut off at the end scrolls on just enough to show it', () => {
-  // The Figures tab at 320px with long counts: 187–270 in a row that ends at 231.
   assert.equal(revealDelta({ left: 187, right: 270 }, view), 39)
 })
 

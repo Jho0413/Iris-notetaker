@@ -43,7 +43,6 @@ async function fetchSession(id: string): Promise<Session | 'not-found' | 'unreac
   return data ?? (status === 404 ? 'not-found' : 'unreachable')
 }
 
-/** Route entry: a fresh page per session id, so no state leaks between sessions. */
 export function SessionPage() {
   const { id } = useParams<{ id: string }>()
   return id ? <SessionView key={id} id={id} /> : null
@@ -65,14 +64,12 @@ function SessionView({ id }: { id: string }) {
   const [busy, setBusy] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [renaming, setRenaming] = useState(false)
-  const [detailsOpen, setDetailsOpen] = useState(false) // below 1120px, where the rail folds away
+  const [detailsOpen, setDetailsOpen] = useState(false)
   const [editing, setEditing] = useState(false)
-  // Dropping the user's edits: "Restore generated notes", or "Use the new notes" after a re-run.
   const [confirmDrop, setConfirmDrop] = useState<'restore' | 'use-new' | null>(null)
 
   const [reload, setReload] = useState(0)
 
-  // The stored session follows status changes and errors.
   useEffect(() => {
     let live = true
     void fetchSession(id).then((result) => {
@@ -88,12 +85,9 @@ function SessionView({ id }: { id: string }) {
     }
   }, [id, run.status, run.failure, reload])
 
-  // Only the finished notes are shown, so notes and transcript are fetched once the session is
-  // done. Leaving done (a re-run) drops them: the old run's notes are never shown meanwhile.
   const done = (run.status ?? session?.status) === 'done'
   const [wasDone, setWasDone] = useState(done)
   if (done !== wasDone) {
-    // Reset while rendering (not in an effect), so stale notes never reach the screen.
     setWasDone(done)
     if (!done) {
       setNotes(null)
@@ -116,7 +110,6 @@ function SessionView({ id }: { id: string }) {
     }
   }, [id, done, reload])
 
-  // Cost: fetched when a step or the session finishes, not on every event.
   const status = run.status ?? session?.status
   const usage = useSessionUsage(id, usageRefreshKey(run, status))
   const cost = usage && status ? usageCost(usage, status) : null
@@ -178,7 +171,6 @@ function SessionView({ id }: { id: string }) {
     setReload((n) => n + 1)
   }
 
-  /** After a re-run: keep the edited version, now based on the new notes. */
   async function keepEdits() {
     if (!notes) return
     setBusy(true)
@@ -250,10 +242,8 @@ function SessionView({ id }: { id: string }) {
   const fromLabel = ui.fromStage ? STAGE_LABELS[ui.fromStage] : 'the start'
   const failure = ui.kind === 'failed' ? failureView(session, run) : null
   const again = againLink(session.source)
-  // Once the notes are shown in tabs, Details sits beside them below 1120px instead of in a bar.
   const tabsShown = !progress && !(editing && notes)
   const toggleDetails = () => setDetailsOpen((open) => !open)
-  // One set of details, shown in the rail or (below 1120px, with tabs) under the tabs row.
   const runDetails: RunDetailsProps = {
     run,
     finished,
@@ -287,7 +277,6 @@ function SessionView({ id }: { id: string }) {
           ) : (
             <>
               <div className="title-line">
-                {/* The title is the control; the pencil gives keyboard users the same. */}
                 <h1 className="title-text" onClick={() => setRenaming(true)}>
                   {shownTitle(session.title)}
                 </h1>
@@ -305,8 +294,6 @@ function SessionView({ id }: { id: string }) {
                 {sessionMetaLine(session, notes?.session_type, length).map((part, i) => (
                   <span key={i} className="num">{part}</span>
                 ))}
-                {/* Below 860px the status moves here from the actions (index.css), so the buttons
-                    keep a line of their own; only one of the two is ever shown. */}
                 <span className="meta-status">
                   <StatusChip state={ui} />
                 </span>
@@ -450,8 +437,6 @@ function SessionView({ id }: { id: string }) {
                     aria-controls="session-details"
                     onClick={toggleDetails}
                   >
-                    {/* The same word open or closed (aria-expanded says which), so the row's width
-                        never changes on a phone. */}
                     {detailsLabel(false)}
                   </button>
                 }
@@ -461,8 +446,6 @@ function SessionView({ id }: { id: string }) {
                   { id: 'figures', label: 'Figures', count: figures.length ? String(figures.length) : undefined },
                 ]}
               />
-              {/* Opened by Details beside the tabs: just below it, so the button stays where it was
-                  pressed (index.css shows this below 1120px only; the rail shows it above). */}
               <div className="tabs-details-panel" id="session-details" hidden={!detailsOpen}>
                 <RunDetails {...runDetails} />
               </div>
@@ -540,10 +523,6 @@ function SessionView({ id }: { id: string }) {
   )
 }
 
-/**
- * Until the notes are finished, the main column shows where processing is instead of any notes:
- * the state, the current step, every step, and how long the run has taken. The step list keeps one row per step, so nothing moves as steps advance.
- */
 function ProgressView({ view, session, run, stream }: {
   view: { heading: string; active: boolean }
   session: Session

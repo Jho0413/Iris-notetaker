@@ -1,4 +1,3 @@
-// LiveCapture lifecycle with fake browser APIs (no real devices, recorder or network).
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { CaptureError } from '../src/capture/captureErrors.ts'
@@ -23,10 +22,9 @@ class FakeTrack extends EventTarget {
     this.kind = kind
   }
   stop() {
-    this.stopped = true // as in browsers: stop() ends the track without an 'ended' event
+    this.stopped = true
     this.readyState = 'ended'
   }
-  /** The source went away on its own (sharing stopped, macOS refused it). */
   end() {
     this.readyState = 'ended'
     this.dispatchEvent(new Event('ended'))
@@ -59,7 +57,7 @@ class FakeRecorder extends EventTarget {
     this.ondataavailable?.({ data: new Blob([text]) })
   }
   requestData() {
-    this.emit('flushed') // what the recorder held, delivered at once
+    this.emit('flushed')
   }
   pause() {
     this.state = 'paused'
@@ -69,7 +67,7 @@ class FakeRecorder extends EventTarget {
   }
   stop() {
     this.state = 'inactive'
-    this.emit('last') // MediaRecorder delivers the final chunk before 'stop'
+    this.emit('last')
     queueMicrotask(() => this.dispatchEvent(new Event('stop')))
   }
 }
@@ -89,7 +87,7 @@ function setup(overrides: Record<string, unknown> = {}) {
   const mic = new FakeTrack('audio')
   let onFrame: ((jpeg: Blob, at: number) => void) | undefined
   let failing = (_url: string) => false
-  const mixed: FakeMixer[] = [] // every mixer made, with the sources added to it
+  const mixed: FakeMixer[] = []
   const env = {
     mediaDevices: {
       getDisplayMedia: async () => stream(display),
@@ -134,7 +132,6 @@ function setup(overrides: Record<string, unknown> = {}) {
 
 interface FakeMixer {
   stream: ReturnType<typeof stream>
-  /** The sources mixed in now. */
   live: ReturnType<typeof stream>[]
   closed: boolean
   add(s: ReturnType<typeof stream>): () => void
@@ -159,11 +156,9 @@ function fakeMixer(): FakeMixer {
 
 const fast = { drainTimeoutMs: 200, uploads: { baseDelayMs: 1, maxDelayMs: 5 } }
 
-/** Sessions made by the captures below (`POST /live` stands in as a counter). */
 let sessionsMade = 0
 
 function capture(env: object, options = {}) {
-  // The fake env stands in for the browser APIs; its shapes are only what LiveCapture uses.
   const createSession = async () => {
     sessionsMade++
     return 's1'
@@ -171,10 +166,6 @@ function capture(env: object, options = {}) {
   return new LiveCapture(createSession, { ...fast, ...options }, env as never)
 }
 
-/**
- * `performance.now()`, which the recording's clock reads, moved by hand: times are exact, so a
- * slow machine can't change what a test sees.
- */
 function fakeClock(tc: import('node:test').TestContext) {
   let ms = 0
   tc.mock.method(performance, 'now', () => ms)
@@ -200,7 +191,6 @@ test('records, then stop uploads the last chunk and ends with the chunk count', 
   assert.equal(end.length, 1)
   assert.deepEqual(JSON.parse(end[0].body as string), { audio_chunks: 3, allow_gaps: false })
   assert.ok(t.display.stopped && t.mic.stopped)
-  // Finished: leaving the page no longer ends anything, and frames are no longer queued.
   t.env.page.dispatchEvent(new Event('pagehide'))
   t.frame(performance.now())
   assert.equal(t.beacons.length, 0)
@@ -226,7 +216,7 @@ test('a failed stop can be retried without losing what was recorded', async () =
   await assert.rejects(live.stop(), /haven't reached Iris/)
   assert.equal(t.posted('/end').length, 0)
 
-  t.failWhen(() => false) // the backend is back
+  t.failWhen(() => false)
   await live.stop()
   assert.equal(t.posted('/audio').length, 2)
   assert.deepEqual(JSON.parse(t.posted('/end')[0].body as string), { audio_chunks: 2, allow_gaps: false })
@@ -254,12 +244,12 @@ test('screen sharing stopped from the browser turns the screen off; the recordin
   assert.equal(screenEnded, 1)
   assert.deepEqual(reasons, [], 'only Stop ends a recording')
   assert.ok(!t.mic.stopped, 'the audio carries on')
-  t.frame(performance.now()) // none after the share ended
+  t.frame(performance.now())
   FakeRecorder.created[0].emit('a')
   await tick()
   assert.deepEqual(frameShares(t), [1])
   const stopping = live.stop()
-  t.mic.dispatchEvent(new Event('ended')) // ignored while stopping
+  t.mic.dispatchEvent(new Event('ended'))
   await stopping
   assert.deepEqual(reasons, [])
   assert.equal(t.posted('/end').length, 1)
@@ -278,15 +268,14 @@ test('leaving the page while recording stops the session without making notes', 
   await capture(t.env).start('screen')
   const unload = new Event('beforeunload', { cancelable: true })
   t.env.page.dispatchEvent(unload)
-  assert.equal(unload.defaultPrevented, true) // the browser asks "leave site?"
+  assert.equal(unload.defaultPrevented, true)
   t.env.page.dispatchEvent(new Event('pagehide'))
   assert.equal(t.beacons.length, 1)
   assert.equal(t.beacons[0].url, '/api/live/s1/stop')
-  // A JSON body, never an empty one: the desktop app can't forward an empty body.
   assert.equal(t.beacons[0].body.type, 'application/json')
   assert.deepEqual(JSON.parse(await t.beacons[0].body.text()), {})
   await tick()
-  assert.equal(t.calls.filter((c) => c.method === 'DELETE').length, 0) // what was recorded is kept
+  assert.equal(t.calls.filter((c) => c.method === 'DELETE').length, 0)
   assert.equal(t.posted('/end').length, 0)
 })
 
@@ -295,14 +284,14 @@ test('leaving the page after Make notes, while its upload is still finishing, ma
   const live = capture(t.env)
   await live.start('screen')
   FakeRecorder.created[0].emit('a')
-  t.failWhen((url) => url.includes('/audio')) // the upload can't finish yet
+  t.failWhen((url) => url.includes('/audio'))
   const making = live.stop()
   t.env.page.dispatchEvent(new Event('pagehide'))
   assert.equal(t.beacons.length, 1)
-  assert.equal(t.beacons[0].url, '/api/live/s1/end') // Make notes was asked for
+  assert.equal(t.beacons[0].url, '/api/live/s1/end')
   assert.deepEqual(JSON.parse(await t.beacons[0].body.text()), { allow_gaps: true })
   await assert.rejects(making)
-  t.failWhen(() => false) // let the queued upload land, so nothing is left retrying
+  t.failWhen(() => false)
   await live.stop()
 })
 
@@ -311,7 +300,7 @@ test('leaving the page after Make notes failed still makes the notes', async () 
   const live = capture(t.env)
   await live.start('audio')
   t.failWhen((url) => url.endsWith('/end'))
-  await assert.rejects(live.stop(), /Iris isn't responding/) // the page shows Try again
+  await assert.rejects(live.stop(), /Iris isn't responding/)
   t.env.page.dispatchEvent(new Event('pagehide'))
   assert.deepEqual(t.beacons.map((b) => b.url), ['/api/live/s1/end'])
 })
@@ -329,12 +318,10 @@ test('keep (leaving the Live page) uploads the last chunk, then stops the sessio
   )
   const stop = t.posted('/stop')
   assert.equal(stop.length, 1)
-  // A JSON body, never an empty one: the desktop app can't forward an empty body.
   assert.deepEqual(JSON.parse(stop[0].body as string), {})
   assert.equal(t.posted('/end').length, 0)
-  assert.equal(t.calls.filter((c) => c.method === 'DELETE').length, 0) // what was recorded is kept
+  assert.equal(t.calls.filter((c) => c.method === 'DELETE').length, 0)
   assert.ok(t.display.stopped && t.mic.stopped)
-  // Kept: closing the tab afterwards neither asks nor sends anything more.
   const unload = new Event('beforeunload', { cancelable: true })
   t.env.page.dispatchEvent(unload)
   assert.equal(unload.defaultPrevented, false)
@@ -348,7 +335,7 @@ test('keep while stopped uploads what the recorder held, then stops the session'
   await live.start('audio')
   live.pause()
   await live.keep()
-  assert.equal(t.posted('/audio').length, 2) // what Stop flushed, and the recorder's last chunk
+  assert.equal(t.posted('/audio').length, 2)
   assert.equal(t.posted('/stop').length, 1)
   assert.equal(t.posted('/end').length, 0)
 })
@@ -358,17 +345,16 @@ test('the tab closed while a keep is still uploading stops the session; it never
   const live = capture(t.env)
   await live.start('screen')
   FakeRecorder.created[0].emit('a')
-  t.failWhen((url) => url.includes('/audio')) // the upload can't finish yet
+  t.failWhen((url) => url.includes('/audio'))
   const keeping = live.keep()
   t.env.page.dispatchEvent(new Event('pagehide'))
   assert.deepEqual(t.beacons.map((b) => b.url), ['/api/live/s1/stop'])
   assert.deepEqual(JSON.parse(await t.beacons[0].body.text()), {})
   await assert.rejects(keeping, /haven't reached Iris/)
-  // After the keep failed too.
   t.env.page.dispatchEvent(new Event('pagehide'))
   assert.deepEqual(t.beacons.map((b) => b.url), ['/api/live/s1/stop', '/api/live/s1/stop'])
 
-  t.failWhen(() => false) // the backend is back: trying again keeps, with every chunk
+  t.failWhen(() => false)
   await live.keep()
   assert.equal(t.posted('/audio').length, 2)
   assert.equal(t.posted('/stop').length, 1)
@@ -387,7 +373,6 @@ test('a failed keep request can be retried and still keeps', async () => {
   assert.equal(t.posted('/end').length, 0)
 })
 
-/** A capture whose stop request is answered with `status`; everything else as `setup()`. */
 function stopAnswering(status: number) {
   const t = setup()
   const fetchFn = t.env.fetch
@@ -401,7 +386,7 @@ function stopAnswering(status: number) {
 test('keep: a session no longer recording, or gone, counts as kept; any other refusal is an error', async () => {
   for (const [status, ok] of [
     [409, true],
-    [404, true], // deleted elsewhere: nothing left to keep, so retrying would fail forever
+    [404, true],
     [500, false],
   ] as const) {
     const live = stopAnswering(status)
@@ -435,7 +420,7 @@ test('keep after Make notes was chosen joins it, and retries the notes if they f
   u.failWhen((url) => url.endsWith('/end'))
   await assert.rejects(failed.stop())
   u.failWhen(() => false)
-  await failed.keep() // the page went away after Make notes failed: the notes are still made
+  await failed.keep()
   assert.equal(u.posted('/end').length, 1)
   assert.equal(u.posted('/stop').length, 0)
 })
@@ -452,7 +437,7 @@ test('Make notes after a keep makes them once the keep has settled', async () =>
     t.calls.filter((c) => c.url.endsWith('/stop') || c.url.endsWith('/end')).map((c) => c.url),
     ['/api/live/s1/stop', '/api/live/s1/end'],
   )
-  assert.equal(live.keep(), making) // and from then on, keeping joins the notes
+  assert.equal(live.keep(), making)
 })
 
 test('the tab closed while Make notes waits behind a keep still in flight makes the notes', async () => {
@@ -460,13 +445,13 @@ test('the tab closed while Make notes waits behind a keep still in flight makes 
   const live = capture(t.env)
   await live.start('audio')
   FakeRecorder.created[0].emit('a')
-  t.failWhen((url) => url.includes('/audio')) // the keep's upload can't finish yet
+  t.failWhen((url) => url.includes('/audio'))
   const keeping = live.keep()
   const making = live.stop()
   t.env.page.dispatchEvent(new Event('pagehide'))
   assert.deepEqual(t.beacons.map((b) => b.url), ['/api/live/s1/end'])
   assert.deepEqual(JSON.parse(await t.beacons[0].body.text()), { allow_gaps: true })
-  t.failWhen(() => false) // let the queued upload land, so nothing is left retrying
+  t.failWhen(() => false)
   await keeping.catch(() => {})
   await making
 })
@@ -522,9 +507,9 @@ test('stop while the mic prompt is open cancels the start instead of recording',
   })
   const live = capture(t.env)
   const starting = live.start('screen')
-  await new Promise((r) => setTimeout(r, 0)) // now waiting on the mic prompt
+  await new Promise((r) => setTimeout(r, 0))
   const stopping = live.stop()
-  grantMic(stream(mic)) // the user allows the mic after leaving the page
+  grantMic(stream(mic))
   await assert.rejects(starting, /cancelled/)
   await stopping
   assert.equal(FakeRecorder.created.length, 0)
@@ -569,9 +554,6 @@ test('if the backend still misses audio after every upload landed, it ends with 
   ])
 })
 
-// --- Partial starts: whatever was acquired before a failure is released at once ---------------
-
-/** Fails instead of hanging when `p` doesn't settle in time. */
 function within<T>(p: Promise<T>, ms = 200): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined
   const timeout = new Promise<never>((_, reject) => {
@@ -582,7 +564,6 @@ function within<T>(p: Promise<T>, ms = 200): Promise<T> {
 
 const tick = () => new Promise((r) => setTimeout(r, 0))
 
-/** Waits until `ready()` holds, checking every tick; fails instead of hanging after `ms`. */
 async function until(ready: () => boolean, ms = 1000) {
   const deadline = Date.now() + ms
   while (!ready()) {
@@ -591,7 +572,6 @@ async function until(ready: () => boolean, ms = 1000) {
   }
 }
 
-/** The share number of each frame posted, in order. */
 function frameShares(t: ReturnType<typeof setup>): number[] {
   return t.posted('/frame').map((c) => Number(new URL(c.url, 'http://x').searchParams.get('share')))
 }
@@ -618,12 +598,12 @@ test('stop while the mic prompt stays open releases the screen share without wai
   const t = setup({
     mediaDevices: {
       getDisplayMedia: async () => stream(t.display),
-      getUserMedia: () => new Promise(() => {}), // the user never answers the prompt
+      getUserMedia: () => new Promise(() => {}),
     },
   })
   const live = capture(t.env)
   const starting = live.start('screen')
-  await tick() // now waiting on the mic prompt
+  await tick()
   await within(live.stop())
   await assert.rejects(within(starting), /cancelled/)
   assert.equal(t.display.stopped, true)
@@ -642,9 +622,9 @@ test('screen sharing stopped during the mic prompt fails the start and releases 
   })
   const starting = capture(t.env).start('screen')
   await tick()
-  t.display.dispatchEvent(new Event('ended')) // "Stop sharing" in the browser's bar
+  t.display.dispatchEvent(new Event('ended'))
   await assert.rejects(within(starting), /Screen sharing stopped before recording started/)
-  grantMic(stream(t.mic)) // the user answers the prompt afterwards
+  grantMic(stream(t.mic))
   await tick()
   assert.equal(t.mic.stopped, true)
   assert.equal(FakeRecorder.created.length, 0)
@@ -704,7 +684,7 @@ test('stop while the recorder is starting drops its late chunk and discards the 
   const t = setup({ MediaRecorder: SlowRecorder })
   const live = capture(t.env)
   const starting = live.start('screen')
-  await tick() // the recorder exists but hasn't reported 'start'
+  await tick()
   assert.equal(FakeRecorder.created.length, 1)
   await within(live.stop())
   fireStart()
@@ -750,10 +730,10 @@ test('closing the tab during a prompt makes no session', async () => {
   const starting = capture(t.env).start('screen')
   await tick()
   t.env.page.dispatchEvent(new Event('pagehide'))
-  await assert.rejects(within(starting), /cancelled/) // a page restored from cache can't record
+  await assert.rejects(within(starting), /cancelled/)
   assert.equal(t.display.stopped, true)
   assert.deepEqual(t.calls.map((c) => `${c.method} ${c.url}`), [])
-  assert.equal(t.beacons.length, 0) // nothing to end: it never recorded
+  assert.equal(t.beacons.length, 0)
   assert.equal(sessionsMade, 0, 'asking for permissions makes no session')
 })
 
@@ -771,7 +751,6 @@ test('frame capture failing to start leaves nothing half-started', async () => {
   t.env.page.dispatchEvent(new Event('pagehide'))
   assert.equal(unload.defaultPrevented, false)
   assert.equal(t.beacons.length, 0)
-  // Nothing to finish: stop after a failed start doesn't end the deleted session.
   await live.stop()
   await tick()
   assert.deepEqual(t.calls.map((c) => `${c.method} ${c.url}`), ['DELETE /api/sessions/s1'])
@@ -783,7 +762,6 @@ test('the recorder failing mid-recording ends only after its last chunk', async 
   await live.start('screen')
   const recorder = FakeRecorder.created[0]
   recorder.emit('a')
-  // As browsers do: inactive when 'error' fires, then the last chunk, then 'stop'.
   recorder.state = 'inactive'
   recorder.onerror?.()
   await tick()
@@ -850,8 +828,6 @@ test('the mic alone is recorded through the mixer too: one stream as sources com
   await live.stop()
 })
 
-// --- Recording audio only -------------------------------------------------------------------
-
 function audioSetup(options: { macSound?: boolean; sound?: () => Promise<unknown> } = {}) {
   const asked: unknown[] = []
   const macSound = new FakeTrack('audio')
@@ -896,7 +872,7 @@ test("in the app, audio mixes the mic with the Mac's sound, asked for alone with
 
 test("the Mac's sound refused (an ended track) or failing: the recording starts with the mic", async () => {
   const refused = new FakeTrack('audio')
-  refused.readyState = 'ended' // what Electron gives once System Audio Recording is refused
+  refused.readyState = 'ended'
   const failing = async () => {
     throw new DOMException('Invalid capture constraints', 'AbortError')
   }
@@ -944,7 +920,7 @@ test("stop while the Mac's sound is being asked for cancels the start and releas
   await tick()
   await within(live.stop())
   await assert.rejects(within(starting), /cancelled/)
-  grant(stream(t.macSound)) // answered afterwards: stopped at once
+  grant(stream(t.macSound))
   await tick()
   assert.ok(t.mic.stopped && t.macSound.stopped)
   assert.equal(FakeRecorder.created.length, 0)
@@ -977,9 +953,6 @@ test('a browser without MediaRecorder says it cannot record audio', async () => 
   await assert.rejects(capture({ ...t.env, MediaRecorder: undefined }).start('audio'), /can't record audio/)
 })
 
-// --- Stopping, continuing and discarding ----------------------------------------------------
-
-/** A setup whose getUserMedia gives a fresh mic each time (as after a stop and continue). */
 function resumableSetup(mac = false) {
   const mics: FakeTrack[] = []
   const t = setup({ macSound: mac })
@@ -1003,15 +976,15 @@ test('stop pauses the recording and releases every source; continue carries on i
   assert.equal(recorder.state, 'paused')
   assert.ok(t.display.stopped && t.mics[0].stopped, 'the screen and the mic are let go')
   assert.deepEqual(t.mixed[0].live, [])
-  t.frame(clock.now()) // a frame grabbed as it stopped is not sent
+  t.frame(clock.now())
   assert.equal(t.posted('/frame').length, 0)
-  t.env.page.dispatchEvent(new Event('pagehide')) // stopped, not finished: leaving stops it, no notes
+  t.env.page.dispatchEvent(new Event('pagehide'))
   assert.deepEqual(t.beacons.map((b) => b.url), ['/api/live/s1/stop'])
 
-  clock.advance(10_000) // stopped for 10 s
+  clock.advance(10_000)
   const display2 = new FakeTrack('video')
   t.env.mediaDevices.getDisplayMedia = async () => {
-    clock.advance(3000) // choosing a window in the picker is still stopped time
+    clock.advance(3000)
     return stream(display2)
   }
   const again = await live.resume()
@@ -1021,11 +994,9 @@ test('stop pauses the recording and releases every source; continue carries on i
   assert.deepEqual(sources(t), [t.mics[1]])
   clock.advance(250)
   t.frame(clock.now())
-  // Timed on the recording's clock: 1 s before Stop and 0.25 s after; the stopped time is left out.
   assert.deepEqual(frameTimes(t), [1.25])
   recorder.emit('b')
   await live.stop()
-  // 'a', the chunk flushed at Stop, 'b', and the last one: one stream.
   assert.deepEqual(JSON.parse(t.posted('/end')[0].body as string), { audio_chunks: 4, allow_gaps: false })
   assert.ok(display2.stopped && t.mics[1].stopped)
 })
@@ -1037,7 +1008,7 @@ test('make notes straight from stopped: the last chunk is sent and the session e
   FakeRecorder.created[0].emit('a')
   live.pause()
   await live.stop()
-  assert.equal(t.posted('/audio').length, 3) // 'a', flushed at Stop, the last one
+  assert.equal(t.posted('/audio').length, 3)
   assert.equal(t.posted('/end').length, 1)
 })
 
@@ -1166,7 +1137,6 @@ test('a failed discard leaves the recording untouched: it can be continued and f
   await live.resume()
   recorder.emit('b')
   await live.stop()
-  // The chunk flushed at Stop, the one after Continue, and the last one: none lost.
   assert.deepEqual(JSON.parse(t.posted('/end')[0].body as string), { audio_chunks: 3, allow_gaps: false })
 })
 
@@ -1181,7 +1151,7 @@ test('sharing that ends while a continue is still asking fails the continue; it 
   t.env.mediaDevices.getUserMedia = () => new Promise((resolve) => (grant = resolve))
   const continuing = live.resume()
   await tick()
-  display2.end() // "Stop sharing" while the mic prompt is open
+  display2.end()
   grant(stream(new FakeTrack('audio')))
   await assert.rejects(continuing, /Screen sharing stopped before the recording continued/)
   assert.equal(FakeRecorder.created[0].state, 'paused')
@@ -1209,12 +1179,12 @@ test("the Mac's sound is let go on Stop and asked for again on Continue", async 
   const sounds: FakeTrack[] = []
   const t = audioSetup({
     sound: async () => {
-      const sound = new FakeTrack('audio') // a fresh capture each time, as the app gives
+      const sound = new FakeTrack('audio')
       sounds.push(sound)
       return stream(sound)
     },
   })
-  t.env.mediaDevices.getUserMedia = async () => stream(new FakeTrack('audio')) // a fresh mic too
+  t.env.mediaDevices.getUserMedia = async () => stream(new FakeTrack('audio'))
   const live = capture(t.env)
   await live.start('audio')
   live.pause()
@@ -1230,15 +1200,13 @@ test("the Mac's sound is let go on Stop and asked for again on Continue", async 
 test("the recording's clock leaves stopped time out, and the menu bar's start matches it", () => {
   let clock = { recordedMs: 0, since: 1_000 }
   assert.equal(recordedMs(clock, 13_000), 12_000)
-  clock = pausedClock(clock, 13_000) // Stop at 12 s
+  clock = pausedClock(clock, 13_000)
   assert.deepEqual(clock, { recordedMs: 12_000, since: 0 })
   assert.equal(recordedMs(clock, 99_000), 12_000, 'frozen while stopped')
-  clock = { ...clock, since: 50_000 } // Continue
+  clock = { ...clock, since: 50_000 }
   assert.equal(recordedMs(clock, 53_000), 15_000)
   assert.equal(53_000 - clockStart(clock), 15_000, "the menu bar's elapsed time")
 })
-
-// --- The session is made only once what is recorded has been granted -----------------------
 
 test('the session is made only after the screen and the mic are granted', async () => {
   const order: string[] = []
@@ -1286,10 +1254,10 @@ test('cancelled before the session is made, which arrives later: it is deleted w
   const live = new LiveCapture(() => new Promise((resolve) => (made = resolve)), fast, t.env as never)
   const starting = live.start('audio')
   await tick()
-  await live.stop() // e.g. the page left while POST /live was in flight
+  await live.stop()
   await assert.rejects(starting, /cancelled/)
   assert.deepEqual(t.calls, [], 'no session yet, so nothing to delete')
-  made('s1') // the session the engine made meanwhile
+  made('s1')
   await tick()
   assert.deepEqual(t.calls.map((c) => `${c.method} ${c.url}`), ['DELETE /api/sessions/s1'])
   assert.equal(FakeRecorder.created.length, 0)
@@ -1331,7 +1299,6 @@ test('sendBeaconOrKeepalive: a beacon where allowed, else a keepalive POST', asy
   assert.equal(fetched[0].init.body, body)
   assert.deepEqual(fetched[0].init.headers, { 'content-type': 'application/json' })
 
-  // A failing fetch is swallowed: the page is going away.
   const failing = async () => {
     throw new TypeError('Failed to fetch')
   }
@@ -1339,9 +1306,6 @@ test('sendBeaconOrKeepalive: a beacon where allowed, else a keepalive POST', asy
   await new Promise((r) => setTimeout(r, 0))
 })
 
-// --- The frame ticker (startTicker) ---------------------------------------------------------
-
-/** A worker the test drives: `message()` is one tick from it, `error()` its error event. */
 function fakeWorker(options: { throws?: boolean; errorsWhileStarting?: boolean } = {}) {
   const worker = { intervalMs: 0, terminated: 0, message: () => {}, error: (_e: Event) => {} }
   const start: StartWorker = (intervalMs, onMessage, onError) => {
@@ -1397,7 +1361,6 @@ test('a worker that errors after it was created (a CSP block) falls back to a pa
   assert.equal(worker.terminated, 1)
   t.mock.timers.tick(2000)
   assert.equal(ticks.count, 2)
-  // The failed worker can't add ticks, and a second error doesn't start a second timer.
   worker.message()
   worker.error(new Event('error'))
   t.mock.timers.tick(1000)
@@ -1438,14 +1401,11 @@ test('the real worker, where there is no Worker (as in Node), falls back to a pa
   stop()
 })
 
-// --- Turning the screen on and off ----------------------------------------------------------
-
-/** A recording whose screen shares are each a new video track (and, if asked, a tab's sound). */
 function shareSetup(options: { macSound?: boolean } = {}) {
   const asked: unknown[] = []
   const shares: { video: FakeTrack; sound: FakeTrack }[] = []
   const macSound = new FakeTrack('audio')
-  const mics: FakeTrack[] = [] // a fresh one each time the mic is asked for (Continue)
+  const mics: FakeTrack[] = []
   const t = setup({ macSound: options.macSound ?? false })
   t.env.mediaDevices.getUserMedia = async () => {
     mics.push(new FakeTrack('audio'))
@@ -1468,21 +1428,19 @@ test('the screen turns on and off during an audio recording, with a new share ea
   const t = shareSetup()
   const live = capture(t.env)
   await live.start('audio')
-  t.frame(performance.now()) // no screen yet: nothing sent
+  t.frame(performance.now())
   const shared = await live.startScreen()
   assert.equal(shared.getVideoTracks()[0], t.shares[0].video)
-  // In a browser, a share's tab sound is mixed in while it is shared.
   assert.deepEqual(t.asked, [{ video: true, audio: SHARED_AUDIO }])
   assert.deepEqual(sources(t), [t.mics[0], t.shares[0].video])
   t.frame(performance.now())
   live.stopScreen()
   assert.ok(t.shares[0].video.stopped && t.shares[0].sound.stopped)
   assert.deepEqual(sources(t), [t.mics[0]], 'its sound is taken out of the mix')
-  t.frame(performance.now()) // a frame still being grabbed as it was turned off is dropped
+  t.frame(performance.now())
   await live.startScreen()
   t.frame(performance.now())
   await tick()
-  // Each frame says which share it is from, so the backend needs nothing else to split them.
   assert.deepEqual(frameShares(t), [1, 2])
   assert.equal(FakeRecorder.created.length, 1, 'one recorder throughout: the audio is one stream')
   await live.stop()
@@ -1539,7 +1497,6 @@ test('a share granted after Stop (or after making notes) is let go at once', asy
     assert.equal(await sharing, null, meanwhile)
     await ending
     assert.ok(late.stopped, meanwhile)
-    // Recording again after Stop, a frame from the late share would be sent: none is.
     if (meanwhile === 'pause') await live.resume()
     t.frame(performance.now())
     await tick()
@@ -1551,15 +1508,15 @@ test('a share granted after Stop (or after making notes) is let go at once', asy
 test('the screen can be shared only while recording, one picker at a time', async () => {
   const t = shareSetup()
   const live = capture(t.env)
-  await assert.rejects(live.startScreen(), CaptureError) // not started
+  await assert.rejects(live.startScreen(), CaptureError)
   await live.start('audio')
   const first = live.startScreen()
   assert.equal(live.startScreen(), first, 'a second press while the picker is open is the same share')
   await first
-  await assert.rejects(live.startScreen(), CaptureError) // already shared
+  await assert.rejects(live.startScreen(), CaptureError)
   live.pause()
-  await assert.rejects(live.startScreen(), CaptureError) // stopped
-  live.stopScreen() // nothing to turn off while stopped
+  await assert.rejects(live.startScreen(), CaptureError)
+  live.stopScreen()
   await live.stop()
 })
 
@@ -1571,7 +1528,7 @@ test('Continue after Stop shares the screen again as a new share, on the recordi
   clock.advance(500)
   t.frame(clock.now())
   live.pause()
-  clock.advance(10_000) // stopped for 10 s
+  clock.advance(10_000)
   const again = await live.resume()
   assert.equal(again.screen?.getVideoTracks()[0], t.shares[1].video, 'the picker opened again')
   clock.advance(250)
@@ -1579,7 +1536,6 @@ test('Continue after Stop shares the screen again as a new share, on the recordi
   await tick()
   assert.deepEqual(frameShares(t), [1, 2])
   assert.deepEqual(frameTimes(t), [0.5, 0.75], 'the stopped time is left out')
-  // With the screen off at Stop, Continue doesn't ask for one.
   live.stopScreen()
   live.pause()
   const asked = t.asked.length
@@ -1594,7 +1550,7 @@ test('a share ending while stopped changes nothing: it was let go', async () => 
   const live = capture(t.env, { onScreenEnded: () => screenEnded++ })
   await live.start('screen')
   live.pause()
-  t.shares[0].video.end() // it was let go
+  t.shares[0].video.end()
   assert.equal(screenEnded, 0)
   await live.stop()
 })
@@ -1609,13 +1565,12 @@ test('a share whose picker is closed because the recording stopped resolves quie
     t.env.mediaDevices.getDisplayMedia = () => new Promise((resolve, reject) => ((settle = resolve), (refuse = reject)))
     const sharing = live.startScreen()
     await tick()
-    live.pause() // the app then closes its picker, which refuses the request
+    live.pause()
     const late = new FakeTrack('video')
     if (answer === 'refused') refuse(new DOMException('Invalid capture constraints', 'AbortError'))
     else settle(stream(late))
     assert.equal(await sharing, null, answer)
     assert.equal(answer === 'granted' ? late.stopped : true, true)
-    // Continue isn't held up: the screen was off at Stop, so no picker is asked for.
     const asked = t.asked.length
     assert.equal((await live.resume()).screen, null)
     assert.equal(t.asked.length, asked)

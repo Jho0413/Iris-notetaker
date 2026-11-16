@@ -1,6 +1,5 @@
 import type { Session } from '../api/client'
 
-/** "Today 14:02", "Yesterday 09:15", "Mon 27 Oct", or "27 Oct 2025" for older years. */
 export function formatWhen(iso: string, now = new Date()): string {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return ''
@@ -15,7 +14,6 @@ export function formatWhen(iso: string, now = new Date()): string {
   return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
 }
 
-/** "820 KB", "1.4 GB". */
 export function formatBytes(n: number): string {
   const units = ['B', 'KB', 'MB', 'GB']
   let i = 0
@@ -27,7 +25,6 @@ export function formatBytes(n: number): string {
   return `${v >= 10 || i === 0 ? Math.round(v) : v.toFixed(1)} ${units[i]}`
 }
 
-/** "4:05" or "1:02:09". */
 export function formatClock(seconds: number): string {
   const s = Math.max(0, Math.floor(seconds))
   const h = Math.floor(s / 3600)
@@ -36,7 +33,6 @@ export function formatClock(seconds: number): string {
   return h ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`
 }
 
-/** "0.8 s", "42 s", "3 min 05 s". */
 export function formatDuration(seconds: number): string {
   if (seconds < 10) return `${seconds.toFixed(1)} s`
   if (seconds < 60) return `${Math.round(seconds)} s`
@@ -46,12 +42,10 @@ export function formatDuration(seconds: number): string {
 
 export const SOURCE_LABEL: Record<string, string> = { upload: 'Upload', browser_live: 'Live' }
 
-/** A session's title as shown: the library, its page and its PDF. */
 export function shownTitle(title: string): string {
   return title || 'Untitled session'
 }
 
-/** The session's meta line, on its page and in its PDF: type, source, length and when it was made. */
 export function sessionMetaLine(session: Session, sessionType?: string, length?: number): string[] {
   return [
     sessionType ? sessionType.charAt(0).toUpperCase() + sessionType.slice(1) : '',
@@ -61,7 +55,6 @@ export function sessionMetaLine(session: Session, sessionType?: string, length?:
   ].filter((part) => part !== '')
 }
 
-/** Session length in seconds, from the transcript (the backend doesn't set `duration_s` yet). */
 export function sessionLength(session: Session, segs: readonly { end: number }[]): number | undefined {
   if (session.duration_s) return session.duration_s
   const end = segs.reduce((max, s) => Math.max(max, s.end), 0)

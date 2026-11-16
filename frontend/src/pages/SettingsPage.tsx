@@ -21,16 +21,13 @@ import {
 import { useKeyChange } from '../settings/useKeyChange'
 import { useSettings } from '../settings/useSettings'
 
-/** Grouped rows of settings. Changes collect in a save bar and apply once saved. */
 export function SettingsPage() {
   useTitle('Settings')
   const { load, setLoad, reread } = useSettings(false)
-  // The language chosen but not saved yet; null when nothing has changed.
   const [draft, setDraft] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
-  // After the app changed the key: what to confirm, or that it couldn't.
   const [keyResult, setKeyResult] = useState<{ ok: boolean; text: string } | null>(null)
 
   const settings = load.kind === 'ready' ? load.settings : null
@@ -165,8 +162,6 @@ export function SettingsPage() {
   )
 }
 
-/** The OpenAI key: managed by the desktop app (through its bridge), or read by the engine at start-up in
- * the browser. The page only learns whether a key is set, never the key. */
 function ApiKeyRow(props: { keySet: boolean; onResult: (result: { ok: boolean; text: string }) => void }) {
   const app = irisApp()
   const { busy, change: run } = useKeyChange(props.onResult)

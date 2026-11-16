@@ -59,10 +59,10 @@ test('the saved confirmation reads naturally for a language and for detection', 
 
 test('a change is pending only when it differs from what is saved', () => {
   assert.equal(pendingLanguage(null, 'en'), null)
-  assert.equal(pendingLanguage('en', 'en'), null) // changed back: nothing to save
+  assert.equal(pendingLanguage('en', 'en'), null)
   assert.equal(pendingLanguage('fr', 'en'), 'fr')
   assert.equal(pendingLanguage(AUTO, 'en'), AUTO)
-  assert.equal(pendingLanguage('fr', undefined), null) // settings not loaded
+  assert.equal(pendingLanguage('fr', undefined), null)
 })
 
 test('the no-key warning fits where Iris runs', () => {
@@ -71,7 +71,7 @@ test('the no-key warning fits where Iris runs', () => {
   assert.equal(app.title, 'No OpenAI API key is set.')
   assert.equal(browser.title, app.title)
   assert.match(app.detail, /can’t make notes until you add one/)
-  assert.doesNotMatch(app.detail, /\.env|make dev/) // app users never see developer files
+  assert.doesNotMatch(app.detail, /\.env|make dev/)
   assert.match(browser.detail, /OPENAI_API_KEY.*backend\/\.env.*make dev/)
 })
 

@@ -17,7 +17,6 @@ import { usePdfExport } from '../notes/usePdfExport'
 import { useTitle } from '../hooks/useTitle'
 import { useSettings } from '../settings/useSettings'
 
-/** While anything is processing, refresh this often so status chips stay current. */
 const REFRESH_MS = 4000
 
 type Load = { kind: 'loading' } | { kind: 'error' } | { kind: 'ready'; sessions: Session[] }
@@ -71,7 +70,6 @@ export function LibraryPage() {
     refresh()
   }
 
-  /** A stopped recording: make its notes now (the row then shows them being made). */
   async function makeNotes(s: Session) {
     setActionError(null)
     const result = await act(api.POST('/api/live/{session_id}/end', { params: { path: { session_id: s.id } } }))
@@ -118,7 +116,6 @@ export function LibraryPage() {
           {Array.from({ length: 5 }, (_, i) => (
             <div className="library-row" key={i}>
               <div className="skeleton sk-line" style={{ width: `${60 - i * 6}%` }} />
-              {/* Rem, not %: these columns are as wide as what they hold, and a bar holds nothing. */}
               <div className="skeleton sk-line" style={{ width: '6rem' }} />
               <div className="skeleton sk-line meta" style={{ width: '7rem' }} />
               <div className="skeleton sk-line meta" style={{ width: '3rem', marginLeft: 'auto' }} />
@@ -176,8 +173,6 @@ export function LibraryPage() {
                   <Link to={`/sessions/${s.id}`} className="title-link">
                     {shownTitle(s.title)}
                   </Link>
-                  {/* In a narrow window the status, date and cost columns fold into this line
-                      (index.css); the copies here are hidden otherwise, so each is read once. */}
                   <div className="row-sub">
                     <span className="row-status">
                       <StatusChip state={state} />
@@ -220,7 +215,6 @@ export function LibraryPage() {
                       <Icon name="file" /> <span className="btn-label">Make notes</span>
                     </button>
                   )}
-                  {/* A problem with the recording itself isn't fixed by trying again. */}
                   {state.kind === 'failed' && failureView(s, emptyRun()).kind === 'general' && (
                     <button type="button" className="btn btn-sm" onClick={() => void retry(s)} aria-label="Try again">
                       <Icon name="retry" /> <span className="btn-label">Try again</span>

@@ -2,7 +2,6 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { landingSpots, nearestSpot, type Measured } from '../src/notes/editor/landing.ts'
 
-// Three top-level blocks; the second is a step with two blocks inside (its text column 136–700).
 const BLOCKS: Measured[] = [
   { pos: 0, top: 100, bottom: 140 },
   {
@@ -37,11 +36,11 @@ test('the pointer picks the nearest spot; inside a block only over its text colu
     const s = nearestSpot(spots, x, y)
     return s && [s.target.parent, s.target.index]
   }
-  assert.deepEqual(at(300, 268), [10, 2]) // between the step's two blocks
-  assert.deepEqual(at(110, 352), [null, 2]) // left of the step's text: after the step
-  assert.deepEqual(at(300, 352), [10, 3]) // over its text: last inside it
-  assert.deepEqual(at(60, 95), [null, 0]) // a little left of the column still counts
-  assert.equal(at(5, 95), null) // far outside the notes: nowhere
+  assert.deepEqual(at(300, 268), [10, 2])
+  assert.deepEqual(at(110, 352), [null, 2])
+  assert.deepEqual(at(300, 352), [10, 3])
+  assert.deepEqual(at(60, 95), [null, 0])
+  assert.equal(at(5, 95), null)
 })
 
 test('an empty layout has one spot at the top', () => {
@@ -56,7 +55,6 @@ test('picking a spot looks at each spot once, so it stays cheap for long notes',
     body: i % 4 ? undefined : { left: 136, right: 700, bottom: i * 50 + 40, children: [{ pos: i * 10 + 1, top: i * 50 + 5, bottom: i * 50 + 35 }] },
   }))
   const spots = landingSpots(many, COLUMN, () => true)
-  // Counted, not timed: one pass over the spots per pointer move, on any machine.
   const looks = spots.map(() => 0)
   const counted = new Proxy(spots, {
     get(target, key, receiver) {

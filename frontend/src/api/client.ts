@@ -1,5 +1,3 @@
-// Typed API client. Types in schema.d.ts are generated from the backend's OpenAPI schema:
-//   npm run gen:api   (with the backend running)
 import createClient from 'openapi-fetch'
 import { engineAnswersOnly } from './request.ts'
 import type { components, paths } from './schema'
@@ -16,7 +14,6 @@ export type IrisEvent = components['schemas']['Event']
 export type SessionUsage = components['schemas']['SessionUsageView']
 export type AppSettings = components['schemas']['AppSettings']
 
-/** URL for a file inside a session folder, e.g. "visuals/v1.jpg". */
 export function sessionFileUrl(sessionId: string, relPath: string): string {
   return `/api/sessions/${sessionId}/files/${relPath}`
 }

@@ -3,11 +3,6 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode }
 import { createPortal } from 'react-dom'
 import { PALETTE, type Colour } from './format'
 
-/**
- * A small menu floating under the control that opened it (the block toolbar's colour, type and
- * add menus, the formula editor). Escape or a click outside closes it and returns focus to the
- * opener; Up and Down move between its items.
- */
 export function Popover(props: {
   anchor: HTMLElement
   label: string
@@ -41,7 +36,6 @@ export function Popover(props: {
     return () => document.removeEventListener('pointerdown', close, true)
   }, [anchor, onClose])
 
-  // In the page's body, so it is placed in page coordinates whatever holds the opener.
   return createPortal(
     <div
       ref={ref}
@@ -95,7 +89,6 @@ export function MenuItem(props: {
   )
 }
 
-/** The ten notes colours as swatches; the current one is ringed. */
 export function Swatches({ value, onPick }: { value: Colour; onPick: (c: Colour) => void }) {
   return (
     <div className="swatches" role="group" aria-label="Colour">
@@ -119,7 +112,6 @@ function preview(latex: string): string {
   return latex.trim() ? katex.renderToString(latex, { displayMode: true, throwOnError: false }) : ''
 }
 
-/** A formula's LaTeX, with a live preview. */
 export function MathEditor(props: {
   anchor: HTMLElement
   latex: string

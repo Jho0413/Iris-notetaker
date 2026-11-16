@@ -46,14 +46,12 @@ function sources(dir: string): string[] {
 
 test('no developer instructions or raw error details in the UI code', () => {
   const banned = [
-    /make dev/, // how to start the backend
-    /OPENAI_API_KEY|backend\/\.env/, // setup
+    /make dev/,
+    /OPENAI_API_KEY|backend\/\.env/,
     /Is (it|the backend) running/,
-    /HTTP \$\{/, // status codes in messages
-    /\.error\b.*\}<|\{(session|run)\.error/, // the old raw `error` field rendered
+    /HTTP \$\{/,
+    /\.error\b.*\}<|\{(session|run)\.error/,
   ]
-  // src/settings/settings.ts is the one exception: the browser-only API key wording, shown only
-  // when Iris runs in a browser (developers), never in the desktop app (issue #21).
   const allowed = new URL('../src/settings/settings.ts', import.meta.url).pathname
   const files = sources(new URL('../src', import.meta.url).pathname).filter((path) => path !== allowed)
   const offenders = files.flatMap((path) => {

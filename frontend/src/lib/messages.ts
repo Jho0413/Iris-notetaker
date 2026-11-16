@@ -1,11 +1,6 @@
-// Fixed user-facing wording shared by the pages. Pure, so it is
-// testable under plain Node. Nothing here names the backend, a provider, a status code or a
-// command: the user assumes Iris is set up, so every failure is said in Iris's own words.
 import type { Session } from '../api/client'
 import type { Provenance } from './notes'
 
-/** Nothing answered the request (status 0 from `act()`): the network failed, or only the engine
- * is down and the dev proxy or the app's handler answered in its place (`engineDidNotAnswer`). */
 export const UNREACHABLE = "Iris isn't responding. Try again in a moment."
 
 export const RETRY = 'Retry'
@@ -16,21 +11,18 @@ export function actionFailure(status: number, words: string): string {
   return status === 0 ? UNREACHABLE : words
 }
 
-/** Badges for how a figure was made. An original image is labelled neutrally, with no reason. */
 export const PROVENANCE_LABELS: Record<Provenance, string> = {
   verified: 'Verified redraw',
   screenshot: 'Screenshot',
   unverified: 'Original image',
 }
 
-/** For a problem with the recording itself: make another one the way this one was made. */
 export function againLink(source: Session['source']): { to: string; label: string } {
   return source === 'browser_live'
     ? { to: '/live', label: 'Record again' }
     : { to: '/upload', label: 'Upload another recording' }
 }
 
-/** Editing the notes: the save failures, the confirmations and the re-run banner. */
 export const NOTES_EDIT = {
   saveWhileProcessing: 'Iris is making these notes again, so your changes can’t be saved yet. Save once it has finished.',
   saveRefused: 'Your changes couldn’t be saved.',
@@ -49,24 +41,19 @@ export const NOTES_EDIT = {
   useNewBody: 'Your edits are removed and the notes Iris made again are shown. This can’t be undone.',
   keep: 'Keep my edits',
   keepFailed: 'Your edits couldn’t be kept. Try again.',
-  // A re-run can renumber or drop figures the edits place: the editor marks each one it can't find.
   keepInvalid: 'Your edits no longer fit the notes Iris made again: a figure they use may be gone. Edit the notes to fix what’s marked, then save.',
 } as const
 
-/** A save the engine refused, in the editor's words: Markdown line numbers mean nothing there. */
 export function saveRefused(detail: string): string {
   return `${NOTES_EDIT.saveRefused} ${detail.replace(/^Line \d+: /, '')}`
 }
 
-/** Export PDF failed: the notes couldn't be loaded, or the desktop app couldn't save the file
- *  (the reason is in the console or the app's log). */
 export const PDF_FAILED = 'The PDF couldn’t be saved. Try again.'
 
 export const UPLOAD_INTERRUPTED = "The upload was interrupted. Iris isn't responding; try again in a moment."
 
 export const UPLOAD_REFUSED = "Iris couldn't accept this recording. Try again in a moment."
 
-/** The session details' button, in the rail's bar and beside the tabs (below 1120px). */
 export function detailsLabel(open: boolean): string {
   return open ? 'Hide details' : 'Details'
 }

@@ -1,10 +1,6 @@
 import { useEffect, useRef } from 'react'
 import type { Blocker } from 'react-router-dom'
 
-/**
- * A native <dialog> for confirming a destructive or disruptive action: it traps focus, closes on
- * Escape and returns focus to the opener by itself.
- */
 export function ConfirmDialog(props: {
   open: boolean
   title: string
@@ -37,7 +33,6 @@ export function ConfirmDialog(props: {
     >
       <h2 id="confirm-title">{props.title}</h2>
       <p>{props.body}</p>
-      {/* A destructive choice sits apart from the way out, so one isn't clicked for the other. */}
       <div className={props.danger ? 'dialog-actions dialog-actions-apart' : 'dialog-actions'}>
         <button type="button" className="btn" onClick={props.onCancel} disabled={props.busy} autoFocus>
           {props.cancel ?? 'Cancel'}

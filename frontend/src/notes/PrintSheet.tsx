@@ -10,14 +10,8 @@ export interface Printable {
   transcript: Transcript | null
 }
 
-/**
- * A session's notes as printed (Export PDF): its title, meta line and notes. Rendered only while a
- * PDF is made, at the end of <body> and invisible on screen, so exporting changes nothing the user
- * sees; while it is there, printing shows it alone (index.css, `.print-sheet`).
- */
 export function PrintSheet({ printable }: { printable: Printable }) {
   const { session, notes, transcript } = printable
-  // A finished session: everything shown comes from its notes and transcript, no live run.
   const length = sessionLength(session, transcript?.segments ?? [])
   return createPortal(
     <div className="print-sheet" aria-hidden="true">

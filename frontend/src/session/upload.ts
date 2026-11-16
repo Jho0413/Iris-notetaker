@@ -1,7 +1,6 @@
 import type { Session } from '../api/client'
 import { engineDidNotAnswer } from '../api/request.ts'
 
-/** Why an upload failed. Its message is ours: never the backend's detail or the status code. */
 export class UploadError extends Error {
   readonly kind: 'network' | 'rejected' | 'aborted'
   constructor(kind: 'network' | 'rejected' | 'aborted') {
@@ -10,10 +9,6 @@ export class UploadError extends Error {
   }
 }
 
-/**
- * Upload a recording with byte progress: a multipart POST to /api/sessions, over XMLHttpRequest
- * because fetch can't report upload progress and hour-long recordings are large.
- */
 export function uploadWithProgress(
   file: File,
   title: string | undefined,

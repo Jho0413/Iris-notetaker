@@ -20,13 +20,8 @@ const STEP_WORD: Record<StepStatus, string> = {
   stopped: 'Stopped',
 }
 
-/**
- * Every pipeline step with its status and count, in order. A step done while recording (promoted
- * at stop) says "· live". One row per step whatever its state, so nothing moves as steps advance.
- */
 export function StepList(props: {
   run: RunState
-  /** Stored progress when no events are known (e.g. after a backend restart). */
   finished: boolean
   hasEvents: boolean
   currentStage?: Stage | null

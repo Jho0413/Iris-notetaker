@@ -44,10 +44,12 @@ There are five: the library, upload, live recording, a session, and settings. Th
 each address to one page, and the top bar links them.
 
 - The **library** lists sessions and offers what fits each one: open, delete, export a PDF,
-  re-run a failed session, or make notes from a recording that was stopped. While any session is
-  processing it refreshes itself, so their status stays current.
+  re-run a failed session (unless the recording itself was the problem, which a re-run can't
+  fix), or make notes from a recording that was stopped. While any session is processing it
+  refreshes itself, so their status stays current.
 - **Upload** sends the file and shows how much has gone; once the engine has it, the page opens
-  the new session ([`making-notes.md`](making-notes.md)).
+  the new session ([`making-notes.md`](making-notes.md)). Cancel is offered only until the last
+  byte is sent: the engine then makes the session anyway, so cancelling would only hide it.
 - **Live** records and sends as it goes ([`recording-live.md`](recording-live.md)).
 - The **session page** follows the run, then shows the notes, figures and transcript; the session
   can be renamed, re-run, deleted or exported from there.
@@ -142,6 +144,11 @@ is in [`desktop.md`](desktop.md).
   raw error text is never shown.
 - **Only the session's own figures are drawn.** An image the notes point at from anywhere else is
   blocked, since the notes are model output.
+- **Cost in one format.** Costs are shown in one fixed format, not the browser's locale, so the
+  rail and the library always agree. A total with unpriced calls is a lower bound: it says so and
+  is rounded down, never up. Model and provider names never reach the page.
+- **The theme before the first paint.** The page's HTML picks the theme before React starts, so
+  a dark page never flashes white. Printing always uses the light colours.
 
 ## Limits
 

@@ -1,11 +1,5 @@
-// Upload queue for live capture: audio chunks and frames are posted with bounded concurrency, and
-// failed posts are retried with backoff until they succeed or are rejected, so a dropped request or
-// a backend restart doesn't lose content. They can land in any order. The backend stores each by
-// its key (audio seq, frame time and share), so a retry of a post that actually landed is harmless.
-
 export type UploadKind = 'audio' | 'frame'
 
-/** Posts one item; resolves with the HTTP status, rejects on a network error. */
 export type Send = (path: string, body: Blob) => Promise<number>
 
 export interface RejectedUpload {
@@ -18,7 +12,6 @@ export interface UploadQueueOptions {
   concurrency?: number
   baseDelayMs?: number
   maxDelayMs?: number
-  /** Most frames held while uploads are failing; the oldest are dropped beyond this. */
   maxQueuedFrames?: number
 }
 
@@ -29,7 +22,6 @@ interface Item {
   attempts: number
 }
 
-/** Statuses worth retrying: timeouts, rate limits and server errors. Other 4xx are final. */
 export function isRetryable(status: number): boolean {
   return status === 408 || status === 429 || status >= 500
 }
@@ -56,12 +48,10 @@ export class UploadQueue {
     this.maxQueuedFrames = options.maxQueuedFrames ?? 120
   }
 
-  /** Items not yet uploaded: waiting, in flight or waiting to retry. */
   get pending(): number {
     return this.waiting.length + this.active + this.retrying
   }
 
-  /** Whether some uploads have failed at least once and are being retried. */
   get struggling(): boolean {
     return this.retrying > 0 || this.waiting.some((i) => i.attempts > 0)
   }
@@ -73,10 +63,6 @@ export class UploadQueue {
     this.pump()
   }
 
-  /**
-   * Wait until everything is uploaded (or rejected), or until `timeoutMs` passes. Returns how
-   * many items are still pending; they stay queued, so calling drain again keeps retrying.
-   */
   drain(timeoutMs: number): Promise<number> {
     if (this.pending === 0) return Promise.resolve(0)
     return new Promise((resolve) => {
@@ -94,7 +80,6 @@ export class UploadQueue {
     })
   }
 
-  /** Send nothing more: what is waiting or waiting to retry is dropped (the session is gone). */
   close(): void {
     this.closed = true
     this.waiting = []
@@ -112,11 +97,10 @@ export class UploadQueue {
     try {
       status = await this.send(item.path, item.body)
     } catch {
-      status = null // network error: the backend is down or the request was dropped
+      status = null
     }
     this.active--
     if (status !== null && status >= 200 && status < 300) {
-      // uploaded
     } else if (status !== null && !isRetryable(status)) {
       this.rejected.push({ kind: item.kind, path: item.path, status })
     } else {
@@ -135,7 +119,6 @@ export class UploadQueue {
     this.listeners.forEach((listener) => listener())
   }
 
-  /** Bound memory while the backend is unreachable. Audio is never dropped: it is one stream. */
   private dropOldFrames(): void {
     let frames = this.waiting.filter((i) => i.kind === 'frame').length
     while (frames > this.maxQueuedFrames) {

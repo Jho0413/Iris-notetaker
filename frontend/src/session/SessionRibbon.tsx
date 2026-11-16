@@ -3,10 +3,6 @@ import { PROVENANCE_LABELS } from '../lib/messages'
 import { formatClock } from '../lib/format'
 import type { FigureState } from '../lib/notes'
 
-/**
- * The session ribbon (frontend/DESIGN.md): the session's length as a line, with each figure marked
- * where it was shown. Hollow while being redrawn, filled when done (an original image too).
- */
 export function SessionRibbon(props: {
   length: number
   figures: FigureState[]

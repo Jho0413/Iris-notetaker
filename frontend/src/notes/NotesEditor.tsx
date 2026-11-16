@@ -33,7 +33,6 @@ interface FigureSource {
 }
 const FigureContext = createContext<FigureSource | null>(null)
 
-// A figure in the editor is drawn exactly as in the reading view.
 function FigureNode({ node }: ReactNodeViewProps) {
   const source = useContext(FigureContext)
   return (
@@ -47,8 +46,6 @@ const KIND_ICONS: Partial<Record<Kind | Addable, IconName>> = {
   text: 'text', heading: 'heading', box: 'box', step: 'stepIcon', maths: 'sigma',
 }
 
-/** The innermost block under a page element: the deepest block whose DOM holds it. A title
- *  belongs to its box or step, so clicking it (or a block's border or padding) picks that block. */
 function blockFromDom(view: EditorView, target: EventTarget | null): number | null {
   if (!(target instanceof Node) || !view.dom.contains(target)) return null
   let parent: PMNode = view.state.doc
@@ -82,11 +79,6 @@ function label(block: Block): string {
 
 type Menu = { kind: 'colour' | 'turn' | 'add'; anchor: HTMLElement } | { kind: 'math'; anchor: HTMLElement; pos: number }
 
-/**
- * The notes, editable in place: same look as the reading view, with a toolbar on the selected
- * block, a formatting bubble on selected text, a formula editor and pointer dragging. Saving
- * writes the user's version beside the generated notes (PUT /notes/edits).
- */
 export function NotesEditor(props: {
   notes: Notes
   figures?: ReadonlyMap<string, FigureMeta>
@@ -100,9 +92,8 @@ export function NotesEditor(props: {
     [notes.session_id, visuals, props.figures],
   )
   const [menu, setMenu] = useState<Menu | null>(null)
-  // setMenu never changes, so the editor (made once) can keep this.
   const openMath: OpenMath = (pos, anchor) => setMenu({ kind: 'math', anchor, pos })
-  const [version, setVersion] = useState(0) // bumped on every transaction: toolbar and status follow
+  const [version, setVersion] = useState(0)
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -123,7 +114,6 @@ export function NotesEditor(props: {
       attributes: { class: 'notes notes-editable', 'aria-label': 'Notes', spellcheck: 'true' },
       handleKeyDown(view, event) {
         const sel = view.state.selection
-        // Enter on a selected formula opens it; Escape moves to the block's toolbar.
         if (event.key === 'Enter' && sel instanceof NodeSelection && /math/i.test(sel.node.type.name)) {
           const dom = view.nodeDOM(sel.from)
           if (dom instanceof HTMLElement) openMath(sel.from, dom)
@@ -146,10 +136,7 @@ export function NotesEditor(props: {
       },
     },
     onTransaction({ editor, transaction }) {
-      // The document as it was opened: what "Unsaved changes" compares with.
       initial.current ??= transaction.before
-      // The selection moving out of the selected block selects the block it moved to (after this
-      // transaction, never inside it).
       if (transaction.selectionSet) {
         queueMicrotask(() => {
           const state = editor.state
@@ -206,7 +193,6 @@ export function NotesEditor(props: {
     else props.onClose()
   }
 
-  // ---- The selected block and where its toolbar sits (measured after each change).
   const state = editor?.state
   const selected = state ? selectedBlock(state) : null
   const block = state && selected !== null ? blockAt(state.doc, selected) : null
@@ -225,7 +211,6 @@ export function NotesEditor(props: {
     return () => window.removeEventListener('resize', measure)
   }, [editor, selected, version])
 
-  // ---- The formatting bubble on selected text.
   const [bubble, setBubble] = useState<{ top: number; left: number } | null>(null)
   useEffect(() => {
     const sel = editor?.state.selection
@@ -239,7 +224,6 @@ export function NotesEditor(props: {
     setBubble({ top: start.top - w.top - 42, left: Math.max(0, start.left - w.left) })
   }, [editor, version])
 
-  // ---- Dragging a block by its handle, with pointer events (works with touch too).
   const drag = useRef<{
     pos: number
     x: number
@@ -256,7 +240,6 @@ export function NotesEditor(props: {
   const suppressClick = useRef(false)
 
   const measure = useCallback((view: EditorView, from: number): Spot[] => {
-    // Only elements can be measured (a node can be drawn as bare text).
     const rect = (pos: number) => {
       const dom = view.nodeDOM(pos)
       return dom instanceof Element ? dom.getBoundingClientRect() : undefined
@@ -304,7 +287,6 @@ export function NotesEditor(props: {
       d.raf = 0
       d.chip!.style.left = `${d.px}px`
       d.chip!.style.top = `${d.py}px`
-      // Near the window's top or bottom, the page scrolls.
       const dy = d.py < 120 ? -14 : d.py > window.innerHeight - 60 ? 14 : 0
       if (dy) {
         window.scrollBy(0, dy)
@@ -332,7 +314,7 @@ export function NotesEditor(props: {
         d.chip = Object.assign(document.createElement('div'), { className: 'drag-chip', textContent: label(b) })
         d.line = Object.assign(document.createElement('div'), { className: 'drop-line' })
         document.body.append(d.chip, d.line)
-        document.body.classList.add('is-dragging') // dims the dragged block: it is the selected one
+        document.body.classList.add('is-dragging')
         d.started = true
       }
       e.preventDefault()
@@ -345,7 +327,7 @@ export function NotesEditor(props: {
       if (!d) return
       const { started, target, pos } = d
       endDrag()
-      if (!started) return // a click on the handle
+      if (!started) return
       suppressClick.current = true
       setTimeout(() => (suppressClick.current = false), 0)
       if (!target) return
@@ -542,7 +524,6 @@ export function NotesEditor(props: {
                 const dom = editor.view.nodeDOM(added.pos)
                 if (k === 'maths' && dom instanceof HTMLElement) setMenu({ kind: 'math', anchor: dom, pos: added.pos })
                 else {
-                  // Put the cursor in the new block (its title, for a box or step).
                   editor.chain().focus().setTextSelection(added.pos + (k === 'box' || k === 'step' ? 2 : 1)).run()
                 }
               }}
