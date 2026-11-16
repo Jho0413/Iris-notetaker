@@ -36,6 +36,7 @@ from tests.api_errors import connection_error, status_error
 from tests.builders import stage_ctx
 from tests.fakes import fake_openai, install_client
 from tests.media import SPEECH_RATE, WEBM_RATE, split, tone, wav_seconds
+from tests.waiting import decoder_waiting_for
 
 SECONDS = 12
 WORDS = [
@@ -164,20 +165,6 @@ def shuffled(n: int, skip: set[int] = frozenset(), seed: int = 0) -> list[int]:
     order = [i for i in range(n) if i not in skip]
     random.Random(seed).shuffle(order)
     return order
-
-
-def decoder_waiting_for(monkeypatch, seq: int) -> threading.Event:
-    waiting = threading.Event()
-    next_chunk = audio_lane.LiveDecoder.next_chunk
-
-    def watched(decoder, n):
-        if n == seq:
-            decoder._report()
-            waiting.set()
-        return next_chunk(decoder, n)
-
-    monkeypatch.setattr(audio_lane.LiveDecoder, "next_chunk", watched)
-    return waiting
 
 
 async def reached(waiting: threading.Event) -> None:

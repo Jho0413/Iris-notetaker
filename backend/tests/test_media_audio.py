@@ -1,5 +1,4 @@
 import threading
-import time
 import wave
 from fractions import Fraction
 from pathlib import Path
@@ -30,6 +29,7 @@ from iris.media.webm import (
 from iris.sources.browser_live import store_audio_chunk
 from iris.store.layout import SessionPaths, transcript_cache_name
 from tests.media import SPEECH_RATE
+from tests.waiting import decoder_waiting_for
 
 HEADER = b"stream-header"
 
@@ -95,13 +95,13 @@ def read_in_thread(stream: ChunkStream) -> tuple[threading.Thread, list[bytes]]:
     return thread, out
 
 
-def test_a_waiting_feed_hands_on_a_chunk_that_arrives_later(paths: SessionPaths):
+def test_a_waiting_feed_hands_on_a_chunk_that_arrives_later(paths: SessionPaths, monkeypatch):
+    waiting = decoder_waiting_for(monkeypatch, 1)
     decoder = waiting_decoder(paths)
     store_audio_chunk(paths, 0, b"first")
     stream = ChunkStream(decoder, b"", 0, paths.live_audio_chunk(0), 0)
     thread, out = read_in_thread(stream)
-    time.sleep(0.1)
-    assert thread.is_alive()
+    assert waiting.wait(5), "the feed never waited for chunk 1"
     store_audio_chunk(paths, 1, b"second")
     decoder.poke()
     decoder.end()
@@ -110,12 +110,13 @@ def test_a_waiting_feed_hands_on_a_chunk_that_arrives_later(paths: SessionPaths)
     assert (stream.seq, stream.ended) == (1, "end")
 
 
-def test_a_waiting_feed_stops_when_cancelled(paths: SessionPaths):
+def test_a_waiting_feed_stops_when_cancelled(paths: SessionPaths, monkeypatch):
+    waiting = decoder_waiting_for(monkeypatch, 1)
     decoder = waiting_decoder(paths)
     store_audio_chunk(paths, 0, b"first")
     stream = ChunkStream(decoder, b"", 0, paths.live_audio_chunk(0), 0)
     thread, out = read_in_thread(stream)
-    time.sleep(0.1)
+    assert waiting.wait(5), "the feed never waited for chunk 1"
     decoder.cancel()
     thread.join(5)
     assert out == [b"first"]
