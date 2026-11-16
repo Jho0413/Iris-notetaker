@@ -7,6 +7,7 @@ from iris.store.layout import (
     SessionPaths,
     inside,
     read_model,
+    read_optional,
     visual_path,
     visual_source_path,
     write_bytes,
@@ -123,3 +124,27 @@ def test_a_failed_write_leaves_the_old_file_and_no_temp_file(tmp_path, monkeypat
         write_bytes(path, b"new")
     assert path.read_bytes() == b"old"
     assert [p.name for p in tmp_path.iterdir()] == ["k.json"]
+
+
+def test_an_optional_file_that_is_missing_reads_as_none(tmp_path):
+    assert read_optional(tmp_path / "absent.json", Notes) is None
+
+
+def test_an_optional_file_that_is_damaged_reads_as_none_with_a_warning(tmp_path, caplog):
+    path = tmp_path / "damaged.json"
+    path.write_text("{not json")
+    assert read_optional(path, Notes) is None
+    assert f"ignoring unreadable {path}" in caplog.text
+
+
+def test_an_optional_file_that_is_valid_reads_back(tmp_path):
+    notes = Notes(
+        session_id="s1", session_type=SessionType.LECTURE, title="t", markdown="m", visuals=[]
+    )
+    write_model(tmp_path / "notes.json", notes)
+    assert read_optional(tmp_path / "notes.json", Notes) == notes
+
+
+def test_an_optional_file_that_cannot_be_opened_raises(tmp_path):
+    with pytest.raises(IsADirectoryError):
+        read_optional(tmp_path, Notes)

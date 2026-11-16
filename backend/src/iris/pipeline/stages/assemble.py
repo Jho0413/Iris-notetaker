@@ -1,13 +1,3 @@
-"""Assemble: resolve ``[visual:<id>]`` markers into figures and store the final notes.
-
-Reads:  notes_draft.json, selection.json, renders.json and notes_synthesis.json (when present)
-Writes: notes.json (Notes)
-
-The synthesized draft replaces the notes draft only while it was made from exactly that draft and
-selection; otherwise (absent, stale after a re-run, or unreadable) the notes draft is used.
-"""
-
-import logging
 import re
 from pathlib import Path
 
@@ -23,23 +13,14 @@ from iris.models import (
 )
 from iris.notes_format import FORMAT_VERSION
 from iris.pipeline.context import StageContext
-from iris.store.layout import read_model, write_model
+from iris.store.layout import read_model, read_optional, write_model
 
-log = logging.getLogger(__name__)
-
-# A marker and any indentation before it: a figure command is read only at the start of a line.
 MARKER = re.compile(
     r"^[ \t]*\[visual:([A-Za-z0-9_\-]+)\]|\[visual:([A-Za-z0-9_\-]+)\]", re.MULTILINE
 )
 
 
 def resolve_markers(markdown: str, visuals: list[Visual]) -> str:
-    """Replace each marker with a ``::figure{#<id>}`` line (``iris.notes_format``); readers take
-    the image, caption and provenance from ``Notes.visuals`` by id.
-
-    Unknown ids are dropped, never invented. Each visual appears once: repeated markers for an
-    already placed visual are dropped.
-    """
     known = {v.id for v in visuals}
     placed: set[str] = set()
 
@@ -48,14 +29,12 @@ def resolve_markers(markdown: str, visuals: list[Visual]) -> str:
         if vid not in known or vid in placed:
             return ""
         placed.add(vid)
-        # Write and synthesis keep markers on lines of their own; one inside text gets its own.
         return f"::figure{{#{vid}}}" if match.group(1) else f"\n\n::figure{{#{vid}}}\n\n"
 
     return MARKER.sub(repl, markdown)
 
 
 def drop_title_heading(markdown: str, title: str) -> str:
-    """The title is shown above the notes; a first heading repeating it is redundant."""
     first, _, rest = markdown.lstrip().partition("\n")
     if (
         re.fullmatch(r"#{1,6}\s+(.*?)\s*#*\s*", first)
@@ -66,8 +45,6 @@ def drop_title_heading(markdown: str, title: str) -> str:
 
 
 def with_renders(visuals: list[Visual], renders: Path) -> list[NotesVisual]:
-    """Point each visual at its render where ``renders.json`` has one, with how it was made; the
-    others keep their selected path (the source crop)."""
     rendered = {r.id: r for r in read_model(renders, Renders).visuals} if renders.exists() else {}
     out = []
     for v in visuals:
@@ -81,17 +58,12 @@ def with_renders(visuals: list[Visual], renders: Path) -> list[NotesVisual]:
 
 
 def current_draft(ctx: StageContext, selection: Selection) -> NotesDraft:
-    """The synthesized draft if it is current, else the notes draft as written."""
     draft = read_model(ctx.paths.notes_draft, NotesDraft)
-    try:
-        synthesized = read_model(ctx.paths.notes_synthesis, SynthesizedDraft)
-    except FileNotFoundError:
-        return draft
-    except ValueError:
-        log.warning("ignoring unreadable %s", ctx.paths.notes_synthesis)
-        return draft
-    if synthesized.based_on == draft and synthesized.visual_ids == sorted(
-        v.id for v in selection.visuals
+    synthesized = read_optional(ctx.paths.notes_synthesis, SynthesizedDraft)
+    if (
+        synthesized
+        and synthesized.based_on == draft
+        and synthesized.visual_ids == sorted(v.id for v in selection.visuals)
     ):
         return synthesized.draft
     return draft

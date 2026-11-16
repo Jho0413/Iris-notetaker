@@ -1,8 +1,11 @@
+import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
 
 from pydantic import BaseModel
+
+log = logging.getLogger(__name__)
 
 FRAMES_DIR = "frames"
 VISUALS_DIR = "visuals"
@@ -233,3 +236,13 @@ def write_model(path: Path, model: BaseModel) -> None:
 
 def read_model[M: BaseModel](path: Path, model: type[M]) -> M:
     return model.model_validate_json(path.read_bytes())
+
+
+def read_optional[M: BaseModel](path: Path, model: type[M]) -> M | None:
+    try:
+        return read_model(path, model)
+    except FileNotFoundError:
+        return None
+    except ValueError:
+        log.warning("ignoring unreadable %s", path)
+        return None

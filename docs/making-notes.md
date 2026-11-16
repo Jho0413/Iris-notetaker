@@ -257,7 +257,9 @@ figure can be checked or redrawn later.
 ## Assemble and synthesize: the finished notes
 
 1. **Assemble** replaces each marker with a figure line for that figure, pointing at its redraw
-   or its source crop. A marker for an unknown figure is dropped, and each figure appears once.
+   or its source crop. A marker for an unknown figure is dropped, and each figure appears once. A
+   figure is read only at the start of a line, so a marker inside text gets a line of its own. A
+   first heading that repeats the title is dropped, since the title is shown above the notes.
 2. **Synthesize** reads the notes whole. First, without any model call, it compares the moments'
    frames and the figures' crops to spot likely repeats (going back to an earlier slide, the same
    figure picked twice).
@@ -271,8 +273,9 @@ figure can be checked or redrawn later.
    A rewrite is kept only if nothing is lost: no figure, maths, decision or action item. A group
    whose rewrite fails keeps its sections as written; the other groups still apply. Dropping a
    duplicate figure needs no rewrite: its marker is simply removed.
-6. Assemble runs again on the result. If synthesis fails, or its edits no longer match the notes
-   draft (a re-run of an earlier stage changed it), the notes as written are used.
+6. Assemble runs again on the result. If synthesis fails, its result can't be read, or its edits
+   no longer match the notes draft (a re-run of an earlier stage changed it), the notes as written
+   are used.
 
 *Why:* synthesis is a polish, so it may only improve the notes, never lose a figure's content or a
 fact that isn't kept elsewhere, and never stop a session from finishing.

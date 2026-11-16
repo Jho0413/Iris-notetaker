@@ -9,7 +9,7 @@ from iris.llm import usage
 from iris.models import EventType, Moment, Stage, Visual
 from iris.pipeline.context import StageContext
 from iris.pipeline.stages import align, render, select
-from iris.store.layout import read_model, write_model
+from iris.store.layout import read_optional, write_model
 
 log = logging.getLogger(__name__)
 
@@ -71,7 +71,8 @@ class SelectLane(LiveLane):
 
     async def run(self) -> None:
         tl = self.timeline
-        self._replay = _load_batches(self.ctx)
+        recorded = read_optional(self.ctx.paths.live_select_batches, SelectBatches)
+        self._replay = recorded.batches if recorded else []
         try:
             while True:
                 await tl.wait_until(
@@ -146,13 +147,3 @@ class SelectLane(LiveLane):
                 )
                 return
         self.ctx.emit(EventType.VISUAL_RENDERED, render.rendered_event(rendered))
-
-
-def _load_batches(ctx: StageContext) -> list[list[str]]:
-    try:
-        return read_model(ctx.paths.live_select_batches, SelectBatches).batches
-    except FileNotFoundError:
-        return []
-    except ValueError:
-        log.warning("session %s: ignoring an unreadable %s", ctx.session_id, "select_batches")
-        return []

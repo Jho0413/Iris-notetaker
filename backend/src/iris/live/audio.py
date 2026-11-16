@@ -29,7 +29,7 @@ from iris.media.webm import ChunkStream, NoChunkReason, PlacedWav, find_cluster,
 from iris.models import EventType, Stage, TranscriptSegment
 from iris.pipeline.context import StageContext
 from iris.sources.browser_live import audio_chunks
-from iris.store.layout import SessionPaths, read_model, write_model
+from iris.store.layout import SessionPaths, read_optional, write_model
 
 log = logging.getLogger(__name__)
 
@@ -216,16 +216,6 @@ def _within(segments: list[TranscriptSegment], start: float, end: float) -> list
     return sorted(clamped, key=lambda seg: (seg.start, seg.end))
 
 
-def _load_window(path: Path) -> CachedWindow | None:
-    if not path.exists():
-        return None
-    try:
-        return read_model(path, CachedWindow)
-    except ValueError:
-        log.warning("ignoring unreadable transcript window %s", path)
-        return None
-
-
 class AudioLane(LiveLane):
     lane = Lane.AUDIO
 
@@ -358,7 +348,7 @@ class AudioLane(LiveLane):
         samples = await asyncio.to_thread(self._read, start, end)
         digest = hashlib.sha1(samples).hexdigest()
         path = self.ctx.paths.live_transcript_window(i, start, end, self.rate)
-        cached = await asyncio.to_thread(_load_window, path)
+        cached = await asyncio.to_thread(read_optional, path, CachedWindow)
         if cached is not None and self._reusable(cached, i, start, end, digest):
             await self._wait_committed(cached.prompt_through + 1)
             if cached.prompt == self._prompt(cached.prompt_through):
