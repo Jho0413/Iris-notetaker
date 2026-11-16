@@ -166,6 +166,15 @@ class FakeLane(LiveLane):
             self.wakes += 1
 
 
+async def test_a_lane_is_halted_once_a_lane_it_depends_on_fails(tmp_path: Path):
+    timeline = LiveTimeline()
+    ctx = stage_ctx(tmp_path, live=True)
+    select, screen = FakeLane(ctx, timeline, Lane.SELECT), FakeLane(ctx, timeline, Lane.SCREEN)
+    assert not select.halted
+    await timeline.fail_lane(Lane.SCREEN, "x")
+    assert select.halted and not screen.halted
+
+
 def fake_lanes(failing: set[Lane] = frozenset(), only: set[Lane] | None = None):
     made: dict[Lane, FakeLane] = {}
 

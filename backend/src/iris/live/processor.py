@@ -54,14 +54,14 @@ class LiveProcessor:
     async def _run_lane(self, lane: LiveLane) -> None:
         tl = self.timeline
 
-        def stopped() -> bool:
-            return tl.upstream_failed(lane.lane) or (lane.retries_end_at_notes and tl.ending)
+        def retries_over() -> bool:
+            return lane.halted or (lane.retries_end_at_notes and tl.ending)
 
         async def pause(delay: float) -> bool:
-            return not await tl.wait_until(stopped, delay)
+            return not await tl.wait_until(retries_over, delay)
 
         try:
-            with retries_until(stopped, pause):
+            with retries_until(retries_over, pause):
                 await lane.run()
             if not self.timeline.ending:
                 raise RuntimeError("the lane returned before notes were asked for")

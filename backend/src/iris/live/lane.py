@@ -12,8 +12,9 @@ A lane:
   its final results; the processor then marks it finished. Returning earlier, raising, or still
   running ``live_finish_timeout_s`` after notes are asked for marks it failed instead: the
   recording carries on, and making notes falls back to the full pipeline;
-- when ``timeline.upstream_failed(lane)``, stops making paid model calls (its evidence is
-  incomplete and nothing it makes can be promoted) and just waits for notes to be asked for;
+- when ``halted`` (``timeline.upstream_failed(lane)``), stops making paid model calls (its
+  evidence is incomplete and nothing it makes can be promoted) and just waits for notes to be
+  asked for;
 - retries temporary API errors like the stages (``retry_temporary``), but never once an upstream
   lane has failed (nothing it makes can be promoted), nor once notes are asked for if
   ``retries_end_at_notes``: the processor runs each lane in ``retries_until``, so such a retry's
@@ -40,6 +41,10 @@ class LiveLane:
         self.ctx = ctx
         self.timeline = timeline
         self._wake = asyncio.Event()
+
+    @property
+    def halted(self) -> bool:
+        return self.timeline.upstream_failed(self.lane)
 
     def wake(self) -> None:
         self._wake.set()

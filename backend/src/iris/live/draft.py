@@ -36,11 +36,8 @@ class DraftLane(LiveLane):
         self._due: float | None = None
         self._announced = 0
 
-    def _halted(self) -> bool:
-        return self.timeline.upstream_failed(self.lane)
-
     def _stopping(self) -> bool:
-        return self.timeline.ending or self._halted()
+        return self.timeline.ending or self.halted
 
     def _evidence(self) -> tuple:
         tl = self.timeline
@@ -52,7 +49,7 @@ class DraftLane(LiveLane):
         while True:
             if tl.ending:
                 return
-            if self._halted():
+            if self.halted:
                 await tl.wait_until(lambda: tl.ending)
                 return
             seen = self._evidence()
@@ -108,7 +105,7 @@ class DraftLane(LiveLane):
         tl = self.timeline
         due = self._due
         await tl.wait_until(
-            lambda: tl.ending or self._halted() or self._evidence() != seen,
+            lambda: tl.ending or self.halted or self._evidence() != seen,
             None if due is None else max(due - now, 0),
         )
 

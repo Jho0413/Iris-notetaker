@@ -67,9 +67,6 @@ class SelectLane(LiveLane):
         tl = self.timeline
         return tl.ending and tl.done(Lane.SCREEN) and self.read == len(tl.moments)
 
-    def _halted(self) -> bool:
-        return self.timeline.upstream_failed(self.lane)
-
     async def run(self) -> None:
         tl = self.timeline
         recorded = read_optional(self.ctx.paths.live_select_batches, SelectBatches)
@@ -78,13 +75,13 @@ class SelectLane(LiveLane):
             while True:
                 await tl.wait_until(
                     lambda: (
-                        self._halted()
+                        self.halted
                         or bool(self._next_batch())
                         or self._caught_up()
                         or self._drained()
                     )
                 )
-                if self._halted():
+                if self.halted:
                     log.warning(
                         "session %s: live select stopped: an upstream lane failed",
                         self.ctx.session_id,
@@ -96,7 +93,7 @@ class SelectLane(LiveLane):
                     await tl.advance_selected_to(tl.closed_to)
                 else:
                     break
-            if self._halted():
+            if self.halted:
                 await cancel_and_wait(self._renders)
             elif self._renders:
                 await asyncio.gather(*self._renders)
@@ -129,7 +126,7 @@ class SelectLane(LiveLane):
 
     async def _render(self, visual: Visual) -> None:
         async with self._render_limit:
-            if self.timeline.ending or self._halted():
+            if self.timeline.ending or self.halted:
                 return
             try:
                 with usage.recording(self.ctx, Stage.RENDER):
