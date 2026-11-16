@@ -139,7 +139,6 @@ class Moments(BaseModel):
 class AlignedMoment(BaseModel):
     moment: Moment
     transcript: list[TranscriptSegment]
-    ocr_text: str | None = None
 
 
 class Alignment(BaseModel):
