@@ -8,28 +8,27 @@ import time
 from collections import deque
 from collections.abc import Callable
 from pathlib import Path
-from typing import Literal
 
 import av
 import numpy as np
-from pydantic import BaseModel
 
 from iris import speech
 from iris.live.lane import LiveLane
 from iris.live.timeline import Lane, LiveTimeline
 from iris.llm import usage
 from iris.llm.client import get_openai
-from iris.llm.errors import describe, retry_temporary
+from iris.llm.errors import describe
+from iris.llm.transcription import (
+    CachedChunk,
+    ChunkTranscript,
+    supports_prompt,
+    transcribe_stretch_at,
+)
+from iris.media.audio import SAMPLE_BYTES, fits_transcription_upload, quiet_profile
+from iris.media.webm import ChunkStream, NoChunkReason, PlacedWav, find_cluster, stream_header
 from iris.models import EventType, Stage, Transcript, TranscriptSegment
 from iris.pipeline.context import StageContext
-from iris.pipeline.stages import transcribe
-from iris.sources.browser_live import (
-    PlacedWav,
-    RawPcm,
-    audio_chunks,
-    find_cluster,
-    stream_header,
-)
+from iris.sources.browser_live import audio_chunks
 from iris.store.layout import SessionPaths, read_model, write_model
 
 log = logging.getLogger(__name__)
@@ -38,9 +37,6 @@ CONFIRM_S = 1.0
 PROMPT_CHARS = 500
 MIN_TAIL_S = 1.0
 PROGRESS_S = 5.0
-
-
-NoChunkReason = Literal["gap", "end", "stop"]
 
 
 class LiveDecoder:
@@ -74,14 +70,14 @@ class LiveDecoder:
         self.paths.live_pcm.parent.mkdir(parents=True, exist_ok=True)
         with self.paths.live_pcm.open("wb") as f:
             self._file = f
-            self._wav = PlacedWav(RawPcm(f), self.rate)
+            self._wav = PlacedWav(f.write, self.rate)
             self._decode_all()
             if not self._cancelled:
                 self._wav.flush()
             self._report()
 
     def _decode_all(self) -> None:
-        first = self.wait_chunk(0)
+        first = self.next_chunk(0)
         if not isinstance(first, Path):
             if first == "gap":
                 self._skip("the first audio chunk (the stream header) never arrived")
@@ -119,13 +115,13 @@ class LiveDecoder:
             if found is not None:
                 index, offset = found
                 return seq - (len(files[-2:]) - 1) + index, offset
-            got = self.wait_chunk(seq + 1)
+            got = self.next_chunk(seq + 1)
             if not isinstance(got, Path):
                 return seq + 1 if got == "gap" else None
             seq += 1
             files.append(got)
 
-    def _decode(self, stream: "ChunkStream") -> None:
+    def _decode(self, stream: ChunkStream) -> None:
         assert self._wav is not None
         with stream:
             try:
@@ -157,7 +153,7 @@ class LiveDecoder:
                     if not self._cancelled:
                         self._skip(f"live audio stream could not be read on: {e}")
 
-    def wait_chunk(self, seq: int) -> Path | NoChunkReason:
+    def next_chunk(self, seq: int) -> Path | NoChunkReason:
         gap_since: float | None = None
         while True:
             self._forget_wakeups_before_checking()
@@ -198,64 +194,14 @@ class LiveDecoder:
         self._notify()
 
 
-class ChunkStream(io.RawIOBase):
-    def __init__(
-        self,
-        decoder: LiveDecoder,
-        prefix: bytes,
-        seq: int,
-        path: Path,
-        offset: int,
-    ):
-        self._decoder = decoder
-        self._prefix = io.BytesIO(prefix)
-        self.seq = seq
-        self.ended: NoChunkReason | None = None
-        self._file: io.BufferedReader | None = path.open("rb")
-        self._file.seek(offset)
-
-    def readable(self) -> bool:
-        return True
-
-    def readinto(self, buffer) -> int:  # type: ignore[override]
-        if n := self._prefix.readinto(buffer):
-            return n
-        while self._file is not None:
-            if n := self._file.readinto(buffer):
-                return n
-            got = self._decoder.wait_chunk(self.seq + 1)
-            self._file.close()
-            self._file = None
-            if isinstance(got, Path):
-                self.seq += 1
-                self._file = got.open("rb")
-            else:
-                self.ended = got
-        return 0
-
-    def close(self) -> None:
-        if self._file is not None:
-            self._file.close()
-            self._file = None
-        super().close()
-
-
 def window_cut(samples: np.ndarray, rate: int, min_len: int, max_len: int) -> int:
-    cut = transcribe.quiet_profile(samples, rate).quietest(min_len, max_len, target=max_len)
+    cut = quiet_profile(samples, rate).quietest(min_len, max_len, target=max_len)
     return max_len if cut is None else cut
 
 
-class CachedWindow(BaseModel):
-    index: int
-    start: float
-    end: float
-    audio_sha1: str
-    model: str
-    requested_language: str | None = None
+class CachedWindow(CachedChunk):
     prompt: str
     prompt_through: int
-    language: str | None = None
-    segments: list[TranscriptSegment]
 
 
 class WindowFailed(RuntimeError):
@@ -306,7 +252,7 @@ class AudioLane(LiveLane):
 
     async def run(self) -> None:
         longest = self.max_len + max(self.confirm, self.min_tail)
-        if longest * 2 + 1024 > transcribe.API_MAX_UPLOAD_BYTES:
+        if not fits_transcription_upload(longest):
             raise ValueError("live_window_max_s exceeds the transcription API's upload limit")
         paths = self.ctx.paths
         paths.live_transcript_windows_dir.mkdir(parents=True, exist_ok=True)
@@ -394,23 +340,17 @@ class AudioLane(LiveLane):
 
     def _read(self, start: int, end: int) -> np.ndarray:
         samples = np.fromfile(
-            self.ctx.paths.live_pcm, dtype="<i2", count=end - start, offset=2 * start
+            self.ctx.paths.live_pcm, dtype="<i2", count=end - start, offset=SAMPLE_BYTES * start
         )
         if len(samples) != end - start:
             raise RuntimeError(f"live/audio.pcm is shorter than the {end} samples decoded")
         return samples
 
-    def _cache_path(self, i: int, start: int, end: int) -> Path:
-        ms = f"{round(start * 1000 / self.rate)}_{round(end * 1000 / self.rate)}"
-        return self.ctx.paths.live_transcript_windows_dir / f"{i}_{ms}.json"
-
     def _reusable(self, cached: CachedWindow, i: int, start: int, end: int, digest: str) -> bool:
         t0, t1 = start / self.rate, end / self.rate
         return (
             cached.index == i
-            and cached.audio_sha1 == digest
-            and cached.model == self.model
-            and cached.requested_language == self.language
+            and cached.matches(digest, self.model, self.language)
             and abs(cached.start - t0) < 1e-6
             and abs(cached.end - t1) < 1e-6
             and -1 <= cached.prompt_through < i
@@ -420,7 +360,7 @@ class AudioLane(LiveLane):
     async def _window(self, i: int, start: int, end: int) -> CachedWindow:
         samples = await asyncio.to_thread(self._read, start, end)
         digest = hashlib.sha1(samples).hexdigest()
-        path = self._cache_path(i, start, end)
+        path = self.ctx.paths.live_transcript_window(i, start, end, self.rate)
         cached = await asyncio.to_thread(_load_window, path)
         if cached is not None and self._reusable(cached, i, start, end, digest):
             await self._wait_committed(cached.prompt_through + 1)
@@ -431,13 +371,9 @@ class AudioLane(LiveLane):
         prompt = self._prompt(through)
         language, segments = None, []
         for a, b in await asyncio.to_thread(speech.find_speech, samples, self.rate):
-            at = (start + a) / self.rate
-            result = await self._transcribe(i, samples[a:b], at, prompt)
+            result = await self._transcribe(i, samples[a:b], start + a, prompt)
             language = language or result.language
-            segments += [
-                seg.model_copy(update={"start": seg.start + at, "end": seg.end + at})
-                for seg in result.segments
-            ]
+            segments += result.segments
         segments = _within(segments, start / self.rate, end / self.rate)
         window = CachedWindow(
             index=i,
@@ -455,27 +391,24 @@ class AudioLane(LiveLane):
         return window
 
     async def _transcribe(
-        self, i: int, samples: np.ndarray, offset: float, prompt: str
-    ) -> transcribe.ChunkTranscript:
+        self, i: int, samples: np.ndarray, start: int, prompt: str
+    ) -> ChunkTranscript:
         if self._client is None:
             self._client = get_openai(self.ctx.settings)
-        wav = transcribe.encode_wav(samples, self.rate)
-        where = f"session {self.ctx.session_id}: live window {i} at {offset:.1f}s"
-        client = self._client
-
-        async def call() -> transcribe.ChunkTranscript:
-            with usage.recording(self.ctx, Stage.TRANSCRIBE):
-                return await transcribe.transcribe_chunk(
-                    client,
-                    self.model,
-                    wav,
-                    len(samples) / self.rate,
-                    prompt or None,
-                    language=self.language,
-                )
-
+        where = f"session {self.ctx.session_id}: live window {i} at {start / self.rate:.1f}s"
         try:
-            return await retry_temporary(call, self.ctx.settings.api_retry_delays_s, what=where)
+            with usage.recording(self.ctx, Stage.TRANSCRIBE):
+                return await transcribe_stretch_at(
+                    self._client,
+                    self.model,
+                    samples,
+                    self.rate,
+                    start,
+                    prompt=prompt or None,
+                    language=self.language,
+                    retry_delays_s=self.ctx.settings.api_retry_delays_s,
+                    what=where,
+                )
         except Exception as exc:
             raise WindowFailed(f"{where} failed: {describe(exc)}") from exc
 
@@ -484,7 +417,7 @@ class AudioLane(LiveLane):
             await self._commits.wait_for(lambda: self._committed >= n)
 
     def _prompt(self, through: int) -> str:
-        if through < 0 or not transcribe.supports_prompt(self.model):
+        if through < 0 or not supports_prompt(self.model):
             return ""
         before = self._segment_counts[through - 1] if through > 0 else 0
         if self._segment_counts[through] == before:
@@ -520,7 +453,9 @@ class AudioLane(LiveLane):
         self._committed += 1
         self._segment_counts.append(len(self.timeline.segments))
         start, end = round(window.start * self.rate), round(window.end * self.rate)
-        self._kept.add(self._cache_path(window.index, start, end).name)
+        self._kept.add(
+            self.ctx.paths.live_transcript_window(window.index, start, end, self.rate).name
+        )
         async with self._commits:
             self._commits.notify_all()
         self._changed.set()

@@ -282,6 +282,7 @@ All in `backend/src/iris/`:
 - `llm/client.py`: the one OpenAI client.
 - `llm/errors.py`: error kinds and retries.
 - `llm/structured.py`: structured model calls, the check of their replies, and cached answers.
+- `llm/transcription.py`: speech model calls.
 - `llm/usage.py`: the usage log and cost.
 - `config.py`, `user_settings.py`: settings and their precedence.
 - `api/token.py`, `launch_secrets.py`, `parent.py`: the desktop app's side of the engine.

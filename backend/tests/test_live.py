@@ -16,6 +16,8 @@ from iris.llm import structured
 from iris.llm.errors import UserFacingError
 from iris.llm.usage import append_record
 from iris.main import create_app
+from iris.media.audio import read_wav
+from iris.media.webm import CLUSTER_ID
 from iris.models import (
     LIVE_WITHOUT_AUDIO,
     UNREADABLE_LIVE_AUDIO,
@@ -23,9 +25,7 @@ from iris.models import (
     UsageRecord,
 )
 from iris.pipeline.stages import render, transcribe
-from iris.pipeline.stages.transcribe import read_wav
 from iris.sources.browser_live import (
-    CLUSTER_ID,
     BrowserLiveSource,
     CapturedFrame,
     ChunkConflict,
@@ -34,7 +34,6 @@ from iris.sources.browser_live import (
     contiguous_runs,
     finalize_audio,
     finalize_frames,
-    find_cluster,
     missing_audio_chunks,
     split_shares,
     store_audio_chunk,
@@ -160,22 +159,8 @@ def test_header_only_first_chunk_then_a_gap(paths: SessionPaths, webm: bytes, pa
 def test_runs_split_at_missing_chunks(tmp_path: Path):
     p = [tmp_path / str(i) for i in range(6)]
     chunks = [(0, p[0]), (1, p[1]), (3, p[3]), (4, p[4]), (5, p[5])]
-    assert contiguous_runs(chunks) == [[p[0], p[1]], [p[3], p[4], p[5]]]
+    assert contiguous_runs(chunks) == [chunks[:2], chunks[2:]]
     assert contiguous_runs([]) == []
-
-
-@pytest.mark.parametrize("cut", range(len(CLUSTER_ID) + 1))
-def test_cluster_found_across_file_boundaries(tmp_path: Path, cut: int):
-    stream = b"header-bytes" + CLUSTER_ID + b"cluster"
-    at = len(b"header-bytes") + cut
-    a, b = tmp_path / "a", tmp_path / "b"
-    a.write_bytes(stream[:at])
-    b.write_bytes(stream[at:])
-    found = find_cluster([a, b])
-    assert found is not None
-    index, offset = found
-    assert (len(a.read_bytes()) if index == 1 else 0) + offset == len(b"header-bytes")
-    assert find_cluster([tmp_path / "a"] if cut < len(CLUSTER_ID) else [b]) is None
 
 
 def test_unreadable_audio_raises(paths: SessionPaths):

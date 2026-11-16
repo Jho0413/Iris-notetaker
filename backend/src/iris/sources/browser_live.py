@@ -1,16 +1,16 @@
 import asyncio
-import io
 import logging
-import wave
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import BinaryIO, NamedTuple
+from typing import NamedTuple
 
 import av
 
 from iris.llm.errors import UserFacingError
+from iris.media.audio import open_mono_wav
 from iris.media.frames import FrameNormaliser, GridSampler, normalise_frame, rebuild_frames
+from iris.media.webm import ChunkStream, PlacedWav, StoredChunks, find_cluster, stream_header
 from iris.models import (
     LIVE_WITHOUT_AUDIO,
     UNREADABLE_LIVE_AUDIO,
@@ -27,7 +27,6 @@ MAX_UPLOAD_BYTES = 16 * 1024 * 1024
 WEBM_MAGIC = b"\x1a\x45\xdf\xa3"
 JPEG_MAGIC = b"\xff\xd8\xff"
 
-AUDIO_GAP_S = 0.05
 FRAME_WORKERS = 4
 
 
@@ -115,110 +114,42 @@ class BrowserLiveSource:
         )
 
 
-CLUSTER_ID = b"\x1f\x43\xb6\x75"
-MAX_HEADER_BYTES = 1024 * 1024
-
-Part = bytes | tuple[Path, int]
-
-
-class ChunkReader(io.RawIOBase):
-    def __init__(self, parts: Sequence[Part]):
-        self._parts = list(parts)
-        self._next = 0
-        self._current: io.BufferedIOBase | None = None
-
-    def readable(self) -> bool:
-        return True
-
-    def readinto(self, buffer) -> int:  # type: ignore[override]
-        while True:
-            if self._current is None:
-                if self._next >= len(self._parts):
-                    return 0
-                part = self._parts[self._next]
-                self._next += 1
-                if isinstance(part, bytes):
-                    self._current = io.BytesIO(part)
-                else:
-                    self._current = part[0].open("rb")
-                    self._current.seek(part[1])
-            n = self._current.readinto(buffer)
-            if n:
-                return n
-            self._current.close()
-            self._current = None
-
-    def close(self) -> None:
-        if self._current is not None:
-            self._current.close()
-            self._current = None
-        super().close()
-
-
-def contiguous_runs(chunks: Sequence[tuple[int, Path]]) -> list[list[Path]]:
-    runs: list[list[Path]] = []
+def contiguous_runs(chunks: Sequence[tuple[int, Path]]) -> list[list[tuple[int, Path]]]:
+    runs: list[list[tuple[int, Path]]] = []
     prev = None
     for seq, path in chunks:
         if prev is None or seq != prev + 1:
             runs.append([])
-        runs[-1].append(path)
+        runs[-1].append((seq, path))
         prev = seq
     return runs
 
 
-def find_cluster(files: Sequence[Path], limit: int | None = None) -> tuple[int, int] | None:
-    keep = len(CLUSTER_ID) - 1
-    carry = b""
-    scanned = 0
-    prev_len = 0
-    for i, path in enumerate(files):
-        data = path.read_bytes()
-        pos = (carry + data).find(CLUSTER_ID)
-        if pos >= 0:
-            if pos < len(carry):
-                return i - 1, prev_len - len(carry) + pos
-            return i, pos - len(carry)
-        scanned += len(data)
-        if limit is not None and scanned >= limit:
-            return None
-        carry = (carry + data)[-keep:]
-        prev_len = len(data)
-    return None
-
-
-def stream_header(files: Sequence[Path]) -> bytes | None:
-    found = find_cluster(files, MAX_HEADER_BYTES)
-    if found is not None:
-        index, offset = found
-        return b"".join(p.read_bytes() for p in files[:index]) + files[index].read_bytes()[:offset]
-    if sum(p.stat().st_size for p in files) > MAX_HEADER_BYTES:
-        return None
-    data = b"".join(p.read_bytes() for p in files)
-    for k in range(len(CLUSTER_ID) - 1, 0, -1):
-        if data.endswith(CLUSTER_ID[:k]):
-            return data[:-k]
-    return data
+def _files(run: Sequence[tuple[int, Path]]) -> list[Path]:
+    return [path for _, path in run]
 
 
 def finalize_audio(chunks: Sequence[tuple[int, Path]], dest: Path, rate: int) -> float:
     runs = contiguous_runs(chunks)
     if not runs:
         raise UserFacingError(LIVE_WITHOUT_AUDIO, "no audio was recorded")
+    feed = StoredChunks(chunks)
     tmp = dest.with_suffix(dest.suffix + ".tmp")
     try:
-        with wave.open(str(tmp), "wb") as out:
-            wav = PlacedWav(out, rate)
+        with open_mono_wav(str(tmp), rate) as out:
+            wav = PlacedWav(out.writeframes, rate)
             only_run = len(runs) == 1
-            _decode_run([(p, 0) for p in runs[0]], wav, required=only_run)
-            header = stream_header(runs[0]) if len(runs) > 1 else None
+            first_seq, first_path = runs[0][0]
+            _decode_run(ChunkStream(feed, b"", first_seq, first_path, 0), wav, required=only_run)
+            header = stream_header(_files(runs[0])) if len(runs) > 1 else None
             for run in runs[1:]:
-                found = find_cluster(run)
+                found = find_cluster(_files(run))
                 if header is None or found is None:
                     log.warning("no decodable cluster after a gap; %d chunks skipped", len(run))
                     continue
                 index, offset = found
-                rest = [(p, 0) for p in run[index + 1 :]]
-                _decode_run([header, (run[index], offset), *rest], wav, required=False)
+                seq, path = run[index]
+                _decode_run(ChunkStream(feed, header, seq, path, offset), wav, required=False)
             wav.flush()
     except BaseException:
         tmp.unlink(missing_ok=True)
@@ -230,61 +161,10 @@ def finalize_audio(chunks: Sequence[tuple[int, Path]], dest: Path, rate: int) ->
     return wav.samples / rate
 
 
-class RawPcm:
-    def __init__(self, file: BinaryIO):
-        self.file = file
-
-    def setnchannels(self, n: int) -> None:
-        pass
-
-    def setsampwidth(self, n: int) -> None:
-        pass
-
-    def setframerate(self, rate: int) -> None:
-        pass
-
-    def writeframes(self, data: bytes) -> None:
-        self.file.write(data)
-
-
-class PlacedWav:
-    def __init__(self, out: wave.Wave_write | RawPcm, rate: int):
-        out.setnchannels(1)
-        out.setsampwidth(2)
-        out.setframerate(rate)
-        self.out = out
-        self.rate = rate
-        self.samples = 0
-        self._gap = round(AUDIO_GAP_S * rate)
-        self._resampler: av.AudioResampler | None = None
-
-    def write(self, frame: av.AudioFrame) -> None:
-        if frame.time is not None and round(frame.time * self.rate) - self.samples > self._gap:
-            self.flush()
-            lead = round(frame.time * self.rate) - self.samples
-            if lead > 0:
-                self.out.writeframes(bytes(2 * lead))
-                self.samples += lead
-        if self._resampler is None:
-            self._resampler = av.AudioResampler(format="s16", layout="mono", rate=self.rate)
-        for chunk in self._resampler.resample(frame):
-            self._write_pcm(chunk)
-
-    def flush(self) -> None:
-        if self._resampler is not None:
-            for chunk in self._resampler.resample(None):
-                self._write_pcm(chunk)
-            self._resampler = None
-
-    def _write_pcm(self, frame: av.AudioFrame) -> None:
-        self.out.writeframes(frame.to_ndarray().tobytes())
-        self.samples += frame.samples
-
-
-def _decode_run(parts: Sequence[Part], wav: PlacedWav, *, required: bool) -> None:
-    with ChunkReader(parts) as reader:
+def _decode_run(stream: ChunkStream, wav: PlacedWav, *, required: bool) -> None:
+    with stream:
         try:
-            container = av.open(reader)
+            container = av.open(stream)
         except av.FFmpegError as e:
             if required:
                 raise UserFacingError(

@@ -21,11 +21,12 @@ from iris.live.audio import (
 )
 from iris.live.replay import encode_webm
 from iris.llm import usage
+from iris.llm.transcription import transcribe_chunk
+from iris.media.audio import encode_wav
+from iris.media.webm import CLUSTER_ID
 from iris.models import EventType, SourceKind, Stage, Transcript
 from iris.pipeline.context import StageContext
-from iris.pipeline.stages.transcribe import encode_wav, transcribe_chunk
 from iris.sources.browser_live import (
-    CLUSTER_ID,
     audio_chunks,
     finalize_audio,
     store_audio_chunk,
@@ -35,6 +36,7 @@ from tests.api_errors import connection_error, status_error
 from tests.builders import stage_ctx
 from tests.fakes import fake_openai, install_client
 from tests.media import SPEECH_RATE, WEBM_RATE, split, tone, wav_seconds
+from tests.waiting import decoder_waiting_for
 
 SECONDS = 12
 WORDS = [
@@ -163,20 +165,6 @@ def shuffled(n: int, skip: set[int] = frozenset(), seed: int = 0) -> list[int]:
     order = [i for i in range(n) if i not in skip]
     random.Random(seed).shuffle(order)
     return order
-
-
-def decoder_waiting_for(monkeypatch, seq: int) -> threading.Event:
-    waiting = threading.Event()
-    wait_chunk = audio_lane.LiveDecoder.wait_chunk
-
-    def watched(decoder, n):
-        if n == seq:
-            decoder._report()
-            waiting.set()
-        return wait_chunk(decoder, n)
-
-    monkeypatch.setattr(audio_lane.LiveDecoder, "wait_chunk", watched)
-    return waiting
 
 
 async def reached(waiting: threading.Event) -> None:
@@ -706,6 +694,33 @@ async def test_calls_are_recorded_under_the_transcribe_stage(
     assert {r.model for r in records} == {"whisper-1"}
 
 
+async def test_a_retried_live_window_logs_each_attempt_as_transcription(
+    tmp_path: Path, paths: SessionPaths, webm: bytes, monkeypatch
+):
+    async def gate(n: int) -> None:
+        if n == 0:
+            raise status_error(503, message="overloaded")
+
+    fake = FakeTranscriber(gate)
+    s = settings(tmp_path, api_retry_delays_s=[0.01])
+    run = Run(paths, s, fake, monkeypatch, metered=True)
+    chunks = split(webm, 2000)
+    run.store(chunks, range(len(chunks)))
+    await run.stop()
+
+    failed, retried = fake.calls[0], fake.calls[1]
+    assert failed["sha1"] == retried["sha1"]
+    records = usage.read_usage(paths.usage_log).records
+    window = records[:2]
+    assert len(records) == len(fake.calls) == len(run.windows()) + 1
+    assert {r.stage for r in records} == {Stage.TRANSCRIBE}
+    assert {r.purpose for r in records} == {"transcription"}
+    assert [r.error is not None for r in records] == [True] + [False] * (len(records) - 1)
+    price = s.model_prices["whisper-1"].audio_per_second
+    billed = usage.billed_seconds(retried["seconds"]) * price
+    assert sum(r.cost_usd or 0 for r in window) == pytest.approx(billed)
+
+
 async def test_another_model_invalidates_the_cache_and_stale_windows_are_removed(
     tmp_path: Path, paths: SessionPaths, webm: bytes, monkeypatch
 ):
@@ -810,6 +825,42 @@ async def test_a_cached_window_just_past_its_bounds_still_commits(
     assert again.calls == []
     starts = [seg.start for seg in rerun.timeline.segments]
     assert starts == sorted(starts)
+
+
+WINDOW_KEYS_AS_FIRST_WRITTEN = [
+    "index",
+    "start",
+    "end",
+    "audio_sha1",
+    "model",
+    "requested_language",
+    "prompt",
+    "prompt_through",
+    "language",
+    "segments",
+]
+
+
+async def test_a_window_cached_with_its_keys_in_the_first_written_order_is_reused(
+    tmp_path: Path, paths: SessionPaths, webm: bytes, monkeypatch
+):
+    chunks = split(webm, 2000)
+    s = settings(tmp_path)
+    run = Run(paths, s, FakeTranscriber(), monkeypatch)
+    run.store(chunks, range(len(chunks)))
+    await run.stop()
+    for path in paths.live_transcript_windows_dir.iterdir():
+        window = json.loads(path.read_text())
+        assert sorted(window) == sorted(WINDOW_KEYS_AS_FIRST_WRITTEN)
+        path.write_text(json.dumps({k: window[k] for k in WINDOW_KEYS_AS_FIRST_WRITTEN}, indent=2))
+
+    again = FakeTranscriber()
+    rerun = Run(paths, s, again, monkeypatch)
+    await rerun.stop()
+    assert again.calls == []
+    assert [seg.text for seg in rerun.timeline.segments] == [
+        seg.text for seg in run.timeline.segments
+    ]
 
 
 GAP_WORDS = [(0.2, 0.9), (1.4, 2.3), (8.2, 8.8), (9.3, 10.4), (10.9, 11.6)]

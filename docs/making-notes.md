@@ -71,18 +71,36 @@ frames are picked, sized and saved by the same code, so they match what ingest w
 ## Transcribe: the speech
 
 1. The audio is cut into transcription chunks, each cut placed at the quietest point near where it
-   should fall, so no word is split in half. How long a chunk is depends on the speech model
-   in the settings: `whisper-1`, which times each line, gets long chunks; the others get short
-   chunks, so the times stay close even where a model times a chunk's text as one span.
+   should fall, so no word is split in half. A pause within 3 dB of the quietest one counts as
+   just as quiet, and of those the one nearest where the cut should fall wins. How long a chunk
+   is depends on the speech model in the settings: `whisper-1`, which times each line, gets long
+   chunks, which give it more context; the others get short chunks, so the times stay close even
+   where a model times a chunk's text as one span. No chunk is longer than the speech model
+   accepts in one upload.
 2. Only the speech in each chunk is sent. A small voice detector bundled with Iris (Silero VAD)
    finds the stretches where someone is talking, and each stretch is sent on its own; a chunk
-   with no speech isn't sent at all.
+   with no speech isn't sent at all. Speech is looked for one chunk at a time, so the first
+   chunk's stretches are already on their way while later chunks are still being checked.
 3. The stretches go to the speech model in parallel. Each finished chunk is cached, so a re-run
-   never pays for it again.
+   never pays for it again; a cached chunk is used again only while its audio, the model and the
+   language asked for are all the same.
 4. Each line's times are moved by where its stretch starts, onto the session's clock, and
    everything is merged into one transcript, in order.
 
 *Why:* chunks keep each call bounded and let a failure cost one chunk, not the whole recording.
+
+### Asking each model
+
+Only `whisper-1` times each line, so it is asked for timed lines. A model that tells speakers apart
+(a `-diarize` one) is asked for lines with a speaker each; its speaker labels hold within one
+stretch only. Any other model is asked for plain text, which becomes one line spanning the
+stretch. The reply is read by what comes back, not by the model's name, and each line's times are
+kept within its stretch. The language is sent when the settings name one; otherwise the model
+detects it.
+
+Only `whisper-1` is given the text said just before (a live recording sends it, an upload
+doesn't): it reads it as what came before the audio. The other models read it as instructions,
+and what was said in a session is never sent as instructions.
 
 ### Sending only speech
 
@@ -318,8 +336,11 @@ Prompts treat what was said and shown as data, never as instructions.
 
 - `backend/src/iris/sources/`: the sources and their ingest (`upload.py`, `browser_live.py`)
 - `backend/src/iris/media/`: what the sources and stages share about media: picking, sizing and
-  saving frames (`frames.py`), opening a recording's streams (`container.py`) and small image
-  steps (`images.py`)
+  saving frames (`frames.py`), opening a recording's streams (`container.py`), small image steps
+  (`images.py`), WAV files, quiet points and the upload limit (`audio.py`), and joining a live
+  recording's chunks into one stream (`webm.py`)
+- `backend/src/iris/llm/transcription.py`: what each speech model is asked and how its reply is
+  read, sending one stretch, and the cached chunk
 - `backend/src/iris/pipeline/__init__.py`: `PLAN`, the stage order
 - `backend/src/iris/pipeline/stages/`: one module per stage
 - `backend/src/iris/speech.py`: finding the speech to send

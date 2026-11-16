@@ -10,10 +10,13 @@ import openai
 import pytest
 
 from iris.config import Settings
+from iris.llm import transcription
+from iris.llm.transcription import CachedChunk, transcribe_chunk
+from iris.media.audio import encode_wav
 from iris.models import EventType, Transcript
 from iris.pipeline.context import StageContext
 from iris.pipeline.stages import transcribe
-from iris.pipeline.stages.transcribe import encode_wav, plan_chunks, transcribe_chunk
+from iris.pipeline.stages.transcribe import plan_chunks
 from iris.store.layout import read_model
 from tests.api_errors import status_error
 from tests.builders import stage_ctx
@@ -232,6 +235,51 @@ async def test_transcribe_chunk_plain_string_response():
     assert result.segments[0].text == "hello"
 
 
+async def test_a_stretch_is_sent_as_a_wav_with_its_prompt_and_placed_at_its_start():
+    client = Recorder(
+        {"language": "english", "segments": [{"start": 0.5, "end": 1.0, "text": "a"}]}
+    )
+    samples = np.arange(SPEECH_RATE * 2, dtype="<i2")
+    result = await transcription.transcribe_stretch_at(
+        client,
+        "whisper-1",
+        samples,
+        SPEECH_RATE,
+        3 * SPEECH_RATE,
+        prompt="before",
+        language="en",
+        retry_delays_s=[0],
+        what="a stretch",
+    )
+    assert client.kwargs["file"] == ("chunk.wav", encode_wav(samples, SPEECH_RATE), "audio/wav")
+    assert (client.kwargs["prompt"], client.kwargs["language"]) == ("before", "en")
+    assert result.language == "english"
+    assert [(s.start, s.end, s.text) for s in result.segments] == [(3.5, 4.0, "a")]
+
+
+async def test_a_stretch_is_retried_after_a_temporary_error():
+    calls = []
+
+    async def create(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            raise status_error(503)
+        return {"text": "hi"}
+
+    result = await transcription.transcribe_stretch_at(
+        SimpleNamespace(audio=SimpleNamespace(transcriptions=SimpleNamespace(create=create))),
+        "gpt-4o-transcribe",
+        np.zeros(SPEECH_RATE, dtype="<i2"),
+        SPEECH_RATE,
+        0,
+        language=None,
+        retry_delays_s=[0],
+        what="a stretch",
+    )
+    assert len(calls) == 2
+    assert [(s.start, s.end, s.text) for s in result.segments] == [(0.0, 1.0, "hi")]
+
+
 async def test_stage_offsets_and_merges_timestamps(ctx, monkeypatch):
     pattern = bursts_pattern(20)
     write_wav(ctx.paths.audio, make_audio(pattern))
@@ -415,7 +463,7 @@ async def test_a_blocking_error_in_one_stretch_cancels_the_chunks_other_stretch(
             cancelled.append(n)
             raise
 
-    monkeypatch.setattr(transcribe, "transcribe_chunk", fake_chunk)
+    monkeypatch.setattr(transcription, "transcribe_chunk", fake_chunk)
     use_client(monkeypatch, object())
     with pytest.raises(openai.PermissionDeniedError):
         await asyncio.wait_for(transcribe.run(ctx), 5)
@@ -434,7 +482,7 @@ async def test_a_chunk_without_speech_is_not_sent_and_is_cached_empty(ctx, monke
     assert client.audio.transcriptions.calls == []
     assert read_model(ctx.paths.transcript, Transcript).segments == []
     [path] = ctx.paths.transcript_chunks_dir.glob("*.json")
-    cached = read_model(path, transcribe.CachedChunk)
+    cached = read_model(path, CachedChunk)
     assert cached.segments == [] and cached.language is None
 
     def no_client(_settings):
@@ -484,7 +532,7 @@ async def test_a_chunk_without_speech_never_sets_the_language(ctx, monkeypatch):
     use_client(monkeypatch, client)
     await transcribe.run(ctx, **SMALL)
     chunks = sorted(
-        (read_model(p, transcribe.CachedChunk) for p in ctx.paths.transcript_chunks_dir.iterdir()),
+        (read_model(p, CachedChunk) for p in ctx.paths.transcript_chunks_dir.iterdir()),
         key=lambda c: c.index,
     )
     assert chunks[0].segments == [] and chunks[0].language is None
