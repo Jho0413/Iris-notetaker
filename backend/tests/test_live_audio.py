@@ -694,6 +694,33 @@ async def test_calls_are_recorded_under_the_transcribe_stage(
     assert {r.model for r in records} == {"whisper-1"}
 
 
+async def test_a_retried_live_window_logs_each_attempt_as_transcription(
+    tmp_path: Path, paths: SessionPaths, webm: bytes, monkeypatch
+):
+    async def gate(n: int) -> None:
+        if n == 0:
+            raise status_error(503, message="overloaded")
+
+    fake = FakeTranscriber(gate)
+    s = settings(tmp_path, api_retry_delays_s=[0.01])
+    run = Run(paths, s, fake, monkeypatch, metered=True)
+    chunks = split(webm, 2000)
+    run.store(chunks, range(len(chunks)))
+    await run.stop()
+
+    failed, retried = fake.calls[0], fake.calls[1]
+    assert failed["sha1"] == retried["sha1"]
+    records = usage.read_usage(paths.usage_log).records
+    window = records[:2]
+    assert len(records) == len(fake.calls) == len(run.windows()) + 1
+    assert {r.stage for r in records} == {Stage.TRANSCRIBE}
+    assert {r.purpose for r in records} == {"transcription"}
+    assert [r.error is not None for r in records] == [True] + [False] * (len(records) - 1)
+    price = s.model_prices["whisper-1"].audio_per_second
+    billed = usage.billed_seconds(retried["seconds"]) * price
+    assert sum(r.cost_usd or 0 for r in window) == pytest.approx(billed)
+
+
 async def test_another_model_invalidates_the_cache_and_stale_windows_are_removed(
     tmp_path: Path, paths: SessionPaths, webm: bytes, monkeypatch
 ):
