@@ -13,6 +13,7 @@ import av
 import numpy as np
 
 from iris import speech
+from iris.aio import cancel_and_wait
 from iris.live.lane import LiveLane
 from iris.live.timeline import Lane, LiveTimeline
 from iris.llm import usage
@@ -26,10 +27,10 @@ from iris.llm.transcription import (
 )
 from iris.media.audio import SAMPLE_BYTES, fits_transcription_upload, quiet_profile
 from iris.media.webm import ChunkStream, NoChunkReason, PlacedWav, find_cluster, stream_header
-from iris.models import EventType, Stage, Transcript, TranscriptSegment
+from iris.models import EventType, Stage, TranscriptSegment
 from iris.pipeline.context import StageContext
 from iris.sources.browser_live import audio_chunks
-from iris.store.layout import SessionPaths, read_model, write_model
+from iris.store.layout import SessionPaths, read_optional, write_model
 
 log = logging.getLogger(__name__)
 
@@ -156,7 +157,7 @@ class LiveDecoder:
     def next_chunk(self, seq: int) -> Path | NoChunkReason:
         gap_since: float | None = None
         while True:
-            self._forget_wakeups_before_checking()
+            self._poke.clear()
             if self._cancelled:
                 return "stop"
             path = self.paths.live_audio_chunk(seq)
@@ -174,9 +175,6 @@ class LiveDecoder:
                     return "gap"
             self._report()
             self._poke.wait(timeout)
-
-    def _forget_wakeups_before_checking(self) -> None:
-        self._poke.clear()
 
     def _next_stored(self, seq: int) -> int | None:
         return next((s for s, _ in audio_chunks(self.paths) if s > seq), None)
@@ -219,16 +217,6 @@ def _within(segments: list[TranscriptSegment], start: float, end: float) -> list
     return sorted(clamped, key=lambda seg: (seg.start, seg.end))
 
 
-def _load_window(path: Path) -> CachedWindow | None:
-    if not path.exists():
-        return None
-    try:
-        return read_model(path, CachedWindow)
-    except ValueError:
-        log.warning("ignoring unreadable transcript window %s", path)
-        return None
-
-
 class AudioLane(LiveLane):
     lane = Lane.AUDIO
 
@@ -249,6 +237,14 @@ class AudioLane(LiveLane):
         self._segment_counts: list[int] = []
         self._kept: set[str] = set()
         self._client = None
+        self._decoder: LiveDecoder | None = None
+
+    def wake(self) -> None:
+        if self._decoder and self.timeline.ending:
+            self._decoder.end()
+            self._changed.set()
+        elif self._decoder:
+            self._decoder.poke()
 
     async def run(self) -> None:
         longest = self.max_len + max(self.confirm, self.min_tail)
@@ -263,27 +259,17 @@ class AudioLane(LiveLane):
                 loop.call_soon_threadsafe(self._changed.set)
 
         decoder = LiveDecoder(paths, self.rate, self.ctx.settings.live_audio_gap_wait_s, notify)
+        self._decoder = decoder
+        self.wake()
         decoding = asyncio.create_task(asyncio.to_thread(decoder.run))
         decoding.add_done_callback(lambda _: self._changed.set())
-        forwarding = asyncio.create_task(self._forward_input(decoder))
         windows: dict[int, asyncio.Task[CachedWindow]] = {}
         try:
             await self._process(decoder, decoding, windows)
         finally:
             decoder.cancel()
-            forwarding.cancel()
-            for task in windows.values():
-                task.cancel()
-            await asyncio.gather(decoding, forwarding, *windows.values(), return_exceptions=True)
-
-    async def _forward_input(self, decoder: LiveDecoder) -> None:
-        while True:
-            await self.wait_for_input()
-            if self.timeline.ending:
-                decoder.end()
-                self._changed.set()
-                return
-            decoder.poke()
+            await cancel_and_wait(windows.values())
+            await asyncio.gather(decoding, return_exceptions=True)
 
     async def _process(
         self,
@@ -361,7 +347,7 @@ class AudioLane(LiveLane):
         samples = await asyncio.to_thread(self._read, start, end)
         digest = hashlib.sha1(samples).hexdigest()
         path = self.ctx.paths.live_transcript_window(i, start, end, self.rate)
-        cached = await asyncio.to_thread(_load_window, path)
+        cached = await asyncio.to_thread(read_optional, path, CachedWindow)
         if cached is not None and self._reusable(cached, i, start, end, digest):
             await self._wait_committed(cached.prompt_through + 1)
             if cached.prompt == self._prompt(cached.prompt_through):
@@ -440,11 +426,6 @@ class AudioLane(LiveLane):
     async def _commit(self, window: CachedWindow) -> None:
         segments = _within(window.segments, window.start, window.end)
         language = window.language if segments else None
-        transcript = Transcript(
-            language=self.timeline.language or language,
-            segments=[*self.timeline.segments, *segments],
-        )
-        await asyncio.to_thread(write_model, self.ctx.paths.live_transcript, transcript)
         self.ctx.emit(
             EventType.TRANSCRIPT_CHUNK,
             {"chunk": window.index, "segments": [s.model_dump() for s in segments]},
@@ -462,9 +443,6 @@ class AudioLane(LiveLane):
 
     async def _finish(self, decoded: int) -> None:
         await self.timeline.publish_transcript([], decoded / self.rate)
-        if not self._committed:
-            empty = Transcript(segments=[])
-            await asyncio.to_thread(write_model, self.ctx.paths.live_transcript, empty)
         for old in self.ctx.paths.live_transcript_windows_dir.glob("*.json"):
             if old.name not in self._kept:
                 old.unlink(missing_ok=True)

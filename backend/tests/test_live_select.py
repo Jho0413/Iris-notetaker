@@ -202,7 +202,6 @@ async def test_moments_closing_during_a_call_are_batched_and_ids_continue(
     assert [v.moment_id for v in timeline.visuals] == ["m001", "m002", "m003", "m004"]
     assert [c.moment_id for c in timeline.contents] == ["m001", "m002", "m003", "m004"]
     assert all((ctx.paths.root / v.source_path).is_file() for v in timeline.visuals)
-    assert read_model(ctx.paths.live_selection, Selection) == timeline.selection()
     selected = [data["id"] for kind, data in events if kind == EventType.VISUAL_SELECTED]
     assert selected == ["v000001", "v000002", "v000003", "v000004"]
 
@@ -295,6 +294,26 @@ async def test_live_renders_hit_the_render_cache(
     write_model(ctx.paths.selection, timeline.selection())
     await render.run(ctx)
     assert drawer.calls == ["v000001"]
+
+
+async def test_cancelling_the_lane_cancels_a_render_in_flight_and_caches_nothing(
+    ctx: StageContext, vision: FakeVision, monkeypatch, events: list
+):
+    drawer = Drawer(monkeypatch)
+    drawer.hold["v000001"] = asyncio.Event()
+    driver = Driver(ctx).start()
+    await driver.close(0)
+    await driver.transcribe(0, to=100)
+    await eventually(lambda: drawer.calls == ["v000001"])
+    assert driver.task is not None
+    driver.task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(driver.task, 5)
+    assert drawer.cancelled == ["v000001"]
+    drawer.hold["v000001"].set()
+    await settle(20)
+    assert not list(ctx.paths.render_cache_dir.glob("*.json"))
+    assert not [kind for kind, _ in events if kind == EventType.VISUAL_RENDERED]
 
 
 async def test_an_api_error_in_a_live_render_gives_the_source_crop_uncached(
@@ -498,13 +517,12 @@ async def test_stop_reads_the_rest_once_the_transcript_is_done_and_waits_for_ren
     assert timeline.selected_to == 30
     assert [c.moment_id for c in timeline.contents] == ["m001", "m002", "m003"]
     assert renderer.started == ["v000001"]
-    assert read_model(ctx.paths.live_selection, Selection) == timeline.selection()
 
 
 async def test_no_moments_finishes_at_stop(ctx: StageContext, vision, renderer):
     timeline = await Driver(ctx).start().stop()
     assert vision.calls == [] and timeline.selection() == Selection(visuals=[])
-    assert not ctx.paths.live_selection.exists()
+    assert not ctx.paths.live_select_batches.exists()
 
 
 async def test_a_failed_select_call_fails_the_lane(ctx: StageContext, monkeypatch):
@@ -526,7 +544,7 @@ async def test_screen_and_select_lanes_through_the_processor(
     processor.start()
     for i, frame in enumerate(three_slides().frames):
         store_frame(ctx.paths, float(i), 1, image_bytes(frame))
-        processor.notify_screen()
+        processor.notify(Lane.SCREEN)
         await asyncio.sleep(0)
     timeline = await processor.finish()
     assert timeline.finished == {Lane.SCREEN, Lane.SELECT} and not timeline.failed

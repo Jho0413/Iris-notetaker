@@ -125,17 +125,45 @@ flowchart LR
   back. Once a share has started, its last moment stays open until the next share's frames or
   make notes say where it ended: nothing else can tell sharing having stopped from frames still
   on their way. A restarted lane clears the frames it made and replays every captured one, so
-  its output is the same as if it had run all along. Its list of frames fed is rewritten every
-  so often rather than per frame, since it grows with the session.
-- **Select lane:** waits until the speech around a closed moment is transcribed, reads the moments
-  in batches with the select stage's own step, and redraws each new figure in the background by
-  the render stage's rules.
+  its output is the same as if it had run all along.
+- **Select lane:** waits until the speech around a closed moment is transcribed, a little past its
+  end so speech that outlasts the screen is part of it, reads the moments in batches with the
+  select stage's own step, and redraws each new figure in the background by the render stage's
+  rules. One batch is read at a time and the moments that become ready meanwhile go together into
+  the next, so a batch of the same moments after the same content has the select stage's own cache
+  key. A few figures are redrawn at once; a redraw that fails gives the source crop, uncached, so
+  the render stage tries it again at make notes. The lane notes which moments went into each
+  batch, the ones still to come after a restart included, so a lane restarted after an engine
+  restart (even twice) waits for the same moments and reads the same, cached, batches, until the
+  moments differ or a batch can no longer form. If a lane
+  it depends on fails, the redraws still running are cancelled, leaving no half-written cache
+  entry. At make notes it reads what is left and waits for the redraws already running; the ones
+  not started are left to the render stage, which redraws every figure anyway.
 - **Draft lane:** packs everything before the horizon into notes sections exactly as the write
-  stage would, and writes each one that can no longer change into the write stage's cache.
+  stage would, and writes each one that can no longer change into the write stage's cache, with
+  the input the write stage will give it, so making notes finds it there. A section written live
+  always has more after it, and each one after the first is a continuation, even when the first
+  could not be written. A section is written again only if its input changed (the language became
+  known, say), and the first goes first, since the others carry its title. One that fails is tried
+  once more a minute later, then left (at once for a blocking error) until its input changes; the
+  write stage tries it again at make notes. While the first waits for its retry the others wait
+  too; once it is given up they are written without its title. The Live page's count of sections
+  written only goes up, though a rewrite can briefly lower the real count. At make notes a call
+  already running finishes, since the write stage would make that very call, but no new one
+  starts, not even a retry.
 
 The **horizon** is the earlier of "transcribed to" and "read to": before it, the speech is
 transcribed and every moment ending there has been read. Nothing published later can reach back
-before it, so notes sections before it are final.
+before it, so notes sections before it are final: screen content is published in the order it was
+shown, and the timeline refuses any that starts before what is already read. With no screen
+shared no moment can open, so "moments closed to" follows the transcript, and so does the
+horizon: the sections are written from the speech alone.
+
+A lane that is done (finished, failed, or not run at all) counts as through any time, so a lane
+waiting on it never waits forever. A failed lane isn't a finished one, though: the lanes after it
+stop making paid calls and wait for make notes, which redoes their work. A lane not run is never
+finished, so nothing waiting on its work is promoted. The draft lane only fills a cache, so its
+failure costs nothing at make notes.
 
 *Why:* using the stages' own steps and cache keys makes the live work the final work, not a draft
 redone later. Lanes that only talk through the timeline can each fail, restart or wait without
@@ -147,13 +175,25 @@ the others knowing; a lane whose input lane failed stops making paid calls.
    remaining batches), then ingest writes the standard session files from `live/`. If the engine
    restarted since the recording (the desktop app quit and stopped it, say), no lanes are running:
    fresh ones start first and catch up from the captured files. Their caches make that quick and
-   free, so only what was still open when recording stopped is paid for.
-2. Promotion keeps the lanes' work as far as it holds together, in pipeline order. If the audio,
-   screen and select lanes all finished cleanly, the transcript, moments, alignment and selection
-   become the stages' outputs and the run goes on from write, where the sections written live and
-   the figures redrawn live are cache hits. If only the audio lane did, the run goes on from
-   detect, so the speech isn't transcribed twice. Otherwise (the audio lane failed or missed a
+   free, so only what was still open when recording stopped is paid for. A lane still running
+   after a set time is cancelled and counts as failed, so a stuck lane delays the notes by at most
+   that long; if the run itself is cancelled (the engine shutting down), the lanes stop with it.
+2. Promotion keeps the lanes' work as far as it holds together, in pipeline order: each step is
+   either promoted or run, in its turn. If the audio, screen and select lanes all finished
+   cleanly, the transcript and moments become transcribe's and detect's outputs, align, which
+   makes no model call, runs on them as it would after an upload, the selection becomes select's
+   output, and the run goes on to write, where the sections written live and the figures redrawn
+   live are cache hits. If only the audio lane did, the run goes on from detect, so the speech
+   isn't transcribed twice. Otherwise (the audio lane failed or missed a
    chunk) the full pipeline runs, as for an upload.
+
+   What is written is exactly what the timeline holds, in its order, since the sections written
+   live depend on it. Promotion keeps less if the live work doesn't hold together on disk (two
+   moments or figures with one id, screen content naming an unknown moment, a frame or source
+   crop ingest didn't leave in place), since the stages it skips would have caught that. A
+   promoted step shows as done while recording, and its counts are sent again (the moments found,
+   the figures kept, the transcript's segments), since the page resets its counts when the run
+   starts.
 3. The rest of the pipeline runs as usual. The time from make notes to finished notes depends on
    what was still open at the end, not on how long the session was (after a restart, plus a
    short catch-up that grows with the length of the recording).

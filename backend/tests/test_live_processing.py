@@ -39,6 +39,18 @@ async def test_waiters_wake_when_a_watermark_passes():
     assert tl.transcript().language == "en"
 
 
+async def test_waiting_until_a_watermark_passes_says_it_passed():
+    tl = LiveTimeline()
+    waiter = asyncio.create_task(tl.wait_until(lambda: tl.transcribed_to >= 5, timeout=5))
+    await tl.publish_transcript([], transcribed_to=5)
+    assert await waiter is True
+
+
+async def test_waiting_until_a_watermark_that_never_passes_times_out():
+    tl = LiveTimeline()
+    assert await tl.wait_until(lambda: tl.transcribed_to >= 5, timeout=0.05) is False
+
+
 async def test_watermarks_never_move_back():
     tl = LiveTimeline()
     await tl.publish_transcript([], transcribed_to=30)
@@ -83,10 +95,10 @@ async def test_a_done_lane_releases_everything_waiting_on_it():
     tl = LiveTimeline()
     waiters = [
         asyncio.create_task(tl.wait_until(lambda: tl.transcribed_through(1e9))),
-        asyncio.create_task(tl.wait_until(lambda: tl.closed_through(1e9))),
+        asyncio.create_task(tl.wait_until(lambda: tl.horizon == math.inf)),
     ]
     await tl.fail_lane(Lane.AUDIO, "decoder crashed")
-    await tl.finish_lane(Lane.SCREEN)
+    await tl.finish_lane(Lane.SELECT)
     await asyncio.wait_for(asyncio.gather(*waiters), 1)
 
 
@@ -108,6 +120,18 @@ async def test_complete_needs_the_promoted_lanes_finished_with_nothing_skipped()
     await tl.fail_lane(Lane.SELECT, "x")
     assert not tl.complete
     assert not tl.done(Lane.SELECT) or Lane.SELECT not in tl.finished
+
+
+async def test_a_lane_is_usable_only_once_finished_with_nothing_skipped():
+    tl = LiveTimeline()
+    assert not tl.usable(Lane.AUDIO)
+    await tl.finish_lane(Lane.AUDIO)
+    assert tl.usable(Lane.AUDIO)
+    await tl.mark_skipped_input(Lane.AUDIO)
+    assert not tl.usable(Lane.AUDIO)
+    await tl.fail_lane(Lane.SCREEN, "x")
+    await tl.finish_lane(Lane.SCREEN)
+    assert not tl.usable(Lane.SCREEN)
 
 
 async def test_a_failed_draft_does_not_block_promotion():
@@ -154,6 +178,15 @@ class FakeLane(LiveLane):
             self.wakes += 1
 
 
+async def test_a_lane_is_halted_once_a_lane_it_depends_on_fails(tmp_path: Path):
+    timeline = LiveTimeline()
+    ctx = stage_ctx(tmp_path, live=True)
+    select, screen = FakeLane(ctx, timeline, Lane.SELECT), FakeLane(ctx, timeline, Lane.SCREEN)
+    assert not select.halted
+    await timeline.fail_lane(Lane.SCREEN, "x")
+    assert select.halted and not screen.halted
+
+
 def fake_lanes(failing: set[Lane] = frozenset(), only: set[Lane] | None = None):
     made: dict[Lane, FakeLane] = {}
 
@@ -170,9 +203,9 @@ async def test_input_wakes_only_its_lane_and_finish_flushes_every_lane(tmp_path:
     processor = LiveProcessor(stage_ctx(tmp_path, live=True), factory)
     processor.start()
     processor.start()
-    processor.notify_audio()
+    processor.notify(Lane.AUDIO)
     await settle(5)
-    processor.notify_screen()
+    processor.notify(Lane.SCREEN)
     await settle(5)
     assert lanes[Lane.AUDIO].wakes == 1
     assert lanes[Lane.SCREEN].wakes == 1
@@ -188,9 +221,9 @@ async def test_a_failing_lane_does_not_stop_the_others(tmp_path: Path):
     factory, lanes = fake_lanes(failing={Lane.SCREEN})
     processor = LiveProcessor(stage_ctx(tmp_path, live=True), factory)
     processor.start()
-    processor.notify_screen()
+    processor.notify(Lane.SCREEN)
     await settle(5)
-    processor.notify_audio()
+    processor.notify(Lane.AUDIO)
     await settle(5)
     assert "lane broke" in processor.timeline.failed[Lane.SCREEN]
     assert lanes[Lane.AUDIO].wakes == 1
@@ -204,7 +237,7 @@ async def test_missing_lanes_are_done_but_never_complete(tmp_path: Path):
     factory, _ = fake_lanes(only={Lane.SELECT})
     processor = LiveProcessor(stage_ctx(tmp_path, live=True), factory)
     processor.start()
-    processor.notify_screen()
+    processor.notify(Lane.SCREEN)
     assert processor.timeline.transcribed_through(1e9)
     timeline = await asyncio.wait_for(processor.finish(), 1)
     assert Lane.SELECT in timeline.finished

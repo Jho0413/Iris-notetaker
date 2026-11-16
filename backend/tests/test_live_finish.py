@@ -32,6 +32,7 @@ from iris.models import (
 )
 from iris.pipeline import PLAN, STAGES
 from iris.pipeline.context import StageContext
+from iris.pipeline.stages import align
 from iris.store.layout import SessionPaths, read_model, session_paths
 from tests.builders import stage_ctx
 from tests.fakes import PipelineOpenAI, install_client
@@ -217,9 +218,24 @@ def test_a_live_session_is_finished_at_stop_with_only_the_open_work_left(
     stages = stage_events(client, sid, len(live))
     promoted = [s for kind, s, p in stages if p and kind == "stage_finished"]
     ran = [s for kind, s, p in stages if not p and kind == "stage_finished"]
-    assert promoted == ["transcribe", "detect", "align", "select"]
-    assert ran == ["ingest", "write", "render", "assemble", "synthesize"] or ran == [
+    assert promoted == ["transcribe", "detect", "select"]
+    started = [(s, p) for kind, s, p in stages if kind == "stage_started"]
+    by_group = {
+        ("ingest", False): 0,
+        ("transcribe", True): 1,
+        ("detect", True): 1,
+        ("align", False): 2,
+        ("select", True): 3,
+        ("write", False): 4,
+        ("render", False): 4,
+        ("assemble", False): 5,
+        ("synthesize", False): 6,
+    }
+    assert set(started) == set(by_group)
+    assert [by_group[s] for s in started] == sorted(by_group.values())
+    assert ran == ["ingest", "align", "write", "render", "assemble", "synthesize"] or ran == [
         "ingest",
+        "align",
         "render",
         "write",
         "assemble",
@@ -297,7 +313,7 @@ def test_an_audio_only_session_writes_its_notes_while_recording(app_client: Test
     assert timeline.complete and timeline.moments == []
     stages = stage_events(client, sid, len(live))
     promoted = [s for kind, s, p in stages if p and kind == "stage_finished"]
-    assert promoted == ["transcribe", "detect", "align", "select"]
+    assert promoted == ["transcribe", "detect", "select"]
     notes = client.get(f"/api/sessions/{sid}/notes").json()
     assert notes["visuals"] == [] and "::figure" not in notes["markdown"]
     parts = read_model(root / "notes_draft.json", NotesDraft).parts
@@ -368,7 +384,7 @@ def test_a_skipped_frame_promotes_the_transcript_and_runs_from_detect(
     app_client: TestClient, recording, monkeypatch
 ):
     client = app_client
-    draft_at_detect = draft_seen_at(monkeypatch, Stage.DETECT)
+    draft_at_select = draft_seen_at(monkeypatch, Stage.SELECT)
     sid = start_recording(client)
     processor = client.app.state.runner.live.get(sid)  # type: ignore[attr-defined]
     timeline: LiveTimeline = processor.timeline
@@ -390,7 +406,7 @@ def test_a_skipped_frame_promotes_the_transcript_and_runs_from_detect(
     promoted = [s for kind, s, p in stages if p and kind == "stage_finished"]
     ran = [s for kind, s, p in stages if not p and kind == "stage_finished"]
     assert promoted == ["transcribe"]
-    assert draft_at_detect == [False]
+    assert draft_at_select == [False]
     assert ran[:4] == ["ingest", "detect", "align", "select"]
     assert read_model(root / "transcript.json", Transcript) == timeline.transcript()
     after = by_stage(calls(client, sid)[before:])
@@ -425,10 +441,9 @@ def test_notes_made_after_a_restart_keep_the_live_work(tmp_path: Path, fake: Fak
 
         stages = stage_events(client, sid, 0)
         promoted = [s for kind, s, p in stages if p and kind == "stage_finished"]
-        assert promoted == ["transcribe", "detect", "align", "select"]
+        assert promoted == ["transcribe", "detect", "select"]
         assert not SessionPaths(root).transcript_chunks_dir.exists()
         transcript = read_model(root / "transcript.json", Transcript)
-        assert transcript == read_model(root / "live/transcript.json", Transcript)
         assert transcript.segments[: len(before_restart.segments)] == before_restart.segments
         moments = read_model(root / "moments.json", Moments).moments
         assert len(moments) == len(SCREENS)
@@ -569,13 +584,18 @@ async def test_a_complete_timeline_promotes_everything(tmp_path: Path):
     c = stage_ctx(tmp_path, live=True)
     tl = await timeline_with_work(c)
     assert promote.promotable(c, tl) == promote.EVERYTHING
-    assert promote.remaining_plan(promote.EVERYTHING) == PLAN[4:]
+    assert promote.live_steps(promote.EVERYTHING) == [
+        ([Stage.TRANSCRIBE, Stage.DETECT], []),
+        ([], [Stage.ALIGN]),
+        ([Stage.SELECT], []),
+        *[([], group) for group in PLAN[4:]],
+    ]
 
 
 @pytest.mark.parametrize(
     "spoil",
     [
-        lambda tl, c: tl.failed.update({Lane.SCREEN: "x"}),
+        lambda tl, c: (tl.finished.discard(Lane.SCREEN), tl.failed.update({Lane.SCREEN: "x"})),
         lambda tl, c: tl.skipped_input.add(Lane.SELECT),
         lambda tl, c: tl.finished.discard(Lane.SELECT),
         lambda tl, c: (c.paths.root / "frames/000000000.jpg").unlink(),
@@ -598,9 +618,10 @@ async def test_unusable_screen_work_promotes_only_the_transcript(tmp_path: Path,
     tl = await timeline_with_work(c)
     spoil(tl, c)
     assert promote.promotable(c, tl) == promote.TRANSCRIPT_ONLY
-    plan = promote.remaining_plan(promote.TRANSCRIPT_ONLY)
-    assert plan[0] == [Stage.DETECT] and Stage.TRANSCRIBE not in sum(plan, [])
-    assert plan[1:] == PLAN[2:]
+    assert promote.live_steps(promote.TRANSCRIPT_ONLY) == [
+        ([Stage.TRANSCRIBE], [Stage.DETECT]),
+        *[([], group) for group in PLAN[2:]],
+    ]
 
 
 @pytest.mark.parametrize(
@@ -617,7 +638,7 @@ async def test_unusable_audio_promotes_nothing(tmp_path: Path, spoil):
     await spoil(tl)
     assert promote.promotable(c, tl) == ()
     assert promote.promotable(c, None) == ()
-    assert promote.remaining_plan(()) == PLAN[1:]
+    assert promote.live_steps(()) == [([], group) for group in PLAN[1:]]
 
 
 async def test_promotion_writes_the_timeline_as_it_is(tmp_path: Path):
@@ -626,12 +647,13 @@ async def test_promotion_writes_the_timeline_as_it_is(tmp_path: Path):
     c.emit = lambda t, d: emitted.append((t, d))
     tl = await timeline_with_work(c)
     extras = [await promote.promote(c, tl, stage) for stage in promote.EVERYTHING]
-    assert extras == [{"segments": len(tl.segments)}, {}, {}, {}]
+    assert extras == [{"segments": len(tl.segments)}, {}, {}]
     transcript = read_model(c.paths.transcript, Transcript)
     assert [s.text for s in transcript.segments] == ["b", "a"]
     assert transcript.language == "english"
     assert read_model(c.paths.moments, Moments).moments == tl.moments
     assert read_model(c.paths.selection, Selection) == tl.selection()
+    await align.run(c)
     (item,) = read_model(c.paths.alignment, Alignment).items
     assert [s.text for s in item.transcript] == ["b", "a"]
     assert [t for t, _ in emitted] == ["moment_found", "visual_selected"]

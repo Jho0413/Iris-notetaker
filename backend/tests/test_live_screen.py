@@ -9,11 +9,11 @@ import pytest
 
 from iris.live.screen import ScreenLane
 from iris.live.timeline import Lane, LiveTimeline
-from iris.models import EventType, FrameIndex, Moments
+from iris.models import EventType, FrameIndex
 from iris.pipeline.context import StageContext
 from iris.pipeline.stages.detect import detect_moments, moment_event
 from iris.sources.browser_live import finalize_frames, store_frame
-from iris.store.layout import SessionPaths, read_model
+from iris.store.layout import SessionPaths
 from tests.builders import stage_ctx
 from tests.media import (
     COLOURS,
@@ -82,6 +82,10 @@ def frame_files(paths: SessionPaths) -> dict[str, bytes]:
     return {p.name: p.read_bytes() for p in sorted(paths.frames_dir.glob("*.jpg"))}
 
 
+def fed_times(paths: SessionPaths) -> list[float]:
+    return [int(name.removesuffix(".jpg")) / 1000 for name in frame_files(paths)]
+
+
 async def test_shuffled_frames_within_the_holdback_match_ingest(ctx: StageContext):
     frames = {
         0.0: UNREADABLE_JPEG,
@@ -100,18 +104,15 @@ async def test_shuffled_frames_within_the_holdback_match_ingest(ctx: StageContex
     for times in deliveries:
         await driver.deliver(*((t, frames[t]) for t in times))
         latest = max(latest, *times)
-        if ctx.paths.live_frame_index.exists():
-            live = read_model(ctx.paths.live_frame_index, FrameIndex)
-            assert max(f.t for f in live.frames) + 2.0 <= latest + 1e-9
+        if fed := fed_times(ctx.paths):
+            assert max(fed) + 2.0 <= latest + 1e-9
     timeline = await driver.stop()
 
-    live_index = read_model(ctx.paths.live_frame_index, FrameIndex)
     live_files = frame_files(ctx.paths)
     ingest_index = finalize_frames(ctx.paths, ctx.settings.frame_fps, ctx.settings.frame_max_width)
-    assert live_index == ingest_index
-    assert [f.t for f in live_index.frames] == [1.02, 2.05, 3.5, 4.3, 5.0, 6.1, 7.0]
-    assert (live_index.width, live_index.height) == (320, 240)
     assert live_files == frame_files(ctx.paths)
+    assert [f.t for f in ingest_index.frames] == [1.02, 2.05, 3.5, 4.3, 5.0, 6.1, 7.0]
+    assert (ingest_index.width, ingest_index.height) == (320, 240)
     assert not timeline.skipped_input
 
 
@@ -133,42 +134,24 @@ async def test_a_frame_later_than_the_holdback_is_skipped(
     assert (Lane.SCREEN in driver.timeline.skipped_input) is recorded
     timeline = await driver.stop()
 
-    live = read_model(ctx.paths.live_frame_index, FrameIndex)
-    assert [f.t for f in live.frames] == [0.0, 1.0, 2.4, 4.0, 6.0]
+    fed = fed_times(ctx.paths)
+    assert fed == [0.0, 1.0, 2.4, 4.0, 6.0]
     assert (Lane.SCREEN in timeline.skipped_input) is recorded
     ingest = finalize_frames(ctx.paths, ctx.settings.frame_fps, ctx.settings.frame_max_width)
-    assert (ingest != live) is recorded
+    assert ([f.t for f in ingest.frames] != fed) is recorded
 
 
 async def test_zero_holdback_feeds_frames_as_they_arrive(tmp_path: Path, events: list):
     ctx = stage_ctx(tmp_path, live=True, events=events, live_frame_holdback_s=0)
     driver = await Driver(ctx).start()
     await driver.deliver((0.0, solid_jpeg(COLOURS[0])))
-    assert [f.t for f in read_model(ctx.paths.live_frame_index, FrameIndex).frames] == [0.0]
+    assert fed_times(ctx.paths) == [0.0]
     await driver.stop()
-
-
-async def test_the_frame_index_is_saved_periodically_not_per_frame(ctx: StageContext):
-    def saved() -> list[float]:
-        return [f.t for f in read_model(ctx.paths.live_frame_index, FrameIndex).frames]
-
-    driver = await Driver(ctx).start()
-    for t in range(13):
-        await driver.deliver((float(t), solid_jpeg(COLOURS[0])))
-    assert saved() == [0.0]
-    for t in range(13, 33):
-        await driver.deliver((float(t), solid_jpeg(COLOURS[0])))
-    assert saved() == [float(t) for t in range(31)]
-    await driver.stop()
-    assert saved() == [float(t) for t in range(33)]
 
 
 async def test_no_frames_gives_empty_outputs(ctx: StageContext, events: list):
     timeline = await (await Driver(ctx).start()).stop()
-    assert read_model(ctx.paths.live_frame_index, FrameIndex) == FrameIndex(
-        fps=1.0, width=0, height=0, frames=[]
-    )
-    assert read_model(ctx.paths.live_moments, Moments) == Moments(moments=[])
+    assert frame_files(ctx.paths) == {}
     assert timeline.moments == [] and events == []
 
 
@@ -183,7 +166,6 @@ async def test_with_no_screen_closed_to_follows_the_transcript(ctx: StageContext
     await tl.request_end()
     await asyncio.wait_for(task, 5)
     assert tl.moments == [] and events == []
-    assert read_model(ctx.paths.live_moments, Moments) == Moments(moments=[])
 
 
 async def test_a_fresh_lane_replays_the_captured_frames(ctx: StageContext):
@@ -192,11 +174,12 @@ async def test_a_fresh_lane_replays_the_captured_frames(ctx: StageContext):
     for t in (0.0, 1.0, 2.0, 3.0):
         store_frame(ctx.paths, t, 1, solid_jpeg(COLOURS[int(t)]))
     driver = await Driver(ctx).start()
-    assert [f.t for f in read_model(ctx.paths.live_frame_index, FrameIndex).frames] == [0.0, 1.0]
+    assert fed_times(ctx.paths) == [0.0, 1.0]
     await driver.stop()
     assert not stale.exists()
-    live = read_model(ctx.paths.live_frame_index, FrameIndex)
-    assert live == finalize_frames(ctx.paths, 1.0, 320)
+    live_files = frame_files(ctx.paths)
+    assert [f.t for f in finalize_frames(ctx.paths, 1.0, 320).frames] == [0.0, 1.0, 2.0, 3.0]
+    assert live_files == frame_files(ctx.paths)
 
 
 def deck_ctx(tmp_path: Path, events: list) -> StageContext:
@@ -226,7 +209,6 @@ async def test_moments_match_the_detect_stage_and_close_while_recording(
     expected = detect_moments(ctx.paths.root, index)
     assert len(expected) == 3
     assert timeline.moments == expected
-    assert read_model(ctx.paths.live_moments, Moments) == Moments(moments=expected)
     assert events == [(EventType.MOMENT_FOUND, moment_event(m)) for m in expected]
     assert published_live[-1] == 2
     assert timeline.closed_to == expected[-1].end
@@ -247,10 +229,8 @@ def slides(start: float, img: np.ndarray, seconds: int, seed: int) -> list[tuple
 
 def assert_matches_ingest(ctx: StageContext, timeline: LiveTimeline) -> FrameIndex:
     assert not timeline.skipped_input
-    live = read_model(ctx.paths.live_frame_index, FrameIndex)
     live_files = frame_files(ctx.paths)
     index = finalize_frames(ctx.paths, ctx.settings.frame_fps, ctx.settings.frame_max_width)
-    assert live == index
     assert live_files == frame_files(ctx.paths)
     assert detect_moments(ctx.paths.root, index) == timeline.moments
     return index

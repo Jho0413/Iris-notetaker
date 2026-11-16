@@ -199,7 +199,7 @@ def test_parts_frozen_on_the_live_timeline_are_the_parts_of_the_whole_session(se
     frozen_seen = 0
     for cut in sorted(rng.uniform(0, 1300) for _ in range(30)):
         prefix_transcript, prefix_selection, horizon = live_prefix(rng, transcript, selection, cut)
-        frozen = draft.plan(prefix_transcript, prefix_selection, BUDGET, horizon)
+        frozen = write.split_parts(prefix_transcript, prefix_selection, BUDGET, horizon)[0]
         assert [p.records for p in frozen] == [p.records for p in full[: len(frozen)]]
         assert all(r["start"] < horizon for p in frozen for r in p.records)
         frozen_seen = max(frozen_seen, len(frozen))
@@ -288,7 +288,7 @@ async def test_parts_frozen_live_are_reused_by_the_write_stage_at_stop(tmp_path,
     for upto in range(5, 45, 5):
         await publish_speech(tl, upto, upto - 5)
         await idle(0.05)
-    closed = draft.plan(tl.transcript(), tl.selection(), BUDGET, tl.horizon)
+    closed = write.split_parts(tl.transcript(), tl.selection(), BUDGET, tl.horizon)[0]
     assert len(closed) >= 4
     await eventually(lambda: notes.calls == len(closed))
     await idle(0.1)
@@ -313,7 +313,7 @@ async def test_only_parts_closed_before_the_horizon_are_written(tmp_path, notes)
     contents = [content(0, 0, 50), content(1, 50, 95)]
     await tl.publish_selection(contents, [visual(1, 51)], [], selected_to=95)
     assert tl.horizon == 95
-    frozen = draft.plan(tl.transcript(), tl.selection(), BUDGET, tl.horizon)
+    frozen = write.split_parts(tl.transcript(), tl.selection(), BUDGET, tl.horizon)[0]
     everything, _ = write.split_parts(tl.transcript(), tl.selection(), BUDGET)
     assert frozen and len(everything) > len(frozen)
     await eventually(lambda: notes.calls == len(frozen))
@@ -341,7 +341,7 @@ async def test_a_long_open_moment_makes_no_calls_until_it_closes(tmp_path, notes
     assert tl.horizon == 0 and notes.calls == 0 and events == []
 
     await tl.publish_selection([], [], ["m001"], selected_to=1200)
-    closed = draft.plan(tl.transcript(), tl.selection(), BUDGET, tl.horizon)
+    closed = write.split_parts(tl.transcript(), tl.selection(), BUDGET, tl.horizon)[0]
     assert len(closed) > 4
     await eventually(lambda: notes.calls == len(closed))
     assert live_counts(events)[-1] == len(closed)
@@ -388,7 +388,7 @@ async def test_a_failed_call_is_retried_after_the_retry_delay(tmp_path, notes, m
     notes.fail_next = 1
     task = start_lane(ctx, tl, notes)
     await publish_speech(tl, 12)
-    closed = draft.plan(tl.transcript(), tl.selection(), BUDGET, tl.horizon)
+    closed = write.split_parts(tl.transcript(), tl.selection(), BUDGET, tl.horizon)[0]
     assert len(closed) >= 2
     await eventually(lambda: notes.calls == 1)
     await idle(0.1)
@@ -407,7 +407,7 @@ async def test_a_temporary_error_is_retried_within_the_call(tmp_path, notes, mon
     notes.fail_next, notes.error = 2, connection_error()
     task = start_lane(ctx, tl, notes)
     await publish_speech(tl, 12)
-    closed = draft.plan(tl.transcript(), tl.selection(), BUDGET, tl.horizon)
+    closed = write.split_parts(tl.transcript(), tl.selection(), BUDGET, tl.horizon)[0]
     await eventually(lambda: notes.calls == len(closed) + 2)
     assert notes.payloads[0] == notes.payloads[1] == notes.payloads[2]
     assert live_counts(events)[-1] == len(closed)
@@ -458,7 +458,7 @@ async def test_a_blocking_error_gives_the_payload_up_at_once(tmp_path, notes, mo
     notes.fail_next, notes.error = 1, status_error(401)
     task = start_lane(ctx, tl, notes)
     await publish_speech(tl, 12)
-    closed = draft.plan(tl.transcript(), tl.selection(), BUDGET, tl.horizon)
+    closed = write.split_parts(tl.transcript(), tl.selection(), BUDGET, tl.horizon)[0]
     assert len(closed) >= 2
     await eventually(lambda: notes.calls == len(closed))
     await idle(0.3)
@@ -476,7 +476,7 @@ async def test_a_model_that_always_fails_validation_is_called_at_most_twice_per_
     notes.invalid = lambda data: True
     task = start_lane(ctx, tl, notes)
     await publish_speech(tl, 20)
-    closed = draft.plan(tl.transcript(), tl.selection(), BUDGET, tl.horizon)
+    closed = write.split_parts(tl.transcript(), tl.selection(), BUDGET, tl.horizon)[0]
     assert len(closed) >= 2
     await eventually(lambda: notes.calls == draft.MAX_ATTEMPTS * len(closed))
     await idle(TIME_FOR_ANOTHER_RETRY_S)
@@ -487,7 +487,7 @@ async def test_a_model_that_always_fails_validation_is_called_at_most_twice_per_
 
     notes.invalid = lambda data: False
     await publish_speech(tl, 40, 20)
-    more = draft.plan(tl.transcript(), tl.selection(), BUDGET, tl.horizon)
+    more = write.split_parts(tl.transcript(), tl.selection(), BUDGET, tl.horizon)[0]
     assert len(more) > len(closed)
     await eventually(
         lambda: notes.calls == draft.MAX_ATTEMPTS * len(closed) + len(more) - len(closed)
@@ -529,13 +529,13 @@ async def test_a_part_that_cannot_freeze_blocks_nothing_and_the_write_stage_retr
 async def test_no_call_starts_once_stop_is_requested_while_planning(tmp_path, notes, monkeypatch):
     ctx, _ = make_ctx(tmp_path)
     tl = audio_only()
-    real_plan = draft.plan
+    real_split = write.split_parts
 
-    def plan_then_stop(*args):
+    def split_then_stop(*args):
         tl.ending = True
-        return real_plan(*args)
+        return real_split(*args)
 
-    monkeypatch.setattr(draft, "plan", plan_then_stop)
+    monkeypatch.setattr(write, "split_parts", split_then_stop)
     await publish_speech(tl, 30)
     task = start_lane(ctx, tl, notes)
     await asyncio.wait_for(task, 2)
@@ -547,7 +547,7 @@ async def test_a_restarted_lane_reuses_its_frozen_parts(tmp_path, notes):
     tl = audio_only()
     task = start_lane(ctx, tl, notes)
     await publish_speech(tl, 30)
-    closed = draft.plan(tl.transcript(), tl.selection(), BUDGET, tl.horizon)
+    closed = write.split_parts(tl.transcript(), tl.selection(), BUDGET, tl.horizon)[0]
     await eventually(lambda: notes.calls == len(closed))
     await stop(tl, task)
     ctx2, events = make_ctx(tmp_path)
@@ -566,7 +566,7 @@ async def test_parts_rewritten_once_the_language_is_known_never_lower_the_count(
     tl = audio_only()
     task = start_lane(ctx, tl, notes)
     await tl.publish_transcript([seg(i) for i in range(20)], transcribed_to=200)
-    closed = draft.plan(tl.transcript(), tl.selection(), BUDGET, tl.horizon)
+    closed = write.split_parts(tl.transcript(), tl.selection(), BUDGET, tl.horizon)[0]
     assert len(closed) >= 2
     await eventually(lambda: notes.calls == len(closed))
     await tl.publish_transcript([seg(20)], transcribed_to=210, language="en")

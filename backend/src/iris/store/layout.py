@@ -1,8 +1,11 @@
+import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
 
 from pydantic import BaseModel
+
+log = logging.getLogger(__name__)
 
 FRAMES_DIR = "frames"
 VISUALS_DIR = "visuals"
@@ -103,22 +106,6 @@ class SessionPaths:
 
     def live_transcript_window(self, index: int, start: int, end: int, rate: int) -> Path:
         return self.live_transcript_windows_dir / transcript_cache_name(index, start, end, rate)
-
-    @property
-    def live_transcript(self) -> Path:
-        return self.live_dir / "transcript.json"
-
-    @property
-    def live_frame_index(self) -> Path:
-        return self.live_dir / "frames.json"
-
-    @property
-    def live_moments(self) -> Path:
-        return self.live_dir / "moments.json"
-
-    @property
-    def live_selection(self) -> Path:
-        return self.live_dir / "selection.json"
 
     @property
     def live_select_batches(self) -> Path:
@@ -249,3 +236,13 @@ def write_model(path: Path, model: BaseModel) -> None:
 
 def read_model[M: BaseModel](path: Path, model: type[M]) -> M:
     return model.model_validate_json(path.read_bytes())
+
+
+def read_optional[M: BaseModel](path: Path, model: type[M]) -> M | None:
+    try:
+        return read_model(path, model)
+    except FileNotFoundError:
+        return None
+    except ValueError:
+        log.warning("ignoring unreadable %s", path, exc_info=True)
+        return None

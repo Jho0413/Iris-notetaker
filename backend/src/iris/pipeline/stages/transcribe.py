@@ -17,7 +17,7 @@ from iris.llm.transcription import (
 from iris.media.audio import fits_transcription_upload, quiet_profile, read_wav
 from iris.models import EventType, Transcript
 from iris.pipeline.context import StageContext
-from iris.store.layout import read_model, write_model
+from iris.store.layout import read_optional, write_model
 
 log = logging.getLogger(__name__)
 
@@ -118,15 +118,10 @@ async def run(
     for i, (s, e) in enumerate(chunks):
         digest = hashlib.sha1(samples[s:e]).hexdigest()
         path = ctx.paths.transcript_chunk(i, s, e, rate)
-        if path.exists():
-            try:
-                cached = read_model(path, CachedChunk)
-            except ValueError:
-                log.warning("ignoring unreadable chunk cache %s", path)
-            else:
-                if cached.matches(digest, model, requested):
-                    finish(cached)
-                    continue
+        cached = read_optional(path, CachedChunk)
+        if cached is not None and cached.matches(digest, model, requested):
+            finish(cached)
+            continue
         todo.append((i, s, e, digest))
 
     if not todo:

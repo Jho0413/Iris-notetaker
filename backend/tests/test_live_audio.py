@@ -36,7 +36,7 @@ from tests.api_errors import connection_error, status_error
 from tests.builders import stage_ctx
 from tests.fakes import fake_openai, install_client
 from tests.media import SPEECH_RATE, WEBM_RATE, split, tone, wav_seconds
-from tests.waiting import decoder_waiting_for
+from tests.waiting import decoder_waiting_for, settle
 
 SECONDS = 12
 WORDS = [
@@ -269,7 +269,7 @@ async def test_no_audio_at_all(tmp_path: Path, paths: SessionPaths, monkeypatch)
     run = Run(paths, settings(tmp_path), fake, monkeypatch)
     await run.stop()
     assert not fake.calls and Lane.AUDIO not in run.timeline.skipped_input
-    assert read_model(paths.live_transcript, Transcript).segments == []
+    assert run.timeline.transcript() == Transcript(segments=[])
 
 
 async def test_unreadable_audio_is_skipped_not_fatal(
@@ -279,6 +279,17 @@ async def test_unreadable_audio_is_skipped_not_fatal(
     run.store([b"\x1a\x45\xdf\xa3 but not really webm"], [0])
     await run.stop()
     assert Lane.AUDIO in run.timeline.skipped_input
+
+
+async def test_notes_asked_for_after_the_decoder_gave_up_still_end_the_lane(
+    tmp_path: Path, paths: SessionPaths, monkeypatch
+):
+    gave_up = threading.Event()
+    monkeypatch.setattr(audio_lane.LiveDecoder, "run", lambda _: gave_up.set())
+    run = Run(paths, settings(tmp_path), FakeTranscriber(), monkeypatch)
+    await reached(gave_up)
+    await settle(20)
+    await run.stop(timeout=5)
 
 
 def in_silence(t: float, pad: float = 0.08) -> bool:
@@ -357,8 +368,8 @@ async def test_transcript_commits_while_recording_and_stop_flushes_the_rest(
     assert run.timeline.transcribed_to > early
     n = len(run.windows())
     assert run.chunk_events() == list(range(n))
-    transcript = read_model(paths.live_transcript, Transcript)
-    assert transcript == run.timeline.transcript().model_copy(update={"language": "english"})
+    transcript = run.timeline.transcript()
+    assert transcript.language == "english"
     assert len(transcript.segments) == n
     starts = [s.start for s in transcript.segments]
     assert starts == sorted(starts)
@@ -486,7 +497,7 @@ async def test_failing_lane_is_marked_failed_by_the_processor(
     processor.start()
     for seq, data in enumerate(split(webm, 2000)):
         store_audio_chunk(paths, seq, data)
-        processor.notify_audio()
+        processor.notify(Lane.AUDIO)
     timeline = processor.timeline
     await asyncio.wait_for(timeline.wait_until(lambda: Lane.AUDIO in timeline.failed), 10)
     timeline = await processor.finish()
@@ -511,7 +522,7 @@ async def test_a_window_transcribed_at_stop_is_still_retried(
     processor.start()
     for seq, data in enumerate(split(webm, 2000)):
         store_audio_chunk(paths, seq, data)
-        processor.notify_audio()
+        processor.notify(Lane.AUDIO)
     timeline = await processor.finish()
     assert failed_at_stop
     assert Lane.AUDIO in timeline.finished and Lane.AUDIO not in timeline.failed
@@ -638,7 +649,7 @@ async def test_segments_past_the_window_end_stay_inside_it(
         assert all(a - 1e-9 <= seg.start <= seg.end <= b + 1e-9 for seg in in_window)
 
 
-async def test_the_language_is_the_first_spoken_windows_in_timeline_and_file(
+async def test_the_language_is_the_first_spoken_windows(
     tmp_path: Path, paths: SessionPaths, webm: bytes, monkeypatch
 ):
     fake = FakeTranscriber()
@@ -656,7 +667,7 @@ async def test_the_language_is_the_first_spoken_windows_in_timeline_and_file(
     run.store(chunks, range(len(chunks)))
     await run.stop()
     assert run.timeline.language == "english"
-    assert read_model(paths.live_transcript, Transcript).language == "english"
+    assert run.timeline.transcript().language == "english"
 
 
 async def test_at_most_the_configured_number_of_windows_are_transcribed_at_once(

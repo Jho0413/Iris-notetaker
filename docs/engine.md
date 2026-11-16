@@ -92,7 +92,7 @@ Promotion is a live recording's results kept as the stages' own
 | `transcript_chunks/` | each transcribed chunk (a cache) | transcribe |
 | `transcript.json` | what was said, with its times | transcribe, or promotion |
 | `moments.json` | the moments found on screen | detect, or promotion |
-| `alignment.json` | each moment with the speech around it | align, or promotion |
+| `alignment.json` | each moment with the speech around it | align |
 | `selection_batches/` | each batch of moments read (a cache) | select, or the select lane |
 | `selection.json` | what was read on screen, and the figures kept | select, or promotion |
 | `visuals/` | each figure's source crop and its redraw | select (crops) and render (redraws), or the select lane |
@@ -116,10 +116,6 @@ A live recording keeps its own files in `live/`:
 | `live/frames/` | the screen stills as captured, by time and share | the API, while recording |
 | `live/audio.pcm` | the chunks decoded so far, as one stream | the audio lane |
 | `live/transcript_windows/` | each transcribed window (a cache) | the audio lane |
-| `live/transcript.json` | the transcript so far | the audio lane |
-| `live/frames.json` | the stills fed to the moment detector so far | the screen lane |
-| `live/moments.json` | the moments closed so far | the screen lane |
-| `live/selection.json` | what has been read on screen so far | the select lane |
 | `live/select_batches.json` | which moments went into each batch read, so a restarted lane reads the same batches and finds them cached | the select lane |
 
 ## Runs and the job runner
@@ -135,6 +131,9 @@ A live recording keeps its own files in `live/`:
    that no longer exist.
 5. Each time the engine starts, it marks every session still "processing" as failed: its run was
    cut off by a quit, a restart or a crash. A re-run then resumes from the stage it reached.
+   Recordings are left alone: in a browser a recording carries on through a restart, and the
+   desktop app stops its own when it starts. A command-line run on the same data while the engine
+   starts is marked too, though it carries on; if it finishes, the mark is cleared.
 
 *Why:* one user on one machine needs no queue server or worker process. Cut-off runs are found
 at start-up, not at shutdown, because a crash never reaches shutdown code.
