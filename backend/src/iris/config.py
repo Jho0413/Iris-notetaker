@@ -1,5 +1,3 @@
-"""Settings, read from environment variables (prefix ``IRIS_``) or ``backend/.env``."""
-
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
@@ -7,8 +5,6 @@ from typing import Literal
 from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# The two-letter codes Whisper knows (its tokenizer's language list), so a typo such as "jp" for
-# "ja" fails at startup instead of failing every transcription request.
 _WHISPER_CODES = (
     "af am ar as az ba be bg bn bo br bs ca cs cy da de el en es et eu fa fi fo fr gl gu ha "
     "he hi hr ht hu hy id is it ja jw ka kk km kn ko la lb ln lo lt lv mg mi mk ml mn mr ms "
@@ -19,7 +15,6 @@ TRANSCRIBE_LANGUAGES = frozenset(_WHISPER_CODES.split())
 
 
 def check_language(value: object) -> str | None:
-    """A spoken-language setting as a Whisper code, or None for "auto" (the model detects it)."""
     if value is None:
         return None
     code = str(value).strip().lower()
@@ -33,31 +28,18 @@ def check_language(value: object) -> str | None:
     return code
 
 
-# --- Model prices (cost tracking) --------------------------------------------------------------
-
-
 class ModelPrice(BaseModel):
-    """What one model costs, in USD. Token prices are per million tokens.
-
-    A price left as ``None`` is unknown: a call that uses that part of the price is reported as
-    unpriced, never guessed (``iris.llm.usage.price_call``).
-    """
-
-    input: float | None = None  # text input (and, for chat models, image input)
+    input: float | None = None
     cached_input: float | None = None
-    output: float | None = None  # text output, including reasoning tokens
-    image_input: float | None = None  # image models bill image input tokens separately
+    output: float | None = None
+    image_input: float | None = None
     image_output: float | None = None
-    audio_input: float | None = None  # token-billed transcription models
-    audio_per_second: float | None = None  # duration-billed models, per second rounded up
-    # Requests with more than this many input tokens are billed at ``long_context`` instead.
+    audio_input: float | None = None
+    audio_per_second: float | None = None
     long_context_above: int | None = None
     long_context: ModelPrice | None = None
 
 
-# Standard-tier prices from https://developers.openai.com/api/docs/pricing, checked on the date
-# below. Update both together. Models missing here (e.g. gpt-transcribe, listed only with a
-# per-minute estimate) are reported as unpriced.
 PRICES_CHECKED = "2026-11-03"
 MODEL_PRICES: dict[str, ModelPrice] = {
     "gpt-5.5": ModelPrice(
@@ -82,7 +64,6 @@ MODEL_PRICES: dict[str, ModelPrice] = {
     "gpt-4.1-mini": ModelPrice(input=0.40, cached_input=0.10, output=1.60),
     "gpt-4o": ModelPrice(input=2.50, cached_input=1.25, output=10.00),
     "gpt-4o-mini": ModelPrice(input=0.15, cached_input=0.075, output=0.60),
-    # Image models: no text output price is listed for gpt-image-2 or gpt-image-1-mini.
     "gpt-image-2": ModelPrice(input=5.00, cached_input=1.25, image_input=8.00, image_output=30.00),
     "gpt-image-1.5": ModelPrice(
         input=5.00, cached_input=1.25, image_input=8.00, image_output=32.00, output=10.00
@@ -90,9 +71,6 @@ MODEL_PRICES: dict[str, ModelPrice] = {
     "gpt-image-1-mini": ModelPrice(
         input=2.00, cached_input=0.20, image_input=2.50, image_output=8.00
     ),
-    # Transcription. Whisper is $0.006 per minute, billed per second (rounded up). The gpt-4o
-    # transcribe models' model pages list audio input at these rates; the pricing page lists the
-    # same figure as plain "Input", applied here to text input (the prompt) too.
     "whisper-1": ModelPrice(audio_per_second=0.0001),
     "gpt-4o-transcribe": ModelPrice(input=2.50, audio_input=2.50, output=10.00),
     "gpt-4o-transcribe-diarize": ModelPrice(input=2.50, audio_input=2.50, output=10.00),
@@ -105,72 +83,51 @@ Effort = Literal["low", "medium", "high"]
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="IRIS_", env_file=".env", extra="ignore")
 
-    # Storage: data_dir/iris.db and data_dir/sessions/<id>/
     data_dir: Path = Path("data")
 
-    # OpenAI. Read as OPENAI_API_KEY only (no IRIS_ prefix): the alias replaces the prefixed name.
     openai_api_key: str | None = Field(default=None, validation_alias="OPENAI_API_KEY")
-    transcribe_model: str = "whisper-1"  # the only OpenAI transcription model with timestamps
-    # Spoken language (ISO-639-1, e.g. "en"), sent with every transcription request. Detection
-    # is unreliable (whisper-1 hears some British English as Welsh, and a live session's first
-    # window carries its guess into the rest through the prompt). "auto" lets the model detect it.
+    transcribe_model: str = "whisper-1"
     transcribe_language: str | None = "en"
-    vision_model: str = "gpt-5.5"  # reads the screen; checks rendered visuals
+    vision_model: str = "gpt-5.5"
     notes_model: str = "gpt-5.5"
-    diagram_model: str = "gpt-5.5"  # writes SVG for exact diagrams, charts and graphs
-    image_model: str = "gpt-image-2"  # redraws illustrations from the brief alone
+    diagram_model: str = "gpt-5.5"
+    image_model: str = "gpt-image-2"
     image_quality: Literal["low", "medium", "high"] = "high"
     reasoning_effort: Literal["low", "medium", "high"] = "medium"
 
-    # Rendering: attempts per renderer before falling back, and concurrent visuals.
     render_attempts: int = Field(default=2, ge=1, le=5)
     render_concurrency: int = Field(default=4, ge=1, le=16)
 
-    # Iris's own retries of one unit of work (a transcription chunk, a selection batch, a notes
-    # section, a synthesis call, a live window or batch) after a temporary API error, on top of
-    # the SDK's short retries: the delay before each further attempt. Figures are not retried:
-    # they fall back to the source crop.
     api_retry_delays_s: list[float] = Field(default_factory=lambda: [15.0, 60.0, 120.0])
 
-    # Ingest
-    frame_fps: float = 1.0  # open question: 1 or 2 fps
+    frame_fps: float = 1.0
     frame_max_width: int = 1280
-    # The speech models work at 16 kHz: a higher rate gains nothing and makes a long transcription
-    # chunk too big to upload.
     audio_sample_rate: int = Field(default=16_000, ge=8_000, le=16_000)
 
-    # Selection: bound images and transcript context per vision call.
     selection_batch_size: int = Field(default=6, ge=1, le=20)
 
-    # Serialized evidence characters per notes call (plus prompt and small metadata).
     notes_context_chars: int = Field(default=24_000, ge=2_000, le=60_000)
 
-    # Final synthesis: one planning call over the whole notes, then rewrites of only the sections
-    # its edits touch.
-    synthesis: bool = True  # off: the assembled notes are final
+    synthesis: bool = True
     synthesis_model: str = "gpt-5.5"
-    synthesis_plan_reasoning_effort: Effort = "low"  # the planning call runs on every long session
-    synthesis_reasoning_effort: Effort | None = None  # section rewrites; unset: notes effort
+    synthesis_plan_reasoning_effort: Effort = "low"
+    synthesis_reasoning_effort: Effort | None = None
 
-    # Live processing while recording.
-    live_processing: bool = True  # off: processed only when notes are made, like an upload
-    live_audio_gap_wait_s: float = Field(default=35.0, gt=0)  # wait for a missing chunk, then skip
-    live_window_min_s: float = Field(default=5.0, gt=0)  # transcription windows are cut at the
-    live_window_max_s: float = Field(default=15.0, gt=0)  # quietest point between these lengths
+    live_processing: bool = True
+    live_audio_gap_wait_s: float = Field(default=35.0, gt=0)
+    live_window_min_s: float = Field(default=5.0, gt=0)
+    live_window_max_s: float = Field(default=15.0, gt=0)
     live_transcribe_concurrency: int = Field(default=2, ge=1, le=8)
-    live_frame_holdback_s: float = Field(default=2.0, ge=0)  # frames wait this long to be ordered
-    live_speech_pad_s: float = Field(default=5.0, ge=0)  # transcript past a moment before select
+    live_frame_holdback_s: float = Field(default=2.0, ge=0)
+    live_speech_pad_s: float = Field(default=5.0, ge=0)
     live_render_concurrency: int = Field(default=2, ge=1, le=16)
-    live_finish_timeout_s: float = Field(default=300.0, gt=0)  # lanes still flushing are dropped
+    live_finish_timeout_s: float = Field(default=300.0, gt=0)
 
-    # Cost controls: reasoning effort per call type; unset uses ``reasoning_effort``.
-    select_reasoning_effort: Effort | None = None  # screen reading
+    select_reasoning_effort: Effort | None = None
     notes_reasoning_effort: Effort | None = None
-    diagram_reasoning_effort: Effort | None = None  # SVG figures
-    check_reasoning_effort: Effort | None = None  # figure checks
+    diagram_reasoning_effort: Effort | None = None
+    check_reasoning_effort: Effort | None = None
 
-    # Model price table (USD). IRIS_MODEL_PRICES is JSON whose entries add to or replace the
-    # defaults, e.g. {"my-model": {"input": 1.0, "output": 4.0}}.
     model_prices: dict[str, ModelPrice] = Field(default_factory=lambda: dict(MODEL_PRICES))
 
     @field_validator("model_prices", mode="after")
@@ -178,13 +135,8 @@ class Settings(BaseSettings):
     def _merge_default_prices(cls, prices: dict[str, ModelPrice]) -> dict[str, ModelPrice]:
         return {**MODEL_PRICES, **prices}
 
-    # Server
     cors_origins: list[str] = ["http://localhost:5173"]
-    # Set by the desktop app at each launch (iris/api/token.py): when set, every request must
-    # carry it in X-Iris-Token, else 401. Unset (empty): no token is needed, as with `make dev`.
     api_token: SecretStr | None = None
-    # Set by the desktop app to its own pid (iris/parent.py): the server shuts itself down once
-    # that process is gone, checking every parent_poll_s seconds.
     parent_pid: int | None = Field(default=None, gt=0)
     parent_poll_s: float = Field(default=1.0, gt=0, le=60)
 
@@ -221,7 +173,6 @@ class Settings(BaseSettings):
 
     @property
     def user_settings_path(self) -> Path:
-        """Settings saved from the UI's Settings page (``iris/user_settings.py``)."""
         return self.data_dir / "settings.json"
 
 
