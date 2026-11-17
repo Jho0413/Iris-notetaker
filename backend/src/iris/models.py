@@ -350,7 +350,7 @@ class SessionUsageTotals(BaseModel):
 class SessionUsage(SessionUsageTotals):
     records: list[UsageRecord] = []
 
-    def view(self) -> "SessionUsageView":
+    def view(self) -> SessionUsageView:
         return SessionUsageView(
             **self.model_dump(exclude={"records"}),
             records=[

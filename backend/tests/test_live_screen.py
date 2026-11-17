@@ -50,7 +50,7 @@ class Driver:
         self.lane.wait_for_input = waiting  # type: ignore[method-assign]
         self.task: asyncio.Task[None] | None = None
 
-    async def start(self) -> "Driver":
+    async def start(self) -> Driver:
         self.task = asyncio.create_task(self.lane.run())
         await asyncio.wait_for(self.idle.wait(), 10)
         return self

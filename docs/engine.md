@@ -196,7 +196,16 @@ redraw again.
    with the reason, never as free. Images or audio in a call are billed at their own price only
    where the model has one; otherwise they count as ordinary tokens. An image model's output
    with no breakdown counts as image tokens. Audio billed by length is charged per second,
-   rounded up.
+   rounded up. A request with more input tokens than a model's long-context threshold is billed
+   at its long-context price.
+
+   The default list is OpenAI's standard-tier
+   [pricing page](https://developers.openai.com/api/docs/pricing), kept with the date it was
+   checked; the two are updated together. A model the page gives only an estimate for
+   (`gpt-transcribe`, per minute) is left out, so its calls show as unpriced. The page lists the
+   gpt-4o transcribe models' audio price as plain "Input", so it applies to their text prompt too.
+   It lists no text output price for `gpt-image-2` or `gpt-image-1-mini`, so their entries have
+   none. A chat model's output price covers its reasoning tokens.
 4. Totals per stage, model and purpose are added up from the log each time the API or `iris cost`
    asks, so they are current while a stage runs; no summary is kept beside the log. A re-run that
    only hits its caches makes no calls, so it adds nothing.
@@ -246,6 +255,11 @@ Settings page saved (`settings.json`); which one wins is in
 [`development.md`](development.md#settings). The OpenAI key is read as `OPENAI_API_KEY`. In the
 desktop app, the key and the [launch token](desktop.md#key-words) arrive on the engine's stdin
 instead.
+
+The spoken language defaults to English rather than detection, because detection is unreliable:
+`whisper-1` hears some British English as Welsh, and in a live session the first window's guess
+carries into the rest through the prompt. A language code Whisper doesn't know (`jp` for `ja`) is
+rejected when the settings load or are saved, not on every transcription request.
 
 A change saved on the Settings page applies at once, without restarting the engine: the next
 session uses it, and so does a re-run that transcribes again. A re-run that resumes after

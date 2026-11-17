@@ -205,7 +205,7 @@ async def render_visual(ctx: StageContext, visual: Visual) -> RenderedVisual:
         if cached_file.is_file():
             path = _publish(ctx, cached_file, visual.id, ext)
             return cached.model_copy(update={"id": visual.id, "path": path})
-    except (FileNotFoundError, ValueError):
+    except FileNotFoundError, ValueError:
         pass
 
     attempts, problems = 0, []

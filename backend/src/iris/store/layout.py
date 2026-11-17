@@ -205,7 +205,7 @@ class SessionPaths:
             if is_redraw and f"{VISUALS_DIR}/{path.name}" not in keep:
                 path.unlink(missing_ok=True)
 
-    def ensure(self) -> "SessionPaths":
+    def ensure(self) -> SessionPaths:
         for d in (self.root, self.frames_dir, self.visuals_dir):
             d.mkdir(parents=True, exist_ok=True)
         return self
