@@ -140,7 +140,7 @@ class Driver:
         self.lane = SelectLane(ctx, self.timeline)
         self.task: asyncio.Task[None] | None = None
 
-    def start(self) -> "Driver":
+    def start(self) -> Driver:
         self.task = asyncio.create_task(self.lane.run())
         return self
 

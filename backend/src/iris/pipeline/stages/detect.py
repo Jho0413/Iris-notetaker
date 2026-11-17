@@ -61,7 +61,7 @@ class _State:
         if can_represent and sharpness > self.sharpness:
             self.frame, self.sharpness = ref, sharpness
 
-    def replace_content(self, other: "_State", build: Build | None = None) -> None:
+    def replace_content(self, other: _State, build: Build | None = None) -> None:
         if build is not None:
             self.builds.append(build)
         self.small, self.edges = other.small, other.edges

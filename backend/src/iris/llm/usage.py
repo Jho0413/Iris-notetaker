@@ -44,7 +44,7 @@ _lock = threading.Lock()
 
 
 @contextmanager
-def recording(ctx: "StageContext", stage: Stage | None) -> Iterator[None]:
+def recording(ctx: StageContext, stage: Stage | None) -> Iterator[None]:
     token = _scope.set(_Scope(ctx.paths.usage_log, stage, ctx.settings.model_prices))
     try:
         yield
@@ -83,7 +83,7 @@ def _wav_seconds(request: Mapping[str, Any]) -> float | None:
     try:
         with wave.open(io.BytesIO(data)) as w:
             return w.getnframes() / w.getframerate()
-    except (wave.Error, EOFError, ZeroDivisionError):
+    except wave.Error, EOFError, ZeroDivisionError:
         return None
 
 

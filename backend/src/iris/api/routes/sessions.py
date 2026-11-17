@@ -127,7 +127,7 @@ def _readable[T](paths: SessionPaths, what: str, read: Callable[[], T]) -> T:
         return read()
     except FileNotFoundError:
         raise HTTPException(404, f"{what} not ready") from None
-    except (OSError, ValueError):
+    except OSError, ValueError:
         log.exception("can't read the %s of session %s", what, paths.root.name)
         raise HTTPException(500, f"the {what} couldn't be read") from None
 

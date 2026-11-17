@@ -52,7 +52,7 @@ class ModelPrice(BaseModel):
     audio_per_second: float | None = None  # duration-billed models, per second rounded up
     # Requests with more than this many input tokens are billed at ``long_context`` instead.
     long_context_above: int | None = None
-    long_context: "ModelPrice | None" = None
+    long_context: ModelPrice | None = None
 
 
 # Standard-tier prices from https://developers.openai.com/api/docs/pricing, checked on the date
@@ -206,7 +206,7 @@ class Settings(BaseSettings):
         return delays
 
     @model_validator(mode="after")
-    def _check_live_windows(self) -> "Settings":
+    def _check_live_windows(self) -> Settings:
         if self.live_window_min_s >= self.live_window_max_s:
             raise ValueError("live_window_min_s must be shorter than live_window_max_s")
         return self

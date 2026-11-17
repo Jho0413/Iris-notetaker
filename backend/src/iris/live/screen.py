@@ -123,7 +123,7 @@ class ScreenLane(LiveLane):
                     len(held),
                 )
                 ready, held = held[:split], held[split:]
-            for chunk in batched(ready, FEED_BATCH):
+            for chunk in batched(ready, FEED_BATCH, strict=False):
                 await self._publish(await asyncio.to_thread(feed.feed, list(chunk)))
             if ending_before_listing:
                 break

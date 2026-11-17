@@ -94,7 +94,7 @@ async def cached[M: BaseModel, R](
 ) -> R:
     try:
         return accept(read_model(path, schema))
-    except (FileNotFoundError, ValueError):
+    except FileNotFoundError, ValueError:
         pass
     fresh = await retry_temporary(make, delays, what=what)
     accepted = accept(fresh)

@@ -176,7 +176,7 @@ class Deck:
         noise = self.rng.normal(0, 4, img.shape)
         self.frames.append(np.clip(img.astype(np.float32) + noise, 0, 255).astype(np.uint8))
 
-    def hold(self, img: np.ndarray, seconds: int, overlay=None) -> "Deck":
+    def hold(self, img: np.ndarray, seconds: int, overlay=None) -> Deck:
         for i in range(seconds):
             frame = img.copy()
             if overlay is not None:
@@ -184,7 +184,7 @@ class Deck:
             self._add(frame)
         return self
 
-    def fade(self, a: np.ndarray, b: np.ndarray) -> "Deck":
+    def fade(self, a: np.ndarray, b: np.ndarray) -> Deck:
         self.transitions.add(self.t)
         self._add(cv2.addWeighted(a, 0.5, b, 0.5, 0))
         return self
