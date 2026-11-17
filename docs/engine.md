@@ -204,6 +204,8 @@ redraw again.
    checked; the two are updated together. A model the page gives only an estimate for
    (`gpt-transcribe`, per minute) is left out, so its calls show as unpriced. The page lists the
    gpt-4o transcribe models' audio price as plain "Input", so it applies to their text prompt too.
+   It lists no text output price for `gpt-image-2` or `gpt-image-1-mini`, so their entries have
+   none. A chat model's output price covers its reasoning tokens.
 4. Totals per stage, model and purpose are added up from the log each time the API or `iris cost`
    asks, so they are current while a stage runs; no summary is kept beside the log. A re-run that
    only hits its caches makes no calls, so it adds nothing.
