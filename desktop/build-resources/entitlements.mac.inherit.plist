@@ -7,9 +7,5 @@
          nested binary with this one file. -->
     <key>com.apple.security.cs.allow-jit</key>
     <true/>
-    <!-- Ad-hoc signed, no Team ID: without this the helpers can't load Electron's framework, nor
-         Python its own extension modules. -->
-    <key>com.apple.security.cs.disable-library-validation</key>
-    <true/>
   </dict>
 </plist>

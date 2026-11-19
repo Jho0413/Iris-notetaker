@@ -6,10 +6,6 @@
     <!-- V8 compiles JavaScript to machine code as it runs. -->
     <key>com.apple.security.cs.allow-jit</key>
     <true/>
-    <!-- The app is ad-hoc signed, so neither it nor its frameworks have a Team ID, and library
-         validation would refuse to load Electron's own framework. -->
-    <key>com.apple.security.cs.disable-library-validation</key>
-    <true/>
     <!-- The microphone, for recordings. -->
     <key>com.apple.security.device.audio-input</key>
     <true/>

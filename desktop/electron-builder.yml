@@ -1,6 +1,6 @@
-# Packaging for the desktop app (make desktop). Unsigned for distribution: ad-hoc signed so Apple
-# Silicon runs it, for the user's own Mac. A downloaded copy's first open needs System Settings →
-# Privacy & Security → Open Anyway (macOS 15+; right-click → Open no longer works).
+# Packaging for the desktop app (make desktop). Signed with a Developer ID Application certificate
+# from the login keychain and notarized by Apple (scripts/build-app.sh passes the notarytool
+# keychain profile), so a downloaded copy opens without Open Anyway. No certificate, no build.
 appId: io.github.jho0413.iris
 productName: Iris
 directories:
@@ -33,17 +33,21 @@ electronFuses:
   enableEmbeddedAsarIntegrityValidation: true
 electronLanguages: [en]
 npmRebuild: false
+forceCodeSigning: true
 mac:
   target:
     - target: dmg
       arch: arm64
   category: public.app-category.productivity
   icon: build/icon.icns
-  identity: "-"
+  # Only a Developer ID Application certificate: fail rather than fall back to an Apple Development
+  # certificate or skip signing.
+  type: distribution
+  notarize: true
   # The hardened runtime stops other programs attaching a debugger to Iris or injecting libraries
-  # into it at launch (DYLD_INSERT_LIBRARIES), ways round the fuses to the key Iris holds. The
-  # entitlements let back in only what Iris needs: one file for the app, one for its helpers and
-  # the bundled Python.
+  # into it at launch (DYLD_INSERT_LIBRARIES), ways round the fuses to the key Iris holds. Library
+  # validation stays on: Iris loads only libraries signed by its own team. The entitlements let back
+  # in only what Iris needs: one file for the app, one for its helpers and the bundled Python.
   hardenedRuntime: true
   entitlements: build-resources/entitlements.mac.plist
   entitlementsInherit: build-resources/entitlements.mac.inherit.plist
