@@ -114,8 +114,8 @@ dependencies) runs while the key is there and could reach it, as it could on you
 installing the UI and desktop dependencies first only keeps their install scripts away from it.
 The build turns Gatekeeper on first, so its final check judges the app as a user's Mac would. If
 the key may have leaked, revoke the certificate at developer.apple.com and make a new one. A
-missing secret, or a password that doesn't open the `.p12`, stops the build at that step and says
-which.
+missing secret stops the build at that step and names it; a `.p12` that won't open names the two
+secrets that could be wrong.
 
 1. Bump the version in a PR, and merge it: in `desktop/`, `npm version <x.y.z> --no-git-tag-version`
    (it updates `package.json` and its lockfile together). The app, the `.dmg`'s name and the
