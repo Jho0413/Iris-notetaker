@@ -95,6 +95,23 @@ def read_in_thread(stream: ChunkStream) -> tuple[threading.Thread, list[bytes]]:
     return thread, out
 
 
+def test_a_chunk_stored_just_before_the_end_is_still_handed_on(paths: SessionPaths, monkeypatch):
+    decoder = waiting_decoder(paths)
+    store_audio_chunk(paths, 0, b"first")
+    next_stored = LiveDecoder._next_stored
+
+    def chunk_and_end_arrive_after_the_file_check(self, seq):
+        if seq == 1 and not self._ending:
+            store_audio_chunk(paths, 1, b"second")
+            self.end()
+        return next_stored(self, seq)
+
+    monkeypatch.setattr(LiveDecoder, "_next_stored", chunk_and_end_arrive_after_the_file_check)
+    stream = ChunkStream(decoder, b"", 0, paths.live_audio_chunk(0), 0)
+    assert read_all(stream) == b"firstsecond"
+    assert (stream.seq, stream.ended) == (1, "end")
+
+
 def test_a_waiting_feed_hands_on_a_chunk_that_arrives_later(paths: SessionPaths, monkeypatch):
     waiting = decoder_waiting_for(monkeypatch, 1)
     decoder = waiting_decoder(paths)
