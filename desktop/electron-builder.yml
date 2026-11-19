@@ -40,9 +40,10 @@ mac:
       arch: arm64
   category: public.app-category.productivity
   icon: build/icon.icns
-  # scripts/build-app.sh refuses to build without a Developer ID Application certificate: given none,
-  # electron-builder signs with any other identity it finds, such as an Apple Development one.
   notarize: true
+  # No identity: electron-builder picks the Developer ID Application certificate from the keychain.
+  # Given none, it signs with any other identity it finds, such as an Apple Development one, so
+  # scripts/build-app.sh refuses to build without one.
   # The hardened runtime stops other programs attaching a debugger to Iris or injecting libraries
   # into it at launch (DYLD_INSERT_LIBRARIES), ways round the fuses to the key Iris holds. Library
   # validation stays on: Iris loads only libraries signed by its own team. The entitlements let back
