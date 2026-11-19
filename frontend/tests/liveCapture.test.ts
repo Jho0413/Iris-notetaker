@@ -496,6 +496,26 @@ test('mic denied: the screen picker never opens and no session is made', async (
   assert.equal(sessionsMade, 0, 'asking for permissions makes no session')
 })
 
+test('no microphone found: the screen picker never opens and no session is made', async () => {
+  let screenAsked = false
+  const t = setup({
+    mediaDevices: {
+      getDisplayMedia: async () => {
+        screenAsked = true
+        return stream(t.display)
+      },
+      getUserMedia: async () => {
+        throw new DOMException('Requested device not found', 'NotFoundError')
+      },
+    },
+  })
+  await assert.rejects(capture(t.env).start('screen'), /No microphone was found/)
+  assert.equal(screenAsked, false)
+  await tick()
+  assert.deepEqual(t.calls.map((c) => `${c.method} ${c.url}`), [])
+  assert.equal(sessionsMade, 0, 'asking for permissions makes no session')
+})
+
 test('stop while the mic prompt is open cancels the start instead of recording; the screen is never asked', async () => {
   let grantMic: (s: unknown) => void = () => {}
   let screenAsked = false
@@ -1167,22 +1187,23 @@ test('a failed discard leaves the recording untouched: it can be continued and f
   assert.deepEqual(JSON.parse(t.posted('/end')[0].body as string), { audio_chunks: 3, allow_gaps: false })
 })
 
-test('sharing that ends while a continue is still asking fails the continue; it stays stopped', async () => {
-  const t = resumableSetup()
+test("sharing that ends while the Mac's sound is asked for on Continue fails the continue; it stays stopped", async () => {
+  const t = resumableSetup(true)
   const live = capture(t.env)
   await live.start('screen')
   live.pause()
   const display2 = new FakeTrack('video')
-  t.env.mediaDevices.getDisplayMedia = async () => stream(display2)
-  let grant: (s: unknown) => void = () => {}
-  t.env.mediaDevices.getUserMedia = () => new Promise((resolve) => (grant = resolve))
+  let grantSound: (s: unknown) => void = () => {}
+  t.env.mediaDevices.getDisplayMedia = (constraints?: { video?: boolean }) =>
+    constraints?.video ? Promise.resolve(stream(display2)) : new Promise((resolve) => (grantSound = resolve))
   const continuing = live.resume()
   await tick()
   display2.end()
-  grant(stream(new FakeTrack('audio')))
+  grantSound(stream(new FakeTrack('audio')))
   await assert.rejects(continuing, /Screen sharing stopped before the recording continued/)
   assert.equal(FakeRecorder.created[0].state, 'paused')
   assert.deepEqual(t.mixed[0].live, [])
+  assert.ok(t.mics[1].stopped && display2.stopped, 'the mic and screen asked for again are let go')
 })
 
 test('discard while a continue is still asking deletes the recording and stops what comes late', async () => {

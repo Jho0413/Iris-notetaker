@@ -309,7 +309,9 @@ export function LivePage() {
         detail: desktopApp
           ? 'Also a screen or window you choose.'
           : 'Also a screen, window or tab you choose. Share a tab to include its sound.',
-        waiting: desktopApp ? 'Choose what to record…' : 'Choose what to share in the browser dialog…',
+        waiting: desktopApp
+          ? 'Allow the microphone, then choose what to record…'
+          : 'Allow the microphone, then choose what to share…',
       },
     ]
     return (

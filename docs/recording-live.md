@@ -48,9 +48,13 @@ notes turns what the lanes finished into the pipeline's own outputs and runs onl
 1. The page opens the microphone and, in the desktop app, the Mac's sound; in a browser, a shared
    tab can bring its own sound. All of it is mixed into **one audio track**, recorded as audio
    chunks. A screen recording asks for the microphone first, then the screen, then the Mac's
-   sound, and starts, making its session, only once they are granted. *Why the microphone first:*
+   sound, and starts, making its session, only once each has been asked for (the Mac's sound may
+   be refused; the recording then has the microphone alone). *Why the microphone first:*
    macOS asks for each permission the first time it is used, and a recording is about the voice,
    so its question comes before the screen's; refusing it ends the start before any picker opens.
+   Browsers use the same order. Firefox and Safari allow screen sharing only shortly after the
+   click, so a slow first answer to the microphone question can make the share fail there; starting
+   again works, since the browser then remembers the answer.
 2. While the screen is shared, the page takes a still of it at a steady rate. Each frame is timed
    on the audio's clock and carries its share's number. With nothing shared, no frames are sent,
    so a recording can be audio only, or share and stop sharing any number of times.
