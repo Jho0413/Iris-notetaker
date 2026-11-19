@@ -167,7 +167,8 @@ only the commands the page knows, from its own list: a sandboxed bridge can't lo
   the engine through the window with the token added. The dev app keeps them.
 - **The hardened runtime** has macOS refuse a debugger attaching to the app or its engine, and
   libraries added to them at launch. Only what Iris needs is let back in: compiling JavaScript as
-  it runs, the microphone, and loading its own libraries.
+  it runs, and the microphone. Library validation stays on, so the app and its engine load only
+  libraries signed by Iris's developer team.
 
 *Why the fuses and the hardened runtime:* anything running as the user could otherwise start Iris
 with its own code in it, or reach into it while it runs, and borrow the Keychain's trust in Iris
@@ -192,8 +193,6 @@ to read the key. The fuses close Electron's ways in, the hardened runtime the Ma
    the Keychain's Always Allow carry over to the next version. The build checks the certificate
    and the notarization credentials before it starts, so it never makes an unsigned app, and
    checks at the end that Gatekeeper accepts the app as notarized.
-5. Library validation stays on: the app and its bundled Python load only libraries signed by the
-   same developer team, so nothing can swap a library of its own into `Iris.app`.
 
 ## Limits
 
@@ -202,6 +201,8 @@ The key protection keeps it from other programs running as the user. It doesn't 
 - a keylogger or screen reader catching the key as it is typed;
 - anything reading the session files in the data folder, which are plain files;
 - anything with admin rights, or a process the user lets through the Keychain's own prompt;
+- a program allowed to change apps (macOS's App Management permission) editing the engine's Python
+  files inside `Iris.app`: library validation checks compiled libraries, not Python code.
 
 ## Where to look
 

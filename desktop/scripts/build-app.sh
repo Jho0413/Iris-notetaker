@@ -4,6 +4,7 @@ set -euo pipefail
 DESKTOP="$(cd "$(dirname "$0")/.." && pwd)"
 REPO="$(cd "$DESKTOP/.." && pwd)"
 export APPLE_KEYCHAIN_PROFILE="${APPLE_KEYCHAIN_PROFILE:-iris-notary}"
+unset APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID APPLE_API_KEY APPLE_API_KEY_ID APPLE_API_ISSUER APPLE_KEYCHAIN
 
 echo "==> Signing and notarization credentials"
 identities="$(security find-identity -v -p codesigning)"

@@ -93,14 +93,16 @@ and `make test` cover most of them (not the frontend build).
 
 ## Releasing
 
+Releasing is on hold until the workflow can sign the app: it has no signing certificate yet, so
+`make desktop` stops there before building anything.
+
 1. Bump the version in a PR, and merge it: in `desktop/`, `npm version <x.y.z> --no-git-tag-version`
    (it updates `package.json` and its lockfile together). The app, the `.dmg`'s name and the
    release all read it from `package.json`.
 2. Run the **Release** workflow from `main`: Actions → Release → Run workflow, or
    `gh workflow run release.yml`. It refuses a version that is already released, drafted or
    tagged, then builds the app on a GitHub-hosted Apple Silicon Mac with `make desktop`, including
-   its smoke tests and signature checks. It has no signing certificate yet, so for now
-   `make desktop` stops there: build the release on your own Mac. The tests in "Checks" aren't rerun: CI ran them before the
+   its smoke tests and signature checks. The tests in "Checks" aren't rerun: CI ran them before the
    merge.
 3. It leaves a **draft** release, "Iris <version>", with the `.dmg` and notes listing the merged
    PRs. Check it, then publish it; publishing creates the `v<version>` tag on the commit it was
