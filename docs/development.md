@@ -94,9 +94,9 @@ and `make test` cover most of them (not the frontend build).
 ## Releasing
 
 The workflow signs and notarizes the app the way `make desktop` does on your Mac, from secrets in
-the repository's `release` environment, which only runs on `main`. Set them once, from the Mac
-that holds the certificate (each `gh secret set` asks for its value, so none lands in your shell
-history):
+the repository's `release` environment, which only jobs on `main` can use. Set them once, from
+the Mac that holds the certificate (each `gh secret set` asks for its value, so none lands in
+your shell history):
 
 ```sh
 base64 -i <your Developer ID backup>.p12 | gh secret set MACOS_CERTIFICATE_P12 --env release
@@ -106,10 +106,13 @@ gh secret set APPLE_APP_SPECIFIC_PASSWORD --env release
 ```
 
 On GitHub's Mac they go into a keychain that exists for that build only and is deleted after it.
-The UI and desktop dependencies are installed before it exists; the backend bundle's installs run
-after, so code in them could reach the key, as it could on your own Mac. If the key may have
-leaked, revoke the certificate at developer.apple.com and make a new one. A missing secret, or a
-password that doesn't open the `.p12`, stops the build at that step and says which.
+Everything `make desktop` runs (the backend bundle's installs, the UI and app builds and their
+dependencies) runs while the key is there and could reach it, as it could on your own Mac;
+installing the UI and desktop dependencies first only keeps their install scripts away from it.
+The build turns Gatekeeper on first, so its final check judges the app as a user's Mac would. If
+the key may have leaked, revoke the certificate at developer.apple.com and make a new one. A
+missing secret, or a password that doesn't open the `.p12`, stops the build at that step and says
+which.
 
 1. Bump the version in a PR, and merge it: in `desktop/`, `npm version <x.y.z> --no-git-tag-version`
    (it updates `package.json` and its lockfile together). The app, the `.dmg`'s name and the

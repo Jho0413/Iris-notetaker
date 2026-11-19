@@ -10,9 +10,10 @@ name: Release
 #
 # The build signs and notarizes like a local `make desktop` (docs/development.md, Signing the app):
 # the certificate and notarization login come from the `release` environment's secrets, which
-# only jobs on main can read, into a keychain that lives for this job only. The UI and desktop
-# dependencies are installed before the keychain exists; what runs after it (the backend bundle's
-# installs and the build itself) could reach the key, as on any Mac that holds it.
+# only jobs on main can read, into a keychain that lives for this job only. Everything
+# `make desktop` runs (the backend bundle's installs, the UI and app builds and their
+# dependencies) runs while the key is there and could reach it, as on any Mac that holds it;
+# installing first only keeps the UI and desktop install scripts away from it.
 
 on:
   workflow_dispatch:
@@ -108,11 +109,11 @@ jobs:
             fi
           done
           certificate="$RUNNER_TEMP/iris-signing.p12"
+          trap 'rm -f "$certificate"' EXIT
           SIGNING_KEYCHAIN="$RUNNER_TEMP/iris-signing.keychain-db"
           echo "SIGNING_KEYCHAIN=$SIGNING_KEYCHAIN" >> "$GITHUB_ENV"
           keychain_password="$(openssl rand -base64 32)"
           if ! base64 --decode <<< "$MACOS_CERTIFICATE_P12" > "$certificate"; then
-            rm -f "$certificate"
             echo "::error::MACOS_CERTIFICATE_P12 is not base64. Set it from: base64 -i <file>.p12"
             exit 1
           fi
@@ -120,16 +121,19 @@ jobs:
           security set-keychain-settings -lut 21600 "$SIGNING_KEYCHAIN"
           security unlock-keychain -p "$keychain_password" "$SIGNING_KEYCHAIN"
           if ! security import "$certificate" -P "$MACOS_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$SIGNING_KEYCHAIN"; then
-            rm -f "$certificate"
-            echo "::error::The certificate could not be imported: check MACOS_CERTIFICATE_PASSWORD matches the .p12."
+            echo "::error::The certificate could not be imported: check MACOS_CERTIFICATE_PASSWORD matches the .p12, and that MACOS_CERTIFICATE_P12 is its whole base64 (base64 -i <file>.p12)."
             exit 1
           fi
-          rm -f "$certificate"
           security set-key-partition-list -S apple-tool:,apple: -k "$keychain_password" "$SIGNING_KEYCHAIN" > /dev/null
           security list-keychain -d user -s "$SIGNING_KEYCHAIN"
           security default-keychain -d user -s "$SIGNING_KEYCHAIN"
           xcrun notarytool store-credentials iris-notary --apple-id "$APPLE_ID" \
             --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_SPECIFIC_PASSWORD"
+
+      - name: Turn Gatekeeper on, as on a user's Mac
+        run: |
+          sudo spctl --master-enable
+          spctl --status
 
       - name: Build Iris.app and the .dmg
         run: make desktop
