@@ -1,10 +1,24 @@
 #!/usr/bin/env bash
-# Build Iris.app and a .dmg in desktop/dist (make desktop): the UI, the backend bundle, the icon,
-# then electron-builder. Apple Silicon macOS only.
 set -euo pipefail
 
 DESKTOP="$(cd "$(dirname "$0")/.." && pwd)"
 REPO="$(cd "$DESKTOP/.." && pwd)"
+export APPLE_KEYCHAIN_PROFILE="${APPLE_KEYCHAIN_PROFILE:-iris-notary}"
+unset APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID APPLE_API_KEY APPLE_API_KEY_ID APPLE_API_ISSUER APPLE_KEYCHAIN
+unset CSC_NAME CSC_LINK CSC_KEY_PASSWORD CSC_KEYCHAIN CSC_IDENTITY_AUTO_DISCOVERY
+
+echo "==> Signing and notarization credentials"
+identities="$(security find-identity -v -p codesigning)"
+if [[ "$identities" != *'"Developer ID Application: '* ]]; then
+  echo "build-app.sh: no Developer ID Application certificate with its private key in the keychain." >&2
+  echo "Create one at developer.apple.com (Certificates), or import your .p12 backup into the login keychain." >&2
+  exit 1
+fi
+if ! notary_check="$(xcrun notarytool history --keychain-profile "$APPLE_KEYCHAIN_PROFILE" 2>&1)"; then
+  echo "build-app.sh: can't notarize with the keychain profile \"$APPLE_KEYCHAIN_PROFILE\": $notary_check" >&2
+  echo "Save it with: xcrun notarytool store-credentials $APPLE_KEYCHAIN_PROFILE --apple-id <your Apple ID> --team-id <your team ID>" >&2
+  exit 1
+fi
 
 echo "==> UI (frontend/dist)"
 (cd "$REPO/frontend" && npm run build)
@@ -34,9 +48,6 @@ rm -rf dist
 npx electron-builder --mac --arm64 --publish never
 
 APP="$DESKTOP/dist/mac-arm64/Iris.app"
-# Again, now with the Python as signed inside the app: the hardened runtime decides what it may
-# load. Run without -B, so any module Python had to compile again (stale bytecode) is written into
-# the app and the signature check below fails.
 echo "==> Smoke test of the signed backend in Iris.app"
 SMOKE="$DESKTOP/build/backend/smoke signed"
 rm -rf "$SMOKE"
@@ -44,9 +55,6 @@ env -i HOME="$HOME" PATH=/usr/bin:/bin \
   "$APP/Contents/Resources/backend/python/bin/python3" -I "$DESKTOP/scripts/smoke_backend.py" "$SMOKE"
 rm -rf "$SMOKE"
 codesign --verify --deep --strict "$APP"
-# The hardened runtime is the point of the signature: fail if a config change dropped it, or let a
-# debugger in, for the app or its engine.
-# Captured first, not piped to grep -q: under pipefail, grep quitting early fails the pipeline.
 for bin in "$APP" "$APP/Contents/Resources/backend/python/bin/python3"; do
   signature="$(codesign -dv "$bin" 2>&1)" || {
     echo "build-app.sh: can't read the signature of $bin: $signature" >&2; exit 1
@@ -58,5 +66,16 @@ for bin in "$APP" "$APP/Contents/Resources/backend/python/bin/python3"; do
   if [[ "$entitlements" == *get-task-allow* ]]; then
     echo "build-app.sh: $bin lets a debugger attach (get-task-allow)" >&2; exit 1
   fi
+  if [[ "$entitlements" == *disable-library-validation* ]]; then
+    echo "build-app.sh: $bin loads libraries from any developer (disable-library-validation)" >&2; exit 1
+  fi
 done
+echo "==> Gatekeeper"
+xcrun stapler validate "$APP"
+assessment="$(spctl --assess --type execute -vv "$APP" 2>&1)" || {
+  echo "build-app.sh: Gatekeeper rejects $APP: $assessment" >&2; exit 1
+}
+if [[ "$assessment" != *"source=Notarized Developer ID"* ]]; then
+  echo "build-app.sh: $APP is not notarized with a Developer ID: $assessment" >&2; exit 1
+fi
 echo "==> Built $APP ($(du -sh "$APP" | cut -f1)) and $(ls "$DESKTOP"/dist/*.dmg) ($(du -sh "$DESKTOP"/dist/*.dmg | cut -f1))"

@@ -49,6 +49,9 @@ Open the `.dmg`, drag Iris to Applications and open it. The first launch asks fo
 macOS asks for the microphone, System Audio Recording and Screen Recording the first time each is
 used. No terminal or repo is needed to run it.
 
+Building it signs and notarizes it, which needs an Apple Developer ID
+([`docs/development.md`](docs/development.md#signing-the-app)).
+
 ## Learn more
 
 - [`docs/overview.md`](docs/overview.md): what Iris is made of and the principles behind it. Start

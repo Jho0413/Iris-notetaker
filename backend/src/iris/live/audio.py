@@ -160,11 +160,12 @@ class LiveDecoder:
             self._poke.clear()
             if self._cancelled:
                 return "stop"
+            ending_before_looking = self._ending
             path = self.paths.live_audio_chunk(seq)
             if path.exists():
                 return path
             later = self._next_stored(seq) is not None
-            if self._ending:
+            if ending_before_looking:
                 return "gap" if later else "end"
             timeout = None
             if later and seq > 0:

@@ -66,8 +66,8 @@ sequenceDiagram
 
 *Why the starting page:* the first launch of a new copy can be slow while macOS checks the
 bundled libraries; a blank window would look broken. *Why decrypt once:* each decrypt reads the
-Keychain, and macOS asks the user again for every rebuilt copy of an ad-hoc signed app; a key it
-won't decrypt isn't asked for again in the same launch.
+Keychain, which asks the user at every read until they choose Always Allow; a key it won't
+decrypt isn't asked for again in the same launch.
 
 ## The app handler
 
@@ -167,7 +167,8 @@ only the commands the page knows, from its own list: a sandboxed bridge can't lo
   the engine through the window with the token added. The dev app keeps them.
 - **The hardened runtime** has macOS refuse a debugger attaching to the app or its engine, and
   libraries added to them at launch. Only what Iris needs is let back in: compiling JavaScript as
-  it runs, the microphone, and loading its own libraries.
+  it runs, and the microphone. Library validation stays on, so the app and its engine load only
+  libraries signed by Iris's developer team.
 
 *Why the fuses and the hardened runtime:* anything running as the user could otherwise start Iris
 with its own code in it, or reach into it while it runs, and borrow the Keychain's trust in Iris
@@ -186,8 +187,12 @@ to read the key. The fuses close Electron's ways in, the hardened runtime the Ma
    the app, so the engine starts without compiling it again. The second smoke test runs it in a way
    that would save anything it had to compile, and the signature is checked afterwards: a write
    would break the app's seal, so a passing build proves nothing needed compiling.
-4. The app is ad-hoc signed, not notarized, so every build is a new app to macOS
-   ([`development.md`](development.md#opening-a-downloaded-copy-of-the-app)).
+4. The app is signed with a Developer ID and notarized by Apple
+   ([`development.md`](development.md#signing-the-app)). A downloaded copy opens after macOS's
+   usual first-open question, and every build is the same app to macOS, so the permissions and
+   the Keychain's Always Allow carry over to the next version. The build checks the certificate
+   and the notarization credentials before it starts, so it never makes an unsigned app, and
+   checks at the end that Gatekeeper accepts the app as notarized.
 
 ## Limits
 
@@ -196,10 +201,8 @@ The key protection keeps it from other programs running as the user. It doesn't 
 - a keylogger or screen reader catching the key as it is typed;
 - anything reading the session files in the data folder, which are plain files;
 - anything with admin rights, or a process the user lets through the Keychain's own prompt;
-- a program that can write into `Iris.app` swapping in a library of its own. macOS only checks
-  that an app's libraries come from the same developer when the app is signed with an Apple
-  developer certificate; an ad-hoc or self-signed app has no developer to check against, so that
-  check is off.
+- a program allowed to change apps (macOS's App Management permission) editing the engine's Python
+  files inside `Iris.app`: library validation checks compiled libraries, not Python code.
 
 ## Where to look
 

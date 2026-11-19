@@ -83,5 +83,5 @@ Reference:
 
 ## Limits
 
-Not built yet: Windows and Intel Macs, a signed and auto-updating app for other people, and other
+Not built yet: Windows and Intel Macs, an auto-updating app for other people, and other
 sources such as a meeting bot. Open work is tracked in the GitHub issues.
