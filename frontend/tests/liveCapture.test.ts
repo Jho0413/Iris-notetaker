@@ -767,7 +767,28 @@ test('stop while the screen picker is open: a screen granted later is stopped, a
   assert.equal(sessionsMade, 0, 'asking for permissions makes no session')
 })
 
-test('closing the tab during a prompt makes no session', async () => {
+test('closing the tab while the mic prompt is open makes no session; the screen is never asked', async () => {
+  let screenAsked = false
+  const t = setup({
+    mediaDevices: {
+      getDisplayMedia: async () => {
+        screenAsked = true
+        return stream(t.display)
+      },
+      getUserMedia: () => new Promise(() => {}),
+    },
+  })
+  const starting = capture(t.env).start('screen')
+  await tick()
+  t.env.page.dispatchEvent(new Event('pagehide'))
+  await assert.rejects(within(starting), /cancelled/)
+  assert.equal(screenAsked, false)
+  assert.deepEqual(t.calls.map((c) => `${c.method} ${c.url}`), [])
+  assert.equal(t.beacons.length, 0)
+  assert.equal(sessionsMade, 0, 'asking for permissions makes no session')
+})
+
+test('closing the tab while the screen picker is open makes no session and releases the mic', async () => {
   const t = setup({
     mediaDevices: {
       getDisplayMedia: () => new Promise(() => {}),
@@ -1185,6 +1206,19 @@ test('a failed discard leaves the recording untouched: it can be continued and f
   recorder.emit('b')
   await live.stop()
   assert.deepEqual(JSON.parse(t.posted('/end')[0].body as string), { audio_chunks: 3, allow_gaps: false })
+})
+
+test('continue asks for the mic first, then the screen', async () => {
+  const t = resumableSetup()
+  const live = capture(t.env)
+  await live.start('screen')
+  live.pause()
+  const order: string[] = []
+  t.env.mediaDevices.getDisplayMedia = async () => (order.push('screen'), stream(new FakeTrack('video')))
+  t.env.mediaDevices.getUserMedia = async () => (order.push('mic'), stream(new FakeTrack('audio')))
+  await live.resume()
+  assert.deepEqual(order, ['mic', 'screen'])
+  await live.stop()
 })
 
 test("sharing that ends while the Mac's sound is asked for on Continue fails the continue; it stays stopped", async () => {
