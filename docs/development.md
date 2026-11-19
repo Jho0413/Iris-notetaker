@@ -93,8 +93,23 @@ and `make test` cover most of them (not the frontend build).
 
 ## Releasing
 
-Releasing is on hold until the workflow can sign the app: it has no signing certificate yet, so
-`make desktop` stops there before building anything.
+The workflow signs and notarizes the app the way `make desktop` does on your Mac, from secrets in
+the repository's `release` environment, which only runs on `main`. Set them once, from the Mac
+that holds the certificate (each `gh secret set` asks for its value, so none lands in your shell
+history):
+
+```sh
+base64 -i <your Developer ID backup>.p12 | gh secret set MACOS_CERTIFICATE_P12 --env release
+gh secret set MACOS_CERTIFICATE_PASSWORD --env release
+gh secret set APPLE_ID --env release
+gh secret set APPLE_APP_SPECIFIC_PASSWORD --env release
+```
+
+On GitHub's Mac they go into a keychain that exists for that build only and is deleted after it.
+The UI and desktop dependencies are installed before it exists; the backend bundle's installs run
+after, so code in them could reach the key, as it could on your own Mac. If the key may have
+leaked, revoke the certificate at developer.apple.com and make a new one. A missing secret, or a
+password that doesn't open the `.p12`, stops the build at that step and says which.
 
 1. Bump the version in a PR, and merge it: in `desktop/`, `npm version <x.y.z> --no-git-tag-version`
    (it updates `package.json` and its lockfile together). The app, the `.dmg`'s name and the

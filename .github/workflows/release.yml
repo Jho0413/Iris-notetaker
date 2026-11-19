@@ -7,6 +7,12 @@ name: Release
 #
 # Three jobs so the token that can write to the repository never shares a job with the build,
 # whose dependency installs run third-party scripts.
+#
+# The build signs and notarizes like a local `make desktop` (docs/development.md, Signing the app):
+# the certificate and notarization login come from the `release` environment's secrets, which
+# only jobs on main can read, into a keychain that lives for this job only. The UI and desktop
+# dependencies are installed before the keychain exists; what runs after it (the backend bundle's
+# installs and the build itself) could reach the key, as on any Mac that holds it.
 
 on:
   workflow_dispatch:
@@ -59,7 +65,10 @@ jobs:
     name: Build the .dmg
     needs: version
     runs-on: macos-latest # Apple Silicon, which the build requires
-    timeout-minutes: 45
+    timeout-minutes: 75 # signing every bundled library, then Apple's notarization
+    environment: release
+    env:
+      APPLE_TEAM_ID: 9FGSP5JVSS # not a secret: every signed copy of Iris names it
     steps:
       - uses: actions/checkout@v7
         with:
@@ -85,8 +94,52 @@ jobs:
           npm ci --prefix frontend
           npm ci --prefix desktop
 
+      - name: Install the signing certificate and the notarization login
+        env:
+          MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+        run: |
+          for name in MACOS_CERTIFICATE_P12 MACOS_CERTIFICATE_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD; do
+            if [ -z "${!name}" ]; then
+              echo "::error::The release environment has no $name secret. See docs/development.md (Releasing)."
+              exit 1
+            fi
+          done
+          certificate="$RUNNER_TEMP/iris-signing.p12"
+          SIGNING_KEYCHAIN="$RUNNER_TEMP/iris-signing.keychain-db"
+          echo "SIGNING_KEYCHAIN=$SIGNING_KEYCHAIN" >> "$GITHUB_ENV"
+          keychain_password="$(openssl rand -base64 32)"
+          if ! base64 --decode <<< "$MACOS_CERTIFICATE_P12" > "$certificate"; then
+            rm -f "$certificate"
+            echo "::error::MACOS_CERTIFICATE_P12 is not base64. Set it from: base64 -i <file>.p12"
+            exit 1
+          fi
+          security create-keychain -p "$keychain_password" "$SIGNING_KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$SIGNING_KEYCHAIN"
+          security unlock-keychain -p "$keychain_password" "$SIGNING_KEYCHAIN"
+          if ! security import "$certificate" -P "$MACOS_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$SIGNING_KEYCHAIN"; then
+            rm -f "$certificate"
+            echo "::error::The certificate could not be imported: check MACOS_CERTIFICATE_PASSWORD matches the .p12."
+            exit 1
+          fi
+          rm -f "$certificate"
+          security set-key-partition-list -S apple-tool:,apple: -k "$keychain_password" "$SIGNING_KEYCHAIN" > /dev/null
+          security list-keychain -d user -s "$SIGNING_KEYCHAIN"
+          security default-keychain -d user -s "$SIGNING_KEYCHAIN"
+          xcrun notarytool store-credentials iris-notary --apple-id "$APPLE_ID" \
+            --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_SPECIFIC_PASSWORD"
+
       - name: Build Iris.app and the .dmg
         run: make desktop
+
+      - name: Remove the signing keychain
+        if: always()
+        run: |
+          if [ -n "${SIGNING_KEYCHAIN:-}" ] && [ -f "$SIGNING_KEYCHAIN" ]; then
+            security delete-keychain "$SIGNING_KEYCHAIN"
+          fi
 
       - uses: actions/upload-artifact@v7
         with:
