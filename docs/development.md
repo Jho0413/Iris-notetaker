@@ -39,8 +39,8 @@ Where each keeps its data and logs:
 Because `make app` shares `backend/data/` with `make dev`, don't record in a browser while the dev
 app runs: the app stops recordings it finds left open there
 ([`recording-live.md`](recording-live.md)). For UI work use `make dev`: the dev app loads the
-built UI, not Vite. Test desktop behaviour in `make app`; each `make desktop` build has a new
-signature, so macOS asks for its permissions and the Keychain again.
+built UI, not Vite. Test desktop behaviour in `make app`; a `make desktop` build takes minutes
+longer, since Apple notarizes it ([Signing the app](#signing-the-app)).
 
 ## The CLI
 
@@ -99,7 +99,8 @@ and `make test` cover most of them (not the frontend build).
 2. Run the **Release** workflow from `main`: Actions → Release → Run workflow, or
    `gh workflow run release.yml`. It refuses a version that is already released, drafted or
    tagged, then builds the app on a GitHub-hosted Apple Silicon Mac with `make desktop`, including
-   its smoke tests and signature checks. The tests in "Checks" aren't rerun: CI ran them before the
+   its smoke tests and signature checks. It has no signing certificate yet, so for now
+   `make desktop` stops there: build the release on your own Mac. The tests in "Checks" aren't rerun: CI ran them before the
    merge.
 3. It leaves a **draft** release, "Iris <version>", with the `.dmg` and notes listing the merged
    PRs. Check it, then publish it; publishing creates the `v<version>` tag on the commit it was
@@ -131,12 +132,23 @@ The UI shows only a short message of ours. To see what went wrong:
 - `uv run iris cost <session_id>`: totals per stage, model and purpose, with a count of failed
   calls. Each call, with its error, is in the session's `usage_calls.jsonl`.
 
-## Opening a downloaded copy of the app
+## Signing the app
 
-The app isn't notarized, so macOS blocks a copy downloaded from elsewhere the first time. Open it
-once, then go to System Settings → Privacy & Security and click **Open Anyway** next to the Iris
-message (right-click → Open no longer works on macOS 15 and later). A copy you built yourself
-opens directly.
+`make desktop` signs the app with a **Developer ID Application** certificate and has Apple
+notarize it, so a downloaded copy opens on any Mac with only macOS's usual first-open question. It
+needs, once per Mac:
+
+1. The certificate with its private key in the login keychain (`security find-identity -v -p
+   codesigning` lists it). Make it at developer.apple.com → Certificates, from a certificate
+   request made in Keychain Access on the same Mac, or import the `.p12` backup of one. Only the
+   account holder of an Apple Developer Program membership can make one.
+2. A notarytool keychain profile named `iris-notary` (or another name in `APPLE_KEYCHAIN_PROFILE`):
+   `xcrun notarytool store-credentials iris-notary --apple-id <Apple ID> --team-id <team ID>`, with
+   an app-specific password from account.apple.com.
+
+Without either, `make desktop` stops before it builds anything and says which is missing. If Apple
+rejects a build, `xcrun notarytool log <submission id> --keychain-profile iris-notary` lists what
+it objected to.
 
 ## Permissions and the Keychain
 

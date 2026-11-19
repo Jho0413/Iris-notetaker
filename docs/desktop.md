@@ -66,8 +66,8 @@ sequenceDiagram
 
 *Why the starting page:* the first launch of a new copy can be slow while macOS checks the
 bundled libraries; a blank window would look broken. *Why decrypt once:* each decrypt reads the
-Keychain, and macOS asks the user again for every rebuilt copy of an ad-hoc signed app; a key it
-won't decrypt isn't asked for again in the same launch.
+Keychain, which asks the user at every read until they choose Always Allow; a key it won't
+decrypt isn't asked for again in the same launch.
 
 ## The app handler
 
@@ -186,8 +186,14 @@ to read the key. The fuses close Electron's ways in, the hardened runtime the Ma
    the app, so the engine starts without compiling it again. The second smoke test runs it in a way
    that would save anything it had to compile, and the signature is checked afterwards: a write
    would break the app's seal, so a passing build proves nothing needed compiling.
-4. The app is ad-hoc signed, not notarized, so every build is a new app to macOS
-   ([`development.md`](development.md#opening-a-downloaded-copy-of-the-app)).
+4. The app is signed with a Developer ID and notarized by Apple
+   ([`development.md`](development.md#signing-the-app)). A downloaded copy opens after macOS's
+   usual first-open question, and every build is the same app to macOS, so the permissions and
+   the Keychain's Always Allow carry over to the next version. The build checks the certificate
+   and the notarization credentials before it starts, so it never makes an unsigned app, and
+   checks at the end that Gatekeeper accepts the app as notarized.
+5. Library validation stays on: the app and its bundled Python load only libraries signed by the
+   same developer team, so nothing can swap a library of its own into `Iris.app`.
 
 ## Limits
 
@@ -196,10 +202,6 @@ The key protection keeps it from other programs running as the user. It doesn't 
 - a keylogger or screen reader catching the key as it is typed;
 - anything reading the session files in the data folder, which are plain files;
 - anything with admin rights, or a process the user lets through the Keychain's own prompt;
-- a program that can write into `Iris.app` swapping in a library of its own. macOS only checks
-  that an app's libraries come from the same developer when the app is signed with an Apple
-  developer certificate; an ad-hoc or self-signed app has no developer to check against, so that
-  check is off.
 
 ## Where to look
 
