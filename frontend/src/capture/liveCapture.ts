@@ -355,16 +355,6 @@ export class LiveCapture {
     { screenOptional = false } = {},
   ): Promise<{ screen: MediaStream | null; mic: MediaStream; sound: MediaStream | null }> {
     const devices = this.env.mediaDevices!
-    let display: MediaStream | null = null
-    if (screen) {
-      try {
-        display = this.acquired(await getDisplay(devices, !this.env.macSound))
-      } catch (err) {
-        if (!screenOptional || !(err instanceof CaptureError) || this.cancelled || this.stopping) throw err
-        console.warn('The screen was not shared again; continuing with the screen off', err)
-      }
-    }
-    if (display) this.listenForScreenEnd(display)
     let mic: MediaStream
     try {
       mic = this.acquired(await devices.getUserMedia({ audio: true }))
@@ -375,6 +365,16 @@ export class LiveCapture {
     mic.getAudioTracks()[0]?.addEventListener('ended', () =>
       this.ended('microphone-ended', 'The microphone was disconnected, so the recording was finished.'),
     )
+    let display: MediaStream | null = null
+    if (screen) {
+      try {
+        display = this.acquired(await getDisplay(devices, !this.env.macSound))
+      } catch (err) {
+        if (!screenOptional || !(err instanceof CaptureError) || this.cancelled || this.stopping) throw err
+        console.warn('The screen was not shared again; continuing with the screen off', err)
+      }
+    }
+    if (display) this.listenForScreenEnd(display)
     const sound = this.env.macSound ? await getMacSound(devices) : null
     if (sound) this.acquired(sound)
     this.throwIfCancelled()
