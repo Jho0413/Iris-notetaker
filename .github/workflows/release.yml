@@ -8,7 +8,7 @@ name: Release
 # Three jobs so the token that can write to the repository never shares a job with the build,
 # whose dependency installs run third-party scripts.
 #
-# The build signs and notarizes like a local `make desktop` (docs/development.md, Signing the app):
+# The build signs and notarizes like a local `make desktop`:
 # the certificate and notarization login come from the `release` environment's secrets, which
 # only jobs on main can read, into a keychain that lives for this job only. Everything
 # `make desktop` runs (the backend bundle's installs, the UI and app builds and their
@@ -104,7 +104,7 @@ jobs:
         run: |
           for name in MACOS_CERTIFICATE_P12 MACOS_CERTIFICATE_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD; do
             if [ -z "${!name}" ]; then
-              echo "::error::The release environment has no $name secret. See docs/development.md (Releasing)."
+              echo "::error::The release environment has no $name secret."
               exit 1
             fi
           done
@@ -113,10 +113,7 @@ jobs:
           SIGNING_KEYCHAIN="$RUNNER_TEMP/iris-signing.keychain-db"
           echo "SIGNING_KEYCHAIN=$SIGNING_KEYCHAIN" >> "$GITHUB_ENV"
           keychain_password="$(openssl rand -base64 32)"
-          if ! base64 --decode <<< "$MACOS_CERTIFICATE_P12" > "$certificate"; then
-            echo "::error::MACOS_CERTIFICATE_P12 is not base64. Set it from: base64 -i <file>.p12"
-            exit 1
-          fi
+          base64 --decode <<< "$MACOS_CERTIFICATE_P12" > "$certificate"
           security create-keychain -p "$keychain_password" "$SIGNING_KEYCHAIN"
           security set-keychain-settings -lut 21600 "$SIGNING_KEYCHAIN"
           security unlock-keychain -p "$keychain_password" "$SIGNING_KEYCHAIN"
@@ -132,8 +129,11 @@ jobs:
 
       - name: Turn Gatekeeper on, as on a user's Mac
         run: |
-          sudo spctl --master-enable
-          spctl --status
+          sudo spctl --global-enable
+          if [ "$(spctl --status)" != "assessments enabled" ]; then
+            echo "::error::Gatekeeper could not be turned on on this runner."
+            exit 1
+          fi
 
       - name: Build Iris.app and the .dmg
         run: make desktop

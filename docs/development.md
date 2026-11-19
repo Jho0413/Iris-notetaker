@@ -94,9 +94,12 @@ and `make test` cover most of them (not the frontend build).
 ## Releasing
 
 The workflow signs and notarizes the app the way `make desktop` does on your Mac, from secrets in
-the repository's `release` environment, which only jobs on `main` can use. Set them once, from
-the Mac that holds the certificate (each `gh secret set` asks for its value, so none lands in
-your shell history):
+the repository's `release` environment, which only jobs on `main` can use. Create the
+environment first, in the repository's Settings → Environments → New environment, named
+`release`, with Deployment branches set to Selected branches and `main` added: a workflow that
+names an environment that doesn't exist creates it with no rule, and the rule is what keeps the
+secrets from other branches. Then set the secrets once, from the Mac that holds the certificate
+(each `gh secret set` asks for its value, so none lands in your shell history):
 
 ```sh
 base64 -i <your Developer ID backup>.p12 | gh secret set MACOS_CERTIFICATE_P12 --env release
